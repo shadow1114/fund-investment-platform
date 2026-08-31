@@ -215,7 +215,7 @@ ignore_missing_imports = true
 .venv/bin/pip install \
   "sqlalchemy==2.0.36" "alembic==1.14.0" "psycopg[binary]==3.2.3" \
   "pydantic==2.10.3" "pydantic-settings==2.6.1" "pyyaml==6.0.2" \
-  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare==1.15.30" \
+  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare>=1.18.90" \
   "pytest==8.3.4" "pytest-cov==6.0.0" "ruff==0.8.4" "mypy==1.13.0"
 .venv/bin/pip install -e .
 .venv/bin/pip freeze --exclude-editable > requirements.lock
@@ -2559,7 +2559,7 @@ def dataset(db_session):
         provider_id=provider.id,
         dataset_code="fund_open_fund_info_em.单位净值走势",
         adapter_version="1",
-        library_version="1.15.30",
+        library_version="1.18.94",
     )
     db_session.add(ds)
     db_session.flush()
@@ -2573,7 +2573,7 @@ def test_one_payload_can_be_parsed_multiple_times(db_session, dataset):
         request_params={"symbol": "000001"},
         payload=b"PAR1-fake-parquet",
         row_count=3,
-        library_version="1.15.30",
+        library_version="1.18.94",
         published_at=None,
         provider_available_at=None,
         ingested_at=dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC),
@@ -2592,12 +2592,12 @@ def test_payload_records_library_version(db_session, dataset):
     """AKShare 版本必须随每行 payload 记录，否则无法定位错映射的来源。"""
     payload = RawPayload(
         dataset_id=dataset.id, request_params={}, payload=b"x", row_count=0,
-        library_version="1.15.30",
+        library_version="1.18.94",
         ingested_at=dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC),
     )
     db_session.add(payload)
     db_session.flush()
-    assert payload.library_version == "1.15.30"
+    assert payload.library_version == "1.18.94"
 ```
 
 - [ ] **Step 9：运行全部测试确认通过**
