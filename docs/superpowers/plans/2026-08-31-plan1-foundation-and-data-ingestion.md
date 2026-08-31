@@ -215,7 +215,7 @@ ignore_missing_imports = true
 .venv/bin/pip install \
   "sqlalchemy==2.0.36" "alembic==1.14.0" "psycopg[binary]==3.2.3" \
   "pydantic==2.10.3" "pydantic-settings==2.6.1" "pyyaml==6.0.2" \
-  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare>=1.18.90" \
+  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare==1.18.94" \
   "pytest==8.3.4" "pytest-cov==6.0.0" "ruff==0.8.4" "mypy==1.13.0"
 .venv/bin/pip install -e .
 .venv/bin/pip freeze --exclude-editable > requirements.lock
