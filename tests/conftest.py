@@ -18,6 +18,9 @@ def db_engine():
         # 和当前已知枚举，第二次测试会话会因“type already exists”而失败。
         # 整体重建 public 一次性清空所有类型与 alembic_version，且无需随新枚举
         # 增加而维护。
+        # 两者都需要：8 个业务 schema 不嵌套在 public 之下，丢弃 public 并不会
+        # 连带丢弃它们，反之逐个丢弃业务 schema 也不会清空 public 里的类型和
+        # alembic_version，因此必须两个循环都执行，缺一不可。
         for schema in SCHEMAS:
             conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
         conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
@@ -36,7 +39,13 @@ def db_session(db_engine):
     """函数级会话，测试结束回滚，保证用例间互不污染。"""
     connection = db_engine.connect()
     transaction = connection.begin()
-    session = Session(bind=connection, future=True)
+    # join_transaction_mode="create_savepoint"：若被测代码内部调用了
+    # session.commit()，普通模式会让外层事务提前结束、真正写入数据库，
+    # 污染后续测试且不会报错。该模式下 commit 只释放/重开一个 SAVEPOINT，
+    # 外层事务始终由本 fixture 的 rollback 兜底关闭。
+    session = Session(
+        bind=connection, future=True, join_transaction_mode="create_savepoint"
+    )
     yield session
     session.close()
     transaction.rollback()
