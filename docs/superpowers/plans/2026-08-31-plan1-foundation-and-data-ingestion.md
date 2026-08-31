@@ -867,7 +867,11 @@ Revises: 0001
 import sqlalchemy as sa
 from alembic import op
 
-from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
+from fip.platform.db.mixins import (
+    QUALITY_SOURCE_SQL,
+    TIME_ORDER_SQL,
+    availability_quality_enum,
+)
 
 revision = "0002"
 down_revision = "0001"
@@ -881,12 +885,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("effective_at", sa.Date, nullable=False),
         sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column(
-            "availability_quality",
-            sa.Enum("EXACT", "DERIVED", "INFERRED",
-                    name="availability_quality_enum", create_type=False),
-            nullable=False,
-        ),
+        sa.Column("availability_quality", availability_quality_enum, nullable=False),
         sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("provider_available_at", sa.DateTime(timezone=True), nullable=True),
@@ -2075,6 +2074,10 @@ Revises: 0002
 """
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
+
+# 注意：必须用 postgresql.ENUM 而非 sa.Enum —— 通用的 sa.Enum 会【静默忽略】
+# create_type=False，导致 SQLAlchemy 重复 CREATE TYPE 而报 DuplicateObject。
 
 revision = "0003"
 down_revision = "0002"
@@ -2096,8 +2099,10 @@ def upgrade() -> None:
         sa.Column("decision_id", sa.String(64), nullable=True),
         sa.Column(
             "status",
-            sa.Enum("RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED",
-                    name="execution_status_enum", create_type=False),
+            postgresql.ENUM(
+                "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED",
+                name="execution_status_enum", create_type=False,
+            ),
             nullable=False,
         ),
         sa.Column("progress", sa.Integer, nullable=False, server_default="0"),
