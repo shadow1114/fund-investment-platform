@@ -18,11 +18,23 @@ QUALITY_SOURCE_SQL = (
     " AND published_at IS NULL)"
 )
 
+# 假设：披露不早于生效（即不存在「先公告、后生效」的预披露事实）。
+# clause 1 已经隐含这个假设（published_at >= effective_at）；clause 4 把它
+# 显式地施加到 available_at 本身 —— 无论 available_at 最终解析自哪个来源，
+# 都不能早于 effective_at，这才是「不能在事实发生前看到它」这条不变式的
+# 直接表达。若 published_at 或两个来源均为 NULL，clause 2 / clause 3 会
+# 退化为真空满足（vacuous truth），必须靠 clause 4 兜底，否则 EXACT 分支的
+# provider_available_at、INFERRED 分支的 ingested_at 可以早于 effective_at
+# 而不被拦下 —— 对 EXACT/INFERRED 而言 available_at 分别取自这两列，等价于
+# 平台在事实生效前就“看到”了它，即前视偏差。
+# M1 覆盖的数据类型（净值、分红、无风险利率）均为「先生效、后披露」，此假设
+# 成立；未来若引入预披露事实（先公告、后生效），须重新审视这条约束。
 TIME_ORDER_SQL = (
     "(published_at IS NULL OR published_at >= effective_at) AND "
     "(provider_available_at IS NULL OR published_at IS NULL "
     " OR provider_available_at >= published_at) AND "
-    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at))"
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= effective_at)"
 )
 
 INTERVAL_SQL = "valid_to IS NULL OR valid_from < valid_to"

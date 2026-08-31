@@ -86,3 +86,38 @@ def test_announcement_on_effective_date_is_accepted(db_session):
         provider_available_at=dt.datetime(2026, 1, 2, 0, 40, tzinfo=dt.UTC),
         ingested_at=dt.datetime(2026, 1, 2, 1, 0, tzinfo=dt.UTC)))
     db_session.flush()
+
+
+def test_exact_provider_time_cannot_precede_effective_at(db_session):
+    """真空满足漏洞 1：EXACT 下 published_at 为 NULL 时 clause 2 恒真，
+    provider_available_at（EXACT 分支 available_at 的来源）本应仍不能早于
+    effective_at —— 否则等于平台在事实生效前就拿到了它。"""
+    early = dt.datetime(2025, 12, 31, 9, 0, tzinfo=dt.UTC)
+    with pytest.raises(IntegrityError):
+        db_session.execute(INSERT, _row(
+            quality="EXACT", available_at=early, published_at=None,
+            provider_available_at=early, ingested_at=T2))
+        db_session.flush()
+
+
+def test_inferred_ingested_at_cannot_precede_effective_at(db_session):
+    """真空满足漏洞 2：INFERRED 下两个来源均为 NULL 时 clause 3 退化为
+    ingested_at 与自身比较（恒真），ingested_at（INFERRED 分支 available_at
+    的来源）本应仍不能早于 effective_at。AKShare 回补数据全部落在
+    INFERRED 分支，此漏洞影响面最大。"""
+    early = dt.datetime(2025, 12, 31, 9, 0, tzinfo=dt.UTC)
+    with pytest.raises(IntegrityError):
+        db_session.execute(INSERT, _row(
+            quality="INFERRED", available_at=early, published_at=None,
+            provider_available_at=None, ingested_at=early))
+        db_session.flush()
+
+
+def test_available_at_equal_to_effective_at_is_accepted(db_session):
+    """新增的第 4 子句不应过紧：available_at 恰好等于 effective_at（当日零点）
+    仍应被接受，而不是必须严格晚于 effective_at。"""
+    midnight = dt.datetime(2026, 1, 2, 0, 0, tzinfo=dt.UTC)
+    db_session.execute(INSERT, _row(
+        quality="INFERRED", available_at=midnight, published_at=None,
+        provider_available_at=None, ingested_at=midnight))
+    db_session.flush()
