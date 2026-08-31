@@ -1,10 +1,8 @@
 import datetime as dt
 import inspect
-import re
 
 import pytest
 
-from fip.platform.decision_data import pit as pit_module
 from fip.platform.decision_data.context import (
     DecisionExecutionContext,
     RecomputeScope,
@@ -48,11 +46,15 @@ def test_repository_methods_do_not_accept_a_time_parameter():
     assert not (set(sig.parameters) & forbidden)
 
 
-def test_no_unconstrained_latest_access_path():
-    """PIT-A3：PIT 模块中不得存在『取最新 / 取当前』的方法。"""
-    pattern = re.compile(r"\b(get|fetch|load|read)_(latest|current|newest)\b")
-    assert not pattern.search(inspect.getsource(pit_module)), \
-        "PIT 模块出现了无约束的取最新路径"
+def test_pit_repository_exposes_only_the_time_bounded_query():
+    """PIT-A3: 该 Protocol 只允许存在受时点约束的查询方法。
+
+    用【集合相等】而非正则匹配名字 —— 正则只能拦住它预想到的措辞，
+    而任何新增的公开方法都意味着访问面扩大，必须是一次显式的、
+    需要同步修改本断言的动作。
+    """
+    public = {name for name in dir(NavPitRepository) if not name.startswith("_")}
+    assert public == {"adjusted_nav_series"}
 
 
 def test_pit_and_current_contexts_are_not_interchangeable():
