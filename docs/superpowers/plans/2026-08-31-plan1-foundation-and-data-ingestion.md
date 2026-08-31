@@ -369,17 +369,27 @@ fip.platform 嵌套在 fip 下以避免遮蔽标准库 platform 模块。"
 
 - [ ] **Step 1：安装并启动 PostgreSQL 17，建库**
 
+> **已由 controller 预置，本步退化为验证。** Homebrew 在 macOS 13 Ventura 上已无任何
+> PostgreSQL 预编译包（`@14`~`@17` 全无 bottle），从源码编译又撞上 Command Line Tools
+> 过旧，因此改用 Postgres.app（预编译，无需编译工具链与 sudo）。
+
 ```bash
-brew install postgresql@17
-brew services start postgresql@17
-export PATH="/usr/local/opt/postgresql@17/bin:$PATH"
-echo 'export PATH="/usr/local/opt/postgresql@17/bin:$PATH"' >> ~/.zshrc
-createdb fip_dev
-createdb fip_test
+export PATH="$HOME/Applications/Postgres.app/Contents/Versions/17/bin:$PATH"
+pg_isready -p 5432
 psql -d fip_dev -c "SELECT version();"
+psql -lqt | cut -d'|' -f1 | grep fip_
 ```
 
-Expected: 输出 PostgreSQL 17.x 版本串。
+Expected: `accepting connections`；版本串为 PostgreSQL 17.11 (Postgres.app)；
+`fip_dev` 与 `fip_test` 均已存在。
+
+若 `pg_isready` 失败（例如机器重启过），重新启动：
+
+```bash
+"$HOME/Applications/Postgres.app/Contents/Versions/17/bin/pg_ctl" \
+  -D "$HOME/Library/Application Support/Postgres/var-17" \
+  -l /tmp/fip_pg.log -o "-p 5432" start
+```
 
 - [ ] **Step 2：写 `src/fip/platform/db/base.py`**
 
