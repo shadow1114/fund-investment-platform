@@ -633,7 +633,9 @@ git commit -m "feat(db): 建立 8 个 schema、availability_quality 枚举与 Al
   - `fip.platform.db.mixins.TimeSourceMixin`（列：`available_at`、`availability_quality`、`published_at`、`provider_available_at`、`ingested_at`、`created_at`）
   - `fip.platform.db.mixins.VersionedMixin`（继承上者，加 `effective_at`、`version`）
   - `fip.platform.db.mixins.IntervalMixin`（继承 `TimeSourceMixin`，加 `valid_from`、`valid_to`）
-  - `fip.platform.db.mixins.temporal_check_constraints(table: str) -> tuple[CheckConstraint, CheckConstraint]`
+  - `fip.platform.db.mixins.time_order_sql(anchor: str = "effective_at") -> str`
+  - `fip.platform.db.mixins.temporal_check_constraints(table: str, anchor: str = "effective_at") -> tuple[CheckConstraint, CheckConstraint]`
+    —— **区间型表必须传 `anchor="valid_from"`**，否则生成的 SQL 引用不存在的 `effective_at` 列
   - `fip.platform.db.mixins.interval_check(table: str) -> CheckConstraint`
   - `fip.platform.db.mixins.QUALITY_SOURCE_SQL: str`、`TIME_ORDER_SQL: str`（供迁移脚本复用）
 
@@ -5173,7 +5175,7 @@ class FundManagerAssignment(Base, IntervalMixin):
 
     __tablename__ = "fund_manager_assignment"
     __table_args__ = (
-        *temporal_check_constraints("fund_manager_assignment"),
+        *temporal_check_constraints("fund_manager_assignment", anchor="valid_from"),
         interval_check("fund_manager_assignment"),
         {"schema": "fund"},
     )
@@ -5192,7 +5194,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 
     __tablename__ = "fund_classification_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_classification_history"),
+        *temporal_check_constraints("fund_classification_history", anchor="valid_from"),
         interval_check("fund_classification_history"),
         {"schema": "fund"},
     )
@@ -5208,7 +5210,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 class FundStatusHistory(Base, IntervalMixin):
     __tablename__ = "fund_status_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_status_history"),
+        *temporal_check_constraints("fund_status_history", anchor="valid_from"),
         interval_check("fund_status_history"),
         {"schema": "fund"},
     )
@@ -5227,7 +5229,7 @@ class FundFee(Base, IntervalMixin):
 
     __tablename__ = "fund_fee"
     __table_args__ = (
-        *temporal_check_constraints("fund_fee"),
+        *temporal_check_constraints("fund_fee", anchor="valid_from"),
         interval_check("fund_fee"),
         {"schema": "fund"},
     )
@@ -5245,7 +5247,7 @@ class InvestmentEligibility(Base, IntervalMixin):
 
     __tablename__ = "investment_eligibility"
     __table_args__ = (
-        *temporal_check_constraints("investment_eligibility"),
+        *temporal_check_constraints("investment_eligibility", anchor="valid_from"),
         interval_check("investment_eligibility"),
         {"schema": "fund"},
     )
