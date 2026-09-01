@@ -11,11 +11,17 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
-from fip.platform.db.mixins import IntervalMixin, interval_check, temporal_check_constraints
+from fip.platform.db.mixins import (
+    IntervalMixin,
+    VersionedMixin,
+    interval_check,
+    temporal_check_constraints,
+)
 from fip.platform.db.types import RatioNumeric
 
 
@@ -202,18 +208,36 @@ class FundFee(Base, IntervalMixin):
     rate: Mapped[Decimal] = mapped_column(RatioNumeric, nullable=False)
 
 
-class InvestmentEligibility(Base, IntervalMixin):
-    """可投资性 —— 派生实体，但必须持久化：回测需查历史（03-erd §5.6）。"""
+class InvestmentEligibility(Base, VersionedMixin):
+    """可投资性 —— 派生实体，但派生规则本身会被修订（04-database-design §6.4.1）。
+
+    不是 IntervalMixin：区间模型没有地方安放「同一份修订后的结论」——
+    只能覆盖或用第二段区间部分遮盖第一段，两者都丢失了「当时相信的是
+    什么」。version 记录的正是「这条结论出自哪一版派生规则」，因此本表
+    与 fund_nav / fund_distribution / risk_free_rate 同属三时点 + version
+    的事实型模式（03-erd §15.1 状态型清单未列出本实体），PK 为
+    (share_class_id, effective_at, version)。anchor 用默认值
+    "effective_at"，不得传 "valid_from" —— 本表没有 valid_from/valid_to。
+    """
 
     __tablename__ = "investment_eligibility"
     __table_args__ = (
-        *temporal_check_constraints("investment_eligibility", anchor="valid_from"),
-        interval_check("investment_eligibility"),
+        *temporal_check_constraints("investment_eligibility"),
+        # PIT 版本解析的支撑索引，须与迁移 0013 里的 CREATE INDEX 逐列一致
+        # （含 version DESC），否则 autogenerate 会把它当成待删除对象。
+        Index(
+            "ix_investment_eligibility_pit",
+            "share_class_id",
+            "available_at",
+            text("version DESC"),
+        ),
         {"schema": "fund"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     share_class_id: Mapped[int] = mapped_column(
-        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"),
+        primary_key=True,
     )
+    effective_at: Mapped[dt.date] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
     eligibility_status: Mapped[str] = mapped_column(String(32), nullable=False)

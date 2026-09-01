@@ -81,18 +81,23 @@ def test_interval_tables_also_enforce_quality_source_check(db_session, share_cla
 
 
 def test_eligibility_history_is_persisted_for_backtest(db_session, share_class):
-    """派生实体也要落表 —— 回测需要查当时的可投资性。"""
+    """派生实体也要落表 —— 回测需要查当时的可投资性。
+
+    04-database-design §6.4：三时点 + version（不是区间型）——
+    PK 为 (share_class_id, effective_at, version)。version 记录的是
+    「这条结论出自哪一版派生规则」，因此每条历史结论都独立保留。
+    """
     db_session.add_all([
         InvestmentEligibility(
             share_class_id=share_class.id,
             eligibility_status=EligibilityStatus.FULLY_ELIGIBLE.value,
-            valid_from=dt.date(2020, 1, 1), valid_to=dt.date(2021, 1, 1),
+            effective_at=dt.date(2020, 1, 1), version=1,
             **_times(dt.datetime(2020, 1, 2, tzinfo=dt.UTC)),
         ),
         InvestmentEligibility(
             share_class_id=share_class.id,
             eligibility_status=EligibilityStatus.EXIT_ONLY.value,
-            valid_from=dt.date(2021, 1, 1), valid_to=None,
+            effective_at=dt.date(2021, 1, 1), version=1,
             **_times(dt.datetime(2021, 1, 2, tzinfo=dt.UTC)),
         ),
     ])
