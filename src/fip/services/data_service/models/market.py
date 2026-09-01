@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, ForeignKey
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -22,6 +22,9 @@ class FundNav(Base, VersionedMixin):
     __tablename__ = "fund_nav"
     __table_args__ = (
         *temporal_check_constraints("fund_nav"),
+        # 值域约束必须【同时】声明在 ORM 与迁移中。只写进迁移会让
+        # Base.metadata 不知道它，后续 autogenerate 便会生成一条 DROP。
+        CheckConstraint("unit_nav > 0", name="ck_fund_nav_positive"),
         {"schema": "market", "postgresql_partition_by": "RANGE (effective_at)"},
     )
 
