@@ -35,17 +35,21 @@ def test_every_dataset_has_probe_params():
 
 
 @pytest.mark.parametrize(
-    "symbol",
-    ["161725", "110022"],
+    ("symbol", "expect_zero_rows"),
+    [("161725", False), ("110022", True)],
     ids=["has_split_history", "no_split_history"],
 )
-def test_fund_split_handles_both_split_and_no_split_funds(symbol):
+def test_fund_split_handles_both_split_and_no_split_funds(symbol, expect_zero_rows):
     """161725 有拆分历史；110022 从未拆分过，上游返回 0 行 0 列（无 schema）
-    的空 DataFrame。只探测有数据的基金（如原先只覆盖 161725）看不出“无
-    schema 的合法空结果”被误判为契约违反的问题 —— 两种形状都必须成功。"""
+    的空 DataFrame。断言依据同下方 test_fund_distribution_handles_both_
+    dividend_and_no_dividend_funds 的 docstring：用 row_count 的具体取值
+    而非“没有抛异常”来断言。"""
     adapter = AkShareSourceAdapter()
     record = adapter.fetch("fund_split", symbol=symbol)
-    assert record.row_count >= 0
+    if expect_zero_rows:
+        assert record.row_count == 0
+    else:
+        assert record.row_count > 0
 
 
 @pytest.mark.parametrize(
