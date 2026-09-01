@@ -130,13 +130,33 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
         recompute_scope=RecomputeScope.FULL_PIPELINE,
         runtime_mode=RuntimeMode.BACKTEST,
     )
+    # 延迟 import：见文件顶部说明。
+    from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
+
     with _session() as session:
         share_class = _resolve(session, args.symbol)
-        points = PitDataContext(context=context, session=session).navs().adjusted_nav_series(
-            share_class.id,
-            dt.date.fromisoformat(args.date_from),
-            dt.date.fromisoformat(args.date_to),
-        )
+        try:
+            points = PitDataContext(
+                context=context, session=session
+            ).navs().adjusted_nav_series(
+                share_class.id,
+                dt.date.fromisoformat(args.date_from),
+                dt.date.fromisoformat(args.date_to),
+            )
+        except AdjustedNavUnavailable as exc:
+            # 复权净值现在按 decision_at 现算，算不出来就是【真的】算不出来。
+            # 这里【不得】吞掉异常、回退去读 market.fund_nav.adjusted_nav 列、
+            # 填 0 或沿用上期（C-6）—— 那会让一段不可信的序列冒充可信序列
+            # 流进因子计算。唯一正确的出口是报错退出，并说清是哪只份额类别、
+            # 哪个决策日算不出来。
+            raise SystemExit(
+                f"份额类别 {share_class.display_name}"
+                f"（id={share_class.id}, symbol={args.symbol}）在 "
+                f"decision_at={decision_at} 无法计算复权净值：{exc}。"
+                "该区间的复权净值必须标记为 UNAVAILABLE，不得填 0、"
+                "不得沿用上期，也不得改读 fund_nav.adjusted_nav 列"
+                "（那只是运维物化值，不是 PIT 真值来源）。"
+            ) from exc
     print(f"{share_class.display_name} @ decision_at={decision_at}  共 {len(points)} 条")
     for point in points[:10]:
         print(f"  {point.effective_at}  unit={point.unit_nav}  "

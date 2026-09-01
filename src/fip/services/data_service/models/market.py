@@ -45,6 +45,18 @@ class FundNav(Base, VersionedMixin):
     effective_at: Mapped[dt.date] = mapped_column(primary_key=True)
     version: Mapped[int] = mapped_column(primary_key=True)
     unit_nav: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
+    # adjusted_nav 是【运维物化值，不是 PIT 真值来源】。
+    #
+    # 「正确的复权净值」是 (行, decision_at) 的【二元函数】：同一净值行在不同
+    # 决策时点应有不同的复权值，因为它之后可能又披露了迟到的分红/拆分事件。
+    # 一个每行一个标量的列装不下这个二元函数 —— 无论选哪个时刻盖章都是错的：
+    # 盖「最后一个 checkpoint」会让迟到事件回头改写已可见的旧值（前视偏差），
+    # 盖「首个 checkpoint」则让同一次查询里早期点不含该事件、晚期点含（口径
+    # 不一致，在披露日附近伪造出一个收益尖峰）。见 Task 15 fix round 2 / 3。
+    #
+    # 因此 PIT 真值由 SqlNavPitRepository.adjusted_nav_series 按 decision_at
+    # 【现算】。本列仍由 backfill_adjusted_nav 写入，用途仅限排查与快速目视
+    # 核对，任何决策链路都不得读它。列保留、不改 schema。
     adjusted_nav: Mapped[Decimal | None] = mapped_column(NavNumeric, nullable=True)
     raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 

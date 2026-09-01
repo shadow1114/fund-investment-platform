@@ -1,3 +1,18 @@
+"""复权净值的【运维物化】回填。
+
+本模块产出的是运维物化值，**不是 PIT 真值来源**。
+
+「正确的复权净值」是 (行, decision_at) 的二元函数：同一净值行在不同决策
+时点应有不同的复权值，因为它之后可能又披露了迟到的分红/拆分事件。
+market.fund_nav.adjusted_nav 是每行一个标量，装不下这个二元函数 —— 无论
+选哪个时刻盖章都会错一边（见下面 backfill_adjusted_nav 的 docstring）。
+
+因此自 Task 15 fix round 3 起，决策链路读到的复权净值由
+SqlNavPitRepository.adjusted_nav_series 按 decision_at 【现算】，不再读本
+模块写进列里的值。本列保留的用途是排查与快速目视核对：它让人不必跑一遍
+计算就能看到某一行大致的复权水平。任何决策链路都不得读它。
+"""
+
 import datetime as dt
 from collections.abc import Sequence
 from decimal import Decimal
@@ -73,18 +88,23 @@ def backfill_adjusted_nav(
     它第一次成为当前版本的那个 checkpoint 被赋值，之后任何 checkpoint 都
     不得覆盖它。
 
-    为什么必须是「首个」而不是「reign 内最后一个」（fix round 2）：全平台
-    唯一的可见性规则是 available_at <= decision_at，所以任何能解析到某行的
+    为什么是「首个」而不是「reign 内最后一个」（fix round 2）：全平台唯一的
+    可见性规则是 available_at <= decision_at，所以任何能解析到某行的
     decision_at 都 >= 该行的 available_at；而该行首次成为当前版本的
     checkpoint 就等于它的 available_at。于是「存的值绝不比行本身更新」是
-    构造性成立的 —— 读到的 adjusted_nav 绝不可能含有该行可见时尚不存在的
-    信息。反之若按 reign 内最后一个 checkpoint 盖章，一个在 reign 中途才
-    披露的迟到事件会回头改写该版本已存的值，而 SqlNavPitRepository 逐字读
-    该列，早于该事件披露时刻的查询就会读到含未来信息的值 —— 静默前视偏差。
+    构造性成立的 —— 列里的值绝不含该行可见时尚不存在的信息。反之若按 reign
+    内最后一个 checkpoint 盖章，一个在 reign 中途才披露的迟到事件会回头改写
+    该版本已存的值，含未来信息。
 
-    代价是对称的另一侧：迟到事件披露之后，早期版本行的 adjusted_nav 会偏
-    「旧」（不含该事件）。这是标量列的固有取舍，且方向安全——宁可信息偏少，
-    不可信息偏多（C-12：不回填/伪造时间戳，也不让旧行冒充知道后来的事）。
+    但「首个」也不是对的（fix round 3）：迟到事件披露之后，早期版本行的
+    adjusted_nav 偏「旧」（不含该事件）而晚期行含，同一次查询里就出现口径
+    不一致 —— 在披露日附近伪造出一个凭空的收益尖峰，对动量/波动率这类因子
+    而言与前视一样是污染。两侧都错，说明标量列根本盖不住这个二元函数。
+    结论：本列降级为运维物化值，PIT 真值改由读路径按 decision_at 现算
+    （见本模块顶部 docstring 与 SqlNavPitRepository.adjusted_nav_series）。
+    这里仍保留「首个盖章」，因为在标量列的两种选择中只有它方向安全 ——
+    宁可信息偏少，不可信息偏多（C-12：不回填/伪造时间戳，也不让旧行冒充
+    知道后来的事）。
 
     做法：取 decision_at 可见的全部净值/事件行（不折叠版本），把两者的
     available_at 并集排序为一组 checkpoint；在每个 checkpoint 上重新做
