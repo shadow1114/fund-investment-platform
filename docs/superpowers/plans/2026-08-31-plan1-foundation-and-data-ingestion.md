@@ -1859,7 +1859,7 @@ PROVISIONAL 参数时告警并记入清单，但不阻断 —— 不阻断保证
 
 **Files:**
 - Create: `src/fip/platform/jobs/models.py`, `src/fip/platform/jobs/submitter.py`
-- Create: `db/migrations/versions/0003_calculation_job.py`
+- Create: `db/migrations/versions/0005_calculation_job.py`
 - Test: `tests/unit/test_job_idempotency_key.py`, `tests/integration/test_job_submitter.py`
 
 **Interfaces:**
@@ -2066,13 +2066,13 @@ class JobSubmitter:
         return ExecutionStatus(job.status) in _RETRYABLE
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0003_calculation_job.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0005_calculation_job.py`**
 
 ```python
 """calculation_job 表与 execution_status 枚举
 
-Revision ID: 0003
-Revises: 0002
+Revision ID: 0005
+Revises: 0004
 """
 import sqlalchemy as sa
 from alembic import op
@@ -2081,8 +2081,8 @@ from sqlalchemy.dialects import postgresql
 # 注意：必须用 postgresql.ENUM 而非 sa.Enum —— 通用的 sa.Enum 会【静默忽略】
 # create_type=False，导致 SQLAlchemy 重复 CREATE TYPE 而报 DuplicateObject。
 
-revision = "0003"
-down_revision = "0002"
+revision = "0005"
+down_revision = "0004"
 branch_labels = None
 depends_on = None
 
