@@ -1,12 +1,12 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
 from fip.platform.db.mixins import VersionedMixin, temporal_check_constraints
-from fip.platform.db.types import NavNumeric
+from fip.platform.db.types import NavNumeric, RatioNumeric
 
 
 class FundNav(Base, VersionedMixin):
@@ -83,4 +83,41 @@ class FundDistribution(Base, VersionedMixin):
     version: Mapped[int] = mapped_column(primary_key=True)
     dividend_per_unit: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
     split_ratio: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
+    raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class RiskFreeRate(Base, VersionedMixin):
+    """无风险利率 —— 【市场数据】，观测所得，随市场变化。
+
+    是曲线不是单值（03-erd §6.5）：必须带 currency 与 tenor，否则
+    「这个 Sharpe 用的是哪一段期限」无从回答。
+
+    与 MAR 的边界（上游 §5.5）：MAR 是【评价标准】，由投研配置而非市场
+    观测，属 Evaluation Policy，不在本表。即使数值相同也必须独立建模 ——
+    R_f 变了是市场变了，MAR 变了是评价标准变了，二者审批路径不同。
+    """
+
+    __tablename__ = "risk_free_rate"
+    __table_args__ = (
+        *temporal_check_constraints("risk_free_rate"),
+        # 同 fund_nav / fund_distribution：PIT 版本解析的支撑索引必须与
+        # 迁移 0011 里的 CREATE INDEX 逐列一致（含 version DESC），否则
+        # Base.metadata 看不到它，autogenerate 会把它当成待删除对象。
+        Index(
+            "ix_risk_free_rate_pit",
+            "currency",
+            "tenor",
+            "effective_at",
+            "available_at",
+            text("version DESC"),
+        ),
+        {"schema": "market"},
+    )
+
+    curve_code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    currency: Mapped[str] = mapped_column(String(8), primary_key=True)
+    tenor: Mapped[str] = mapped_column(String(8), primary_key=True)
+    effective_at: Mapped[dt.date] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    rate: Mapped[Decimal] = mapped_column(RatioNumeric, nullable=False)
     raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

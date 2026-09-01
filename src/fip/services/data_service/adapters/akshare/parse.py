@@ -164,3 +164,43 @@ def parse_split_frame(payload: bytes) -> list[ParsedDistribution]:
         rows.append(ParsedDistribution(day, Decimal(0), ratio))
     rows.sort(key=lambda r: r.effective_at)
     return rows
+
+
+_TENOR_LABELS: dict[str, str] = {
+    "3月": "3M", "6月": "6M", "1年": "1Y", "2年": "2Y", "3年": "3Y",
+    "5年": "5Y", "7年": "7Y", "10年": "10Y", "30年": "30Y",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedYieldPoint:
+    effective_at: dt.date
+    tenor: str
+    rate: Decimal
+
+
+def parse_yield_curve_frame(payload: bytes) -> list[ParsedYieldPoint]:
+    """中债国债收益率曲线（宽表）→ (日期, 期限, 利率) 行。
+
+    利率一律转为小数（2.30% → 0.023），与全平台「百分比用小数」一致
+    （10-api/01 §12.1）。混用会在下游产生难以察觉的 100 倍误差。
+
+    无法识别的列直接跳过 —— 不猜测其含义。
+    """
+    frame = pd.read_parquet(io.BytesIO(payload))
+    rows: list[ParsedYieldPoint] = []
+    hundred = Decimal(100)
+    for _, record in frame.iterrows():
+        day = _to_date(record.get("日期"))
+        if day is None:
+            continue
+        for column, tenor in _TENOR_LABELS.items():
+            if column not in frame.columns:
+                continue
+            percent = _to_decimal(record[column])
+            if percent is None:
+                continue
+            rate = (percent / hundred).quantize(Decimal("0.00000001"))
+            rows.append(ParsedYieldPoint(day, tenor, rate))
+    rows.sort(key=lambda r: (r.effective_at, r.tenor))
+    return rows
