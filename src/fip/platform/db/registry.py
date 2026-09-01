@@ -7,5 +7,4 @@ Base.metadata 上。若不这样做，Base.metadata 在 autogenerate 时为空�
 【每新增一个 model 模块，必须在此追加一行 import。】
 """
 
-# 尚无 model 模块。后续任务在此追加，例如：
-# from fip.services.data_service.models import fund  # noqa: F401
+from fip.platform.jobs import models as jobs_models  # noqa: F401
