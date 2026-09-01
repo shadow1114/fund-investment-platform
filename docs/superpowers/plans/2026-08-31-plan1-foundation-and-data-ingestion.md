@@ -4122,7 +4122,7 @@ adjusted_nav_t = unit_nav_t × shares_t
 ```python
 # tests/unit/test_adjusted_nav.py
 import datetime as dt
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -4261,13 +4261,20 @@ def test_duplicate_event_dates_are_rejected():
 
 
 def test_long_series_stays_exact():
-    """1000 期连续分红，验证 Decimal 精度不退化为浮点漂移。"""
+    """1000 期连续分红，验证 Decimal 精度不退化为浮点漂移。
+
+    ⚠️ 期望值必须在【与实现相同的精度上下文】内计算。compute_adjusted_nav
+    内部用 localcontext(prec=60)，而模块外默认是 prec=28 —— 若在默认上下文
+    里算 D("1.01") ** 999，两者必然不等，这条测试会恒失败。
+    """
     navs = [NavObservation(dt.date(2020, 1, 1) + dt.timedelta(days=i), D("1.0"))
             for i in range(1000)]
     events = [DistributionEvent(navs[i].effective_at, D("0.01"), D("1"))
               for i in range(1, 1000)]
     points = compute_adjusted_nav(navs, events)
-    expected = D("1.01") ** 999
+    with localcontext() as ctx:
+        ctx.prec = 60
+        expected = D("1.01") ** 999
     assert points[-1].cumulative_shares == expected
 ```
 
