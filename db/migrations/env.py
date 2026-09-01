@@ -20,6 +20,7 @@ from fip.settings import settings
 from fip.platform.jobs import models as jobs_models  # noqa: F401 — platform 层
 from fip.services.data_service.models import fund  # noqa: F401 — services 层
 from fip.services.data_service.models import governance  # noqa: F401 — services 层
+from fip.services.data_service.models import market  # noqa: F401 — services 层
 from fip.services.data_service.models import raw  # noqa: F401 — services 层
 
 config = context.config
