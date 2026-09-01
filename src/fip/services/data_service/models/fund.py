@@ -1,7 +1,9 @@
 import datetime as dt
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
 from fip.platform.db.mixins import IntervalMixin, interval_check, temporal_check_constraints
+from fip.platform.db.types import RatioNumeric
 
 
 class Fund(Base):
@@ -96,3 +99,121 @@ class ProviderFundIdentity(Base, IntervalMixin):
     share_class_id: Mapped[int] = mapped_column(
         ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
     )
+
+
+class FundManagementCompany(Base):
+    __tablename__ = "fund_management_company"
+    __table_args__ = {"schema": "fund"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    company_code: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    company_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FundManager(Base):
+    __tablename__ = "fund_manager"
+    __table_args__ = {"schema": "fund"}
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    manager_code: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    manager_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FundManagerAssignment(Base, IntervalMixin):
+    """任职区间。支持共管 —— 同一基金同一时段可有多位经理（N:M）。
+
+    区间型实体同样需要 available_at：任职生效日 2026-08-20、公告日
+    2026-08-25 时，8-22 的决策中该任职【不可见】。只有 valid_from
+    没有 available_at 会形成前视偏差（03-erd §15.2）。
+    """
+
+    __tablename__ = "fund_manager_assignment"
+    __table_args__ = (
+        *temporal_check_constraints("fund_manager_assignment", anchor="valid_from"),
+        interval_check("fund_manager_assignment"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fund_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund.id", ondelete="RESTRICT"), nullable=False
+    )
+    manager_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_manager.id", ondelete="RESTRICT"), nullable=False
+    )
+
+
+class FundClassificationHistory(Base, IntervalMixin):
+    """分类历史 —— 基金转型会改变分类，回测必须使用当时的分类。"""
+
+    __tablename__ = "fund_classification_history"
+    __table_args__ = (
+        *temporal_check_constraints("fund_classification_history", anchor="valid_from"),
+        interval_check("fund_classification_history"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fund_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund.id", ondelete="RESTRICT"), nullable=False
+    )
+    classification_scheme: Mapped[str] = mapped_column(String(32), nullable=False)
+    classification_code: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class FundStatusHistory(Base, IntervalMixin):
+    __tablename__ = "fund_status_history"
+    __table_args__ = (
+        *temporal_check_constraints("fund_status_history", anchor="valid_from"),
+        interval_check("fund_status_history"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    share_class_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
+    )
+    lifecycle_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    subscription_open: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    redemption_open: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class FundFee(Base, IntervalMixin):
+    """费率 —— 各份额类别不同，这正是 Fund 与 Share Class 必须分离的原因。"""
+
+    __tablename__ = "fund_fee"
+    __table_args__ = (
+        *temporal_check_constraints("fund_fee", anchor="valid_from"),
+        interval_check("fund_fee"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    share_class_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
+    )
+    fee_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(RatioNumeric, nullable=False)
+
+
+class InvestmentEligibility(Base, IntervalMixin):
+    """可投资性 —— 派生实体，但必须持久化：回测需查历史（03-erd §5.6）。"""
+
+    __tablename__ = "investment_eligibility"
+    __table_args__ = (
+        *temporal_check_constraints("investment_eligibility", anchor="valid_from"),
+        interval_check("investment_eligibility"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    share_class_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
+    )
+    eligibility_status: Mapped[str] = mapped_column(String(32), nullable=False)
