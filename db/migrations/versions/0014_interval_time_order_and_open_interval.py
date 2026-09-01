@@ -33,8 +33,6 @@ Revises: 0013
 """
 from alembic import op
 
-from fip.platform.db.mixins import INTERVAL_TIME_ORDER_SQL, TIME_ORDER_SQL
-
 revision = "0014"
 down_revision = "0013"
 branch_labels = None
@@ -62,6 +60,30 @@ _VERSIONED_TABLES: tuple[tuple[str, str], ...] = (
     ("market", "fund_distribution"),
     ("market", "risk_free_rate"),
     ("fund", "investment_eligibility"),
+)
+
+# --- 本迁移【产出】的定义（0014 时点的字面量，逐字固化，不得从 mixins 取）---
+# fix round 3 item 2：本迁移原先从 fip.platform.db.mixins 直接 import 两个
+# 时序常量 —— 正是它自己为 0002–0013 消除掉的那个模式。mixins 是活代码：
+# 0015 给两类表都补了第五条子句（available_at >= COALESCE(
+# provider_available_at, published_at)），若本迁移仍从 mixins 取值，它的
+# upgrade() 会被【追溯性改写】成产出五子句，而 downgrade() 是固化字面量、
+# 仍还原成四子句 —— 往返立刻不对称，从空库 upgrade 到 0014 也会得到一个
+# 0014 当时根本不存在的形态。
+# 下面两个常量是 0014 【当时】实际产出的字面量，含 mixins 的换行拼接在
+# " OR provider_available_at" 前留下的那个多余空格，逐字保留。
+_NEW_VERSIONED_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= "
+    "(effective_at::timestamp AT TIME ZONE 'UTC')) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= (effective_at::timestamp AT TIME ZONE 'UTC'))"
+)
+_NEW_INTERVAL_TIME_ORDER_SQL = (
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at))"
 )
 
 # --- downgrade 用的旧定义（0013 时点的字面量，逐字固化，不得再从 mixins 取）---
@@ -92,9 +114,9 @@ def _replace_time_order(schema: str, table: str, sql: str) -> None:
 
 def upgrade() -> None:
     for schema, table in _INTERVAL_TABLES:
-        _replace_time_order(schema, table, INTERVAL_TIME_ORDER_SQL)
+        _replace_time_order(schema, table, _NEW_INTERVAL_TIME_ORDER_SQL)
     for schema, table in _VERSIONED_TABLES:
-        _replace_time_order(schema, table, TIME_ORDER_SQL)
+        _replace_time_order(schema, table, _NEW_VERSIONED_TIME_ORDER_SQL)
 
     op.execute(
         "CREATE UNIQUE INDEX uq_pfi_open_interval "

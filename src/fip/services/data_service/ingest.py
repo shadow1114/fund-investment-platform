@@ -238,6 +238,33 @@ class IngestService:
         重指派冲突【不中断本批】：逐条收集，跑完连同 created 一起返回，由
         调用方决定如何报告（CLI 以非零退出码逐条列出）。已成功处理的部分
         照常留在 session 里等待提交。
+
+        ── 有意的取舍：冲突批次会留下一条【无映射的孤儿维度行】 ──
+
+        基金简称改名（"测试蓝筹混合A" → "测试改名混合A"）会先让本方法按新的
+        product_name 建出 Fund + FundShareClass，之后 _ensure_provider_identity
+        才发现同一个 provider 代码此前指向另一个份额类别、返回冲突而【不写】
+        映射。于是新建的那一对维度行没有任何 provider_fund_identity 指向它 ——
+        一条孤儿。
+
+        这是【明知并接受】的取舍，不是缺陷：
+
+        · 旧行为（直接抛 ValueError 穿出本方法）确实不会留下孤儿，但代价是
+          整批 ingest-funds 全废，包括本次已抓到的 raw payload 和其余毫不
+          相干的基金。一条映射冲突不该毁掉一整批已抓数据。
+        · 孤儿【不增长】：本方法按 product_name / (fund_id, share_class_code)
+          查找后才新建，重跑同一批只会命中已存在的那一对，不会再建一条。
+        · 孤儿【不丢数据】：旧份额类别、旧映射、旧 PIT 历史一律原样保留，
+          冲突路径不写不改任何既有行。
+        · 孤儿在人工处置后【正好被复用】：运维确认归属、关闭旧区间
+          （valid_to）后重跑，_ensure_provider_identity 会把映射登记到这条
+          已经存在的份额类别上，不会再多建一条。
+
+        这条性质由 tests/integration/test_cli.py::
+        test_conflicting_batch_leaves_one_reusable_orphan_dimension_row 钉住。
+        代价是冲突未处置期间 fund / fund_share_class 里有一条查不到映射的行；
+        它不参与任何 PIT 解析（cli._resolve 只走 provider_fund_identity），
+        因此不会把任何数据引到错误的基金上。
         """
         record = self._adapter.fetch("fund_list")
         self._store_raw(record)

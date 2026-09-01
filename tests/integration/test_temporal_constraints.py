@@ -253,6 +253,93 @@ def test_interval_legitimate_row_is_accepted(db_session):
     db_session.flush()
 
 
+# --- clause 5：available_at 不得早于它自己声明的来源 -------------------------
+# fix round 3 item 1（Critical）：clause 2 是 provider_available_at >=
+# published_at，clause 3 是 ingested_at >= COALESCE(...) —— 两条都【没有提到
+# available_at】。于是 fix round 2 为区间表删掉 clause 4 之后，区间表上的
+# available_at 不再被任何 CHECK 触及；而版本化表上这个洞更老 —— clause 4 只
+# 把 available_at 钉在 effective_at 之后，从未把它与三个来源关联过，所以
+# 「公告 18:00、却声称 10:00 就可用」这种纯前视偏差一直可以写进库。
+#
+# 补上的第五条子句与 anchor 无关，两类表都成立：
+#     available_at >= COALESCE(provider_available_at, published_at)
+#   · EXACT    ：available_at == provider_available_at，取等号通过；
+#   · DERIVED  ：provider_available_at 为 NULL，COALESCE 落到 published_at，
+#                available_at == published_at，取等号通过；
+#   · INFERRED ：两者皆 NULL，COALESCE 为 NULL，比较为 NULL → 真空满足。
+#                这正是 declared_lag_availability（净值灌数）走的路径，
+#                下面两条守卫测试专门钉住它没有被误伤。
+# 【不】加 available_at <= ingested_at：INFERRED 下 available_at =
+# effective_at + 时滞 可以晚于 ingested_at（当天灌当天的数据就会触发），
+# 那会拒掉合法行。
+
+
+def test_available_at_cannot_precede_its_own_declared_source(db_session):
+    """版本化表：公告在 18:00，却声称 10:00 就可用 —— 纯粹的前视偏差。
+
+    这一行满足原有全部四条 clause（published_at >= effective_at、
+    provider_available_at >= published_at、ingested_at 最后、available_at >=
+    effective_at），仅仅是 available_at 早于它自己的来源。修复前【被接受】。
+    """
+    with pytest.raises(IntegrityError):
+        db_session.execute(INSERT, _row(
+            quality="EXACT", available_at=T0,
+            published_at=T1, provider_available_at=T1, ingested_at=T2))
+        db_session.flush()
+
+
+def test_interval_available_at_cannot_precede_its_own_declared_source(db_session):
+    """区间表：同一个洞。放宽 clause 4 是对的，但没有任何东西补上它的位置。
+
+    available_at = 2025-12-25 早于 published_at = 2026-01-02 10:00，
+    等于声称我们在公告前 8 天就知道了。修复前【被接受】。
+    """
+    early = dt.datetime(2025, 12, 25, 9, 0, tzinfo=dt.UTC)
+    with pytest.raises(IntegrityError):
+        db_session.execute(INTERVAL_INSERT, _interval_row(
+            quality="EXACT", available_at=early,
+            published_at=T0, provider_available_at=T1, ingested_at=T2))
+        db_session.flush()
+
+
+def test_inferred_available_at_stays_free_of_the_source_floor(db_session):
+    """守卫：INFERRED 下两个来源皆 NULL，COALESCE 为 NULL，新子句必须真空满足。
+
+    净值灌数（declared_lag_availability）走的就是这条路径：available_at =
+    effective_at + 声明时滞，没有任何来源可比。新子句若误伤这里，全平台的
+    净值一行都写不进去。
+    """
+    db_session.execute(INSERT, _row(
+        quality="INFERRED", available_at=T2, published_at=None,
+        provider_available_at=None, ingested_at=T1))
+    db_session.flush()
+
+
+def test_interval_inferred_available_at_stays_free_of_the_source_floor(db_session):
+    """守卫：区间表上同一条真空满足路径 —— 早于 valid_from 也照样接受。"""
+    early = dt.datetime(2025, 12, 25, 9, 0, tzinfo=dt.UTC)
+    db_session.execute(INTERVAL_INSERT, _interval_row(
+        quality="INFERRED", available_at=early, published_at=None,
+        provider_available_at=None, ingested_at=early))
+    db_session.flush()
+
+
+def test_derived_available_at_equal_to_published_at_is_accepted(db_session):
+    """守卫：DERIVED 取等号必须通过 —— 新子句是 >= 而非严格 >。"""
+    db_session.execute(INSERT, _row(
+        quality="DERIVED", available_at=T0, published_at=T0,
+        provider_available_at=None, ingested_at=T2))
+    db_session.flush()
+
+
+def test_interval_exact_available_at_equal_to_provider_time_is_accepted(db_session):
+    """守卫：EXACT 取等号必须通过（区间表上同理）。"""
+    db_session.execute(INTERVAL_INSERT, _interval_row(
+        quality="EXACT", available_at=T1,
+        published_at=T0, provider_available_at=T1, ingested_at=T2))
+    db_session.flush()
+
+
 # --- CHECK 不得依赖会话时区 -----------------------------------------------
 # fix round 2 item 2（Critical）：anchor 是 DATE、其余列是 TIMESTAMPTZ，
 # `timestamptz >= date` 走 STABLE 的 date→timestamptz 转换，结果依赖会话

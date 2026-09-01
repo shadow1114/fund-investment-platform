@@ -49,9 +49,9 @@ def utc_anchor_sql(anchor: str) -> str:
 _ANCHOR = utc_anchor_sql("effective_at")
 
 # --------------------------------------------------------------------------
-# 四条 clause 的单独定义。两类表【共享】clause 2 / clause 3，
-# 只有 clause 1 / clause 4 是版本化事实表专有的 —— 见下面两个生成器的
-# docstring。
+# 五条 clause 的单独定义。两类表【共享】clause 2 / clause 3 / clause 5，
+# 只有 clause 1 / clause 4（唯二提到 anchor 的两条）是版本化事实表专有的
+# —— 见下面两个生成器的 docstring。
 _CLAUSE_1_PUBLISHED_AFTER_ANCHOR = f"(published_at IS NULL OR published_at >= {_ANCHOR})"
 _CLAUSE_2_PROVIDER_AFTER_PUBLISHED = (
     "(provider_available_at IS NULL OR published_at IS NULL "
@@ -62,18 +62,45 @@ _CLAUSE_3_INGESTED_LAST = (
 )
 _CLAUSE_4_AVAILABLE_AFTER_ANCHOR = f"(available_at >= {_ANCHOR})"
 
-# 版本化事实表（VersionedMixin，anchor = effective_at）的四子句时序约束。
+# --------------------------------------------------------------------------
+# clause 5（fix round 3 item 1，Critical）：available_at 不得早于它自己声明的
+# 来源。这是【唯一】一条把 available_at 与三个来源关联起来的子句 ——
+# clause 2 是 provider_available_at >= published_at，clause 3 是
+# ingested_at >= COALESCE(...)，两条都没有提到 available_at；clause 4 只把
+# available_at 钉在 anchor 之后。于是「公告 18:00、却声称 10:00 就可用」这种
+# 纯前视偏差在版本化表上一直可以写进库，而 fix round 2 为区间表删掉
+# clause 4 之后，区间表上的 available_at 更是不再被任何 CHECK 触及。
+#
+# 与 anchor 无关，所以两类表【都】适用：
+#   · EXACT    ：available_at == provider_available_at，取等号通过；
+#   · DERIVED  ：provider_available_at 为 NULL，COALESCE 落到 published_at，
+#                available_at == published_at，取等号通过；
+#   · INFERRED ：两者皆 NULL，COALESCE 为 NULL，比较结果为 NULL →
+#                CHECK 真空满足。这正是 declared_lag_availability（净值灌数）
+#                走的路径，不会被拒。
+# 也就是说它拒不掉任何合法行，只挡住「声称比来源更早知道」。
+#
+# 刻意【不】加对称的 available_at <= ingested_at：INFERRED 路径下
+# available_at = effective_at + 声明时滞 可以晚于 ingested_at（当天灌当天的
+# 数据就会触发），那会拒掉合法行。
+_CLAUSE_5_AVAILABLE_AFTER_SOURCE = (
+    "(available_at >= COALESCE(provider_available_at, published_at))"
+)
+
+# 版本化事实表（VersionedMixin，anchor = effective_at）的五子句时序约束。
 TIME_ORDER_SQL = " AND ".join((
     _CLAUSE_1_PUBLISHED_AFTER_ANCHOR,
     _CLAUSE_2_PROVIDER_AFTER_PUBLISHED,
     _CLAUSE_3_INGESTED_LAST,
     _CLAUSE_4_AVAILABLE_AFTER_ANCHOR,
+    _CLAUSE_5_AVAILABLE_AFTER_SOURCE,
 ))
 
-# 区间型状态表（IntervalMixin，区间起点 = valid_from）的两子句时序约束。
+# 区间型状态表（IntervalMixin，区间起点 = valid_from）的三子句时序约束。
 INTERVAL_TIME_ORDER_SQL = " AND ".join((
     _CLAUSE_2_PROVIDER_AFTER_PUBLISHED,
     _CLAUSE_3_INGESTED_LAST,
+    _CLAUSE_5_AVAILABLE_AFTER_SOURCE,
 ))
 
 INTERVAL_SQL = "valid_to IS NULL OR valid_from < valid_to"
@@ -136,12 +163,12 @@ def quality_source_check(table: str) -> CheckConstraint:
 
 
 def time_order_check(table: str) -> CheckConstraint:
-    """版本化事实表的四子句时序约束（03-data/01 §11.6）。"""
+    """版本化事实表的五子句时序约束（03-data/01 §11.6）。"""
     return CheckConstraint(TIME_ORDER_SQL, name=f"ck_{table}_time_order")
 
 
 def interval_time_order_check(table: str) -> CheckConstraint:
-    """区间型状态表的两子句时序约束（不含 clause 1 / clause 4）。"""
+    """区间型状态表的三子句时序约束（不含 anchor 相关的 clause 1 / clause 4）。"""
     return CheckConstraint(INTERVAL_TIME_ORDER_SQL, name=f"ck_{table}_time_order")
 
 
@@ -150,14 +177,14 @@ def interval_check(table: str) -> CheckConstraint:
 
 
 def temporal_check_constraints(table: str) -> tuple[CheckConstraint, CheckConstraint]:
-    """【版本化事实表】（VersionedMixin）的标准约束组：quality_source + 四子句时序。
+    """【版本化事实表】（VersionedMixin）的标准约束组：quality_source + 五子句时序。
 
     ── 为什么版本化表与区间型表的时序不变式不同（本仓库最容易被改错的地方）──
 
     版本化事实表的 anchor 是 effective_at，语义是「这个【事实】在哪一天成立」：
     2026-08-31 的单位净值、当日的分红金额、当日的无风险利率。净值不可能在它
     自己的日期之前就被知道 —— 那不是「提前公告」，那是前视偏差。所以这类表
-    保留全部四条 clause：
+    保留全部五条 clause：
 
       clause 1  published_at >= effective_at   公告不早于事实成立日
       clause 2  provider_available_at >= published_at   推送不早于公告
@@ -167,9 +194,15 @@ def temporal_check_constraints(table: str) -> tuple[CheckConstraint, CheckConstr
                 NULL 时会退化为真空满足（vacuous truth），必须靠 clause 4 堵住
                 EXACT 分支的 provider_available_at 与 INFERRED 分支的
                 ingested_at（见迁移 0003）。
+      clause 5  available_at >= COALESCE(provider_available_at, published_at)
+                available_at 不得早于它自己声明的来源（见迁移 0015）。
+                clause 1–4 里【没有一条】把 available_at 与三个来源关联过：
+                clause 4 只把它钉在 anchor 之后，于是 effective_at=01-02、
+                published_at=01-02T18:00、available_at=01-02T10:00 这样的纯
+                前视偏差一路通过。clause 5 是补上这个位置的唯一一条。
 
-    区间型状态表【不适用】clause 1 与 clause 4，务必改用
-    interval_temporal_check_constraints()，理由见该函数的 docstring。
+    区间型状态表【不适用】clause 1 与 clause 4（唯二提到 anchor 的两条），
+    务必改用 interval_temporal_check_constraints()，理由见该函数的 docstring。
     误用本函数会让数据库拒收合法的预披露数据。
     """
     return (quality_source_check(table), time_order_check(table))
@@ -178,7 +211,7 @@ def temporal_check_constraints(table: str) -> tuple[CheckConstraint, CheckConstr
 def interval_temporal_check_constraints(
     table: str,
 ) -> tuple[CheckConstraint, CheckConstraint]:
-    """【区间型状态表】（IntervalMixin）的标准约束组：quality_source + 两子句时序。
+    """【区间型状态表】（IntervalMixin）的标准约束组：quality_source + 三子句时序。
 
     ── 为什么这里【必须】去掉 clause 1 与 clause 4 ──
 
@@ -195,9 +228,20 @@ def interval_temporal_check_constraints(
     「生效时点」混为一谈，结果是直接拒收真实数据。
 
     真正防前视偏差的不变式，是 available_at 与它的三个来源
-    （published_at / provider_available_at / ingested_at）之间的先后关系 ——
-    也就是保留下来的 clause 2、clause 3，加上 quality_source 对
-    「available_at 取自哪个来源」的锁定。这三条与 valid_from 无关，
+    （published_at / provider_available_at / ingested_at）之间的先后关系。
+    ⚠️ fix round 3 item 1：这句话曾被误写成「clause 2、clause 3 已完整表达
+    这一点」—— 那是错的。clause 2 是 provider_available_at >= published_at，
+    clause 3 是 ingested_at >= COALESCE(...)，两条【都没有提到 available_at】。
+    删掉 clause 4 之后，区间表上的 available_at 一度不再被任何 CHECK 触及：
+    available_at=1900-01-01 配 published_at=2026-01-02 会被原样收下。
+    补上这个位置的是 clause 5：
+
+      clause 5  available_at >= COALESCE(provider_available_at, published_at)
+
+    它与 anchor 无关，因此在区间表上同样成立；INFERRED（两个来源皆 NULL）时
+    COALESCE 为 NULL、CHECK 真空满足，不会误伤提前公告那条合法路径。
+    保留下来的三条是 clause 2、clause 3、clause 5，加上 quality_source 对
+    「available_at 取自哪个来源」的锁定 —— 它们与 valid_from 无关，
     在区间型表上原样成立、原样有效。
 
     区间是否可见由全平台唯一的可见性规则 `available_at <= decision_at`
