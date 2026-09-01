@@ -5482,7 +5482,7 @@ Investment Eligibility 是客观事实归 data-service，Eligibility Rules 是
   - `QualityLevel`（`StrEnum`：`VALID`、`WARNING`、`INVALID`）
   - `BlockingScope`（`StrEnum`：`FUND`、`METRIC`、`GLOBAL`）
   - `QualityFinding`（frozen dataclass：`scope`、`level`、`subject: str`、`reason: str`）
-  - `QualityVerdict`（frozen dataclass：`findings: tuple[QualityFinding, ...]`；属性 `is_globally_blocked: bool`、`blocked_fund_ids: frozenset[int]`、`blocked_metrics: frozenset[str]`）
+  - `QualityVerdict`（frozen dataclass：`findings: tuple[QualityFinding, ...]`；属性 `is_globally_blocked: bool`、`blocked_share_class_ids: frozenset[int]`、`blocked_metrics: frozenset[str]`）
   - `evaluate_batch_quality(expected_ids, arrived_ids, unavailable_adjusted_nav_ids, coverage_threshold: Decimal) -> QualityVerdict`
 
 > **M1 的范围界定**：质量判定结果**不落 `data_quality_result` 表**（该表属 M2，spec §6.3）。M1 的判定结果体现为 Job 的 `status=BLOCKED` 与 `error_code`，以及返回给调用方的 `QualityVerdict`。这避免为一个尚未被查询的表提前建模。
@@ -5516,7 +5516,7 @@ def test_single_missing_fund_blocks_only_that_fund():
     """一只基金缺数据不该阻断整个市场。"""
     verdict = _verdict(list(range(1, 101)), list(range(2, 101)))
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})
     assert all(f.scope is BlockingScope.FUND for f in verdict.findings)
 
 
@@ -5537,7 +5537,7 @@ def test_unavailable_adjusted_nav_is_metric_level():
     """复权净值算不出 → 只影响依赖它的指标，基金本身仍在池内。"""
     verdict = _verdict([1, 2], [1, 2], unavailable=[2])
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset()
+    assert verdict.blocked_share_class_ids == frozenset()
     assert "adjusted_nav" in verdict.blocked_metrics
     assert any(f.scope is BlockingScope.METRIC for f in verdict.findings)
 
@@ -5608,7 +5608,7 @@ class QualityVerdict:
         )
 
     @property
-    def blocked_fund_ids(self) -> frozenset[int]:
+    def blocked_share_class_ids(self) -> frozenset[int]:
         return frozenset(
             int(f.subject)
             for f in self.findings
@@ -5715,7 +5715,7 @@ def test_fund_level_issue_does_not_block_the_job(db_session):
     _apply(job, verdict)
     db_session.flush()
     assert job.status == ExecutionStatus.COMPLETED.value
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})
 ```
 
 - [ ] **Step 5：运行测试确认通过**

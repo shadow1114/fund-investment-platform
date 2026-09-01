@@ -2,7 +2,9 @@ from decimal import Decimal
 
 from fip.services.data_service.quality import (
     BlockingScope,
+    QualityFinding,
     QualityLevel,
+    QualityVerdict,
     evaluate_batch_quality,
 )
 
@@ -77,3 +79,26 @@ def test_no_silent_degradation_missing_funds_are_never_dropped_quietly():
     verdict = _verdict([1, 2, 3], [1])
     subjects = {f.subject for f in verdict.findings if f.scope is BlockingScope.FUND}
     assert subjects == {"2", "3"}
+
+
+def test_warning_level_metric_finding_does_not_block():
+    """METRIC 级的 WARNING 不得被当作阻断。
+
+    三个派生属性（is_globally_blocked / blocked_share_class_ids /
+    blocked_metrics）必须共享同一条不变式：只有 INVALID 才阻断。
+    evaluate_batch_quality 目前只会产出 INVALID 的 METRIC finding，
+    所以这条不变式无法经由它触达 —— 必须【直接构造】一个 WARNING 的
+    METRIC finding 才能覆盖。没有这个测试，blocked_metrics 里的 level
+    过滤被删掉也不会有任何测试报警（Task 18 复评的 PARTIALLY 一条）。
+    """
+    verdict = QualityVerdict((
+        QualityFinding(
+            scope=BlockingScope.METRIC,
+            level=QualityLevel.WARNING,
+            subject="7",
+            reason="复权净值口径存疑，但仍可用",
+        ),
+    ))
+    assert verdict.blocked_metrics == frozenset()
+    assert verdict.blocked_share_class_ids == frozenset()
+    assert verdict.is_globally_blocked is False
