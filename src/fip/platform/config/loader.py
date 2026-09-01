@@ -25,18 +25,37 @@ def _default_on_provisional_use(param: Parameter) -> None:
 
 
 def _flatten(node: Any, prefix: str, out: dict[str, Parameter]) -> None:
+    """将嵌套配置树展开为 dotted-path -> Parameter 的映射。
+
+    叶子的判定要求【精确匹配】 {value, status, source} 三个字段，不多不少
+    （见 spec §5.3 不阻断/不静默）：
+      - 若字段集合与三键集合不相等，但仍有重叠（缺一两项，或夹带额外字段），
+        说明作者想表达的既不是合法叶子也不是合法配置节，必须显式报错，
+        而不是把多出来的/缺失的字段悄悄丢弃或强行凑成一个叶子。
+      - 若字段集合恰好等于三键集合，但 value 本身又是一个映射，则该节点
+        『长得像』叶子又『长得像』嵌套配置节，属于结构性歧义，同样必须
+        报错，绝不能悄悄把嵌套结构塌陷成一个不透明的 value（那正是本模块
+        存在的原因：绝不能让占位/未决结构被静默丢弃）。
+      - value 为 null 同样拒绝：空值无法区分『已定案为空』与『遗漏未填』。
+    """
     if not isinstance(node, dict):
         raise ValueError(f"配置节点 {prefix!r} 不是映射，无法解析")
-    if _LEAF_KEYS & set(node):
-        if "value" not in node:
-            raise ValueError(f"配置叶子 {prefix!r} 缺少 value")
-        if "status" not in node:
+
+    keys = set(node)
+    overlap = _LEAF_KEYS & keys
+
+    if keys == _LEAF_KEYS:
+        if isinstance(node["value"], dict):
             raise ValueError(
-                f"配置叶子 {prefix!r} 缺少 status —— "
-                "无法区分已定案取值与开发期占位"
+                f"配置节点 {prefix!r} 恰好含有 value/status/source 三个字段，"
+                "但 value 本身又是一个映射 —— 无法判断这是一个标量参数叶子，"
+                "还是一个被同名字段掩盖的嵌套配置节，请调整字段名或结构"
             )
-        if "source" not in node:
-            raise ValueError(f"配置叶子 {prefix!r} 缺少 source")
+        if node["value"] is None:
+            raise ValueError(
+                f"配置叶子 {prefix!r} 的 value 为空(null) —— "
+                "空值无法区分『已定案为空』与『遗漏未填』"
+            )
         out[prefix] = Parameter(
             path=prefix,
             value=node["value"],
@@ -44,6 +63,20 @@ def _flatten(node: Any, prefix: str, out: dict[str, Parameter]) -> None:
             source=node["source"],
         )
         return
+
+    if overlap:
+        missing = sorted(_LEAF_KEYS - keys)
+        extra = sorted(keys - _LEAF_KEYS)
+        detail = []
+        if missing:
+            detail.append(f"缺少 {missing}")
+        if extra:
+            detail.append(f"另有非叶子字段 {extra}")
+        raise ValueError(
+            f"配置节点 {prefix!r} 含有部分叶子字段 {sorted(overlap)}，"
+            f"{'，'.join(detail)} —— 既不是合法的参数叶子，也不是合法的配置节"
+        )
+
     for key, child in node.items():
         _flatten(child, f"{prefix}.{key}" if prefix else str(key), out)
 
