@@ -72,6 +72,17 @@ def _dotted_imports(path: pathlib.Path) -> set[str]:
     return out
 
 
+def _touches(module: str, prefix: str) -> bool:
+    """判断 `module` 是否『命中』`prefix` —— 必须落在点边界上，而非裸前缀匹配。
+
+    裸 `str.startswith(prefix)` 会把 `fip.services.factor_service_utils`
+    误判为依赖 `fip.services.factor_service`（仅仅共享字符串前缀，并非同一
+    模块也不是其子模块）。一条会对无关模块报警的适应度测试，比一条过窄的
+    测试更糟——开发者遇到的第一反应通常是直接关掉它。
+    """
+    return module == prefix or module.startswith(prefix + ".")
+
+
 IO_LIBS = {
     "sqlalchemy", "psycopg", "psycopg2", "asyncpg", "alembic",
     "requests", "httpx", "aiohttp", "urllib", "akshare", "socket",
@@ -149,7 +160,7 @@ def test_portfolio_service_does_not_depend_on_factor_service():
     offenders = [
         f.relative_to(SRC)
         for f in _py_files("services", "portfolio_service")
-        if any(m.startswith("fip.services.factor_service") for m in _dotted_imports(f))
+        if any(_touches(m, "fip.services.factor_service") for m in _dotted_imports(f))
     ]
     assert not offenders, f"portfolio_service 依赖了 factor_service：{offenders}"
 
@@ -166,7 +177,10 @@ def test_peer_group_module_does_not_depend_on_scoring_or_universe():
     )
     offenders = []
     for f in _py_files("services", "fund_service", "peer_group"):
-        bad = [m for m in _dotted_imports(f) if m.startswith(banned_prefixes)]
+        bad = [
+            m for m in _dotted_imports(f)
+            if any(_touches(m, prefix) for prefix in banned_prefixes)
+        ]
         if bad:
             offenders.append((f.relative_to(SRC), bad))
     assert not offenders, f"Peer Group 模块依赖了评分/候选池模块：{offenders}"
@@ -183,6 +197,10 @@ def test_platform_layer_does_not_import_services_at_module_level():
     相对导入的 `node.module` 不带 `fip.` 前缀（例如上例中 `node.module ==
     "services.data_service"`、`node.level == 3`），只匹配 `fip.services` 前缀
     会把这类写法完全放过 —— 而模块级相对导入正是本测试要防的典型违规形式。
+
+    还必须处理相对导入裸包名的形式，如 `from .. import services`：这类语句的
+    `node.module` 是 `None`（包名落在 `node.names` 里而不是 `node.module` 里），
+    朴素的 `node.module and ...` 判断会因 `module` 为假值而整体短路放过它。
     """
     offenders = []
     for f in _py_files("platform"):
@@ -191,12 +209,22 @@ def test_platform_layer_does_not_import_services_at_module_level():
             bad: list[str] = []
             if isinstance(node, ast.Import):
                 bad = [a.name for a in node.names if a.name.startswith("fip.services")]
-            elif isinstance(node, ast.ImportFrom) and node.module:
+            elif isinstance(node, ast.ImportFrom):
                 if node.level > 0:
-                    # 相对导入：module 本身不带 fip. 前缀，需按首段判断。
-                    if node.module.split(".")[0] == "services":
-                        bad = [f"{'.' * node.level}{node.module}"]
-                elif node.module.startswith("fip.services"):
+                    if node.module:
+                        # 相对导入且带 module：如 `from ...services.x import y`。
+                        # module 本身不带 fip. 前缀，需按首段判断。
+                        if node.module.split(".")[0] == "services":
+                            bad = [f"{'.' * node.level}{node.module}"]
+                    else:
+                        # 相对导入且 module 为 None：包名在 names 里，
+                        # 如 `from .. import services`。
+                        bad = [
+                            f"{'.' * node.level}{a.name}"
+                            for a in node.names
+                            if a.name == "services"
+                        ]
+                elif node.module and node.module.startswith("fip.services"):
                     bad = [node.module]
             if bad:
                 offenders.append((f.relative_to(SRC), bad))
