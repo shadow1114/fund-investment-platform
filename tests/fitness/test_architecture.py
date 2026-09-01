@@ -7,6 +7,8 @@
 - DEP-3：portfolio_service 不依赖 factor_service
 - C-4：peer_group 模块不依赖 scoring / ranking / universe
 - 依赖方向单向：platform 层不在模块级依赖 services 层
+- 每个定义了 ORM model（Base 子类）的模块都被 db/migrations/env.py 注册，
+  否则 Base.metadata 不完整、`alembic revision --autogenerate` 会静默失效
 
 明确不覆盖：
 - C-3（backend service 层不得含投资策略规则、阈值或常量）—— 语义上 AST 无法判定
@@ -256,6 +258,78 @@ def test_platform_layer_does_not_import_services_at_module_level():
             if bad:
                 offenders.append((f.relative_to(SRC), bad))
     assert not offenders, f"platform 层模块级依赖了 services 层：{offenders}"
+
+
+ENV_PY = pathlib.Path(__file__).resolve().parents[2] / "db" / "migrations" / "env.py"
+
+
+def _module_dotted_path(f: pathlib.Path) -> str:
+    """把 src 下的文件路径转成点号模块名（`__init__.py` 归约到包名本身）。"""
+    parts = list(f.relative_to(SRC.parent).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def _modules_defining_base_subclass() -> set[str]:
+    """AST 扫描 src/fip 下全部 .py 文件，返回定义了 Base 子类的模块点号路径。"""
+    modules: set[str] = set()
+    for f in SRC.rglob("*.py"):
+        tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for base in node.bases:
+                name = None
+                if isinstance(base, ast.Name):
+                    name = base.id
+                elif isinstance(base, ast.Attribute):
+                    name = base.attr
+                if name == "Base":
+                    modules.add(_module_dotted_path(f))
+    return modules
+
+
+def _env_py_registered_modules() -> set[str]:
+    """AST 扫描 env.py 的模块级 import，还原出它实际加载了哪些点号模块。
+
+    本仓库的 model 模块清一色以 `from <package> import <module>` 的形式被
+    env.py 逐一列出，没有经由 `__init__.py` 二次导出的间接路径 —— 因此这里
+    只做浅层扫描（模块级 Import / ImportFrom），不构建通用的 import 依赖图
+    解析器。若未来出现二次导出等更复杂的路径，应改为在本测试里维护一份
+    显式模块清单，而不是让这个扫描本身变复杂、变得难以确信其正确性。
+    """
+    tree = ast.parse(ENV_PY.read_text(encoding="utf-8"), filename=str(ENV_PY))
+    registered: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            registered.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            registered.add(node.module)
+            registered.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return registered
+
+
+def test_every_orm_model_module_is_registered_in_env():
+    """漏注册一个 Base 子类模块是纯粹的静默失败，且是本计划里后果最严重的一种。
+
+    db/migrations/env.py 是 Alembic 读取 Base.metadata 的唯一入口。一个模块
+    定义了 ORM model 却没被 env.py 在模块级 import，不会抛出任何异常 ——
+    Base.metadata 里就是没有那张表：`alembic revision --autogenerate` 要么
+    漏建该表，要么（更危险）在下一次针对既有表的 autogenerate 里把它误判成
+    待删除对象。0006 迁移就手工剔除过这类噪声（mixin_probe / interval_probe /
+    calculation_job 的索引），这条测试防的是同一类问题反过来发生在【新表】
+    自己身上 —— 那种情况下没有 code review 能替它兜底，因为迁移文件里根本
+    不会出现这张表的任何痕迹。
+    """
+    defined = _modules_defining_base_subclass()
+    registered = _env_py_registered_modules()
+    missing = sorted(defined - registered)
+    assert not missing, (
+        "以下模块定义了 ORM model（Base 子类）但未在 db/migrations/env.py 里 "
+        f"import，Base.metadata 不会包含它们，autogenerate 会静默失效：{missing}"
+        "。请在 env.py 追加对应的 import。"
+    )
 
 
 GUARDED_ROOTS: list[tuple[str, ...]] = [
