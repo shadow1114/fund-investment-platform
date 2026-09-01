@@ -1,0 +1,16 @@
+# Metric Version v1 —— Factor 计算口径与公式
+# Owner: factor-service（01-system-architecture §8.2 第 1 项）
+annualization:
+  trading_days_per_year:
+    value: 252
+    status: DECIDED
+    source: "10-api/01 §12.3 annualized_return 定义为 252 交易日"
+adjusted_nav:
+  dividend_reinvestment_price:
+    value: EX_DATE_NAV
+    status: DECIDED
+    source: "本 Plan Task 15 —— 以除息日当日单位净值再投资"
+  same_day_order:
+    value: DIVIDEND_THEN_SPLIT
+    status: DECIDED
+    source: "本 Plan Task 15 —— 同日先除息后拆分"

@@ -1,0 +1,16 @@
+# Evaluation Policy v1 —— MAR、评价周期、评价准入条件
+# Owner: fund-service（01-system-architecture §8.2.1 第 1 子项）
+mar:
+  default:
+    value: 0.0
+    status: PROVISIONAL
+    source: "P1-19 / 上游 TBD-19 待投研定案，下游不得自行填充"
+risk_free_rate:
+  tenor:
+    value: 1Y
+    status: PROVISIONAL
+    source: "上游 TBD-18 待投研与数据共同确定"
+  currency:
+    value: CNY
+    status: PROVISIONAL
+    source: "上游 TBD-18"
