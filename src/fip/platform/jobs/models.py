@@ -1,7 +1,7 @@
 import datetime as dt
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,7 +31,12 @@ execution_status_enum = ENUM(
 
 class CalculationJob(Base):
     __tablename__ = "calculation_job"
-    __table_args__ = {"schema": "governance"}
+    __table_args__ = (
+        # 与迁移 0005 里的 CREATE INDEX 对齐 —— 只写进迁移会让 Base.metadata
+        # 不知道它，后续 autogenerate 会把它当作待删除对象。
+        Index("ix_calculation_job_status", "status"),
+        {"schema": "governance"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     execution_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
