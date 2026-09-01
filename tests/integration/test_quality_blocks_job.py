@@ -40,4 +40,4 @@ def test_fund_level_issue_does_not_block_the_job(db_session):
     _apply(job, verdict)
     db_session.flush()
     assert job.status == ExecutionStatus.COMPLETED.value
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})

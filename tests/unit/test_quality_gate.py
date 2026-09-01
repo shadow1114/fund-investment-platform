@@ -23,7 +23,7 @@ def test_single_missing_fund_blocks_only_that_fund():
     """一只基金缺数据不该阻断整个市场。"""
     verdict = _verdict(list(range(1, 101)), list(range(2, 101)))
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})
     assert all(f.scope is BlockingScope.FUND for f in verdict.findings)
 
 
@@ -44,9 +44,19 @@ def test_unavailable_adjusted_nav_is_metric_level():
     """复权净值算不出 → 只影响依赖它的指标，基金本身仍在池内。"""
     verdict = _verdict([1, 2], [1, 2], unavailable=[2])
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset()
+    assert verdict.blocked_share_class_ids == frozenset()
     assert "adjusted_nav" in verdict.blocked_metrics
-    assert any(f.scope is BlockingScope.METRIC for f in verdict.findings)
+    metric_findings = [f for f in verdict.findings if f.scope is BlockingScope.METRIC]
+    assert len(metric_findings) == 1
+    assert metric_findings[0].subject == "2"
+
+
+def test_multiple_unavailable_adjusted_nav_ids_each_get_their_own_finding():
+    """指标级判定不能把受影响的份额类别聚合掉 —— 每个 id 都要能在 finding 里找到。"""
+    verdict = _verdict([1, 2, 3], [1, 2, 3], unavailable=[2, 3])
+    metric_subjects = {f.subject for f in verdict.findings if f.scope is BlockingScope.METRIC}
+    assert metric_subjects == {"2", "3"}
+    assert "adjusted_nav" in verdict.blocked_metrics
 
 
 def test_empty_expectation_blocks_globally():
