@@ -4066,7 +4066,7 @@ def test_zero_split_ratio_is_rejected_by_the_database(db_session, share_class):
 .venv/bin/pytest tests/unit/test_distribution_parsing.py tests/integration/test_fund_distribution.py -v
 ```
 
-Expected: 7 passed + 3 passed
+Expected: 9 passed + 3 passed
 
 - [ ] **Step 8：提交**
 
