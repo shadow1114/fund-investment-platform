@@ -240,6 +240,87 @@ def test_peer_group_module_does_not_depend_on_scoring_or_universe():
     assert not offenders, f"Peer Group 模块依赖了评分/候选池模块：{offenders}"
 
 
+def _service_import_names(node: ast.stmt) -> list[str]:
+    """单条语句本身是否是对 services 层的依赖；是则返回被依赖的名字。"""
+    if isinstance(node, ast.Import):
+        return [a.name for a in node.names if _touches(a.name, "fip.services")]
+    if isinstance(node, ast.ImportFrom):
+        if node.level > 0:
+            if node.module:
+                # 相对导入且带 module：如 `from ...services.x import y`。
+                # module 本身不带 fip. 前缀，需按首段判断。
+                if node.module.split(".")[0] == "services":
+                    return [f"{'.' * node.level}{node.module}"]
+                return []
+            # 相对导入且 module 为 None：包名在 names 里，
+            # 如 `from .. import services`。
+            return [
+                f"{'.' * node.level}{a.name}"
+                for a in node.names
+                if a.name == "services"
+            ]
+        if node.module and _touches(node.module, "fip.services"):
+            return [node.module]
+    return []
+
+
+def _is_type_checking_guard(test: ast.expr) -> bool:
+    """判断某个 `if` 的条件是否为 TYPE_CHECKING 守卫。
+
+    显式豁免的理由：`typing.TYPE_CHECKING` 在运行期【恒为 False】，其 body
+    只被类型检查器读取，运行时那行 import 从不执行，因此不构成模块级依赖，
+    也不会形成包级循环依赖 —— 它正是本项目让 platform 层安全地拿到 services
+    层类型标注的推荐写法（见 src/fip/platform/cli.py 顶部）。豁免的只有
+    body；`else` 分支在运行期【会】执行，仍须扫描。
+
+    同时接受裸名 `TYPE_CHECKING`（`from typing import TYPE_CHECKING`）与属性
+    访问 `typing.TYPE_CHECKING`（`import typing`）两种写法。
+    """
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    if isinstance(test, ast.Attribute):
+        return test.attr == "TYPE_CHECKING"
+    return False
+
+
+def _scan_module_level_body(body: list[ast.stmt]) -> list[str]:
+    """递归扫描一段【模块级】语句，返回其中对 services 层的依赖。
+
+    必须进入模块级的 If / Try / With 体：这些语句在 import 该模块时【会】真的
+    执行，藏在里面的 import 是货真价实的模块级依赖（`try: import X except
+    ImportError: ...` 正是「可选依赖」最常见的写法）。只遍历 tree.body 会对
+    它们完全失明 —— 一条对违规失明的适应度测试比没有测试更糟，因为它给出
+    虚假的安全感。
+
+    但【不得】进入 FunctionDef / AsyncFunctionDef / ClassDef：函数体内的延迟
+    import 只在调用时执行，是本项目明确鼓励的模式（platform 层就靠它调用
+    services 层），进入函数体会把合法写法全部误报。
+    """
+    bad: list[str] = []
+    for node in body:
+        bad.extend(_service_import_names(node))
+        if isinstance(node, ast.If):
+            if not _is_type_checking_guard(node.test):
+                bad.extend(_scan_module_level_body(node.body))
+            # orelse 在运行期照常执行，即使 test 是 TYPE_CHECKING 也要扫。
+            bad.extend(_scan_module_level_body(node.orelse))
+        elif isinstance(node, ast.Try | ast.TryStar):
+            bad.extend(_scan_module_level_body(node.body))
+            for handler in node.handlers:
+                bad.extend(_scan_module_level_body(handler.body))
+            bad.extend(_scan_module_level_body(node.orelse))
+            bad.extend(_scan_module_level_body(node.finalbody))
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            bad.extend(_scan_module_level_body(node.body))
+    return bad
+
+
+def module_level_service_imports(source: str, filename: str = "<test>") -> list[str]:
+    """返回 source 中【模块级】对 services 层的 import。"""
+    tree = ast.parse(source, filename=filename)
+    return _scan_module_level_body(tree.body)
+
+
 def test_platform_layer_does_not_import_services_at_module_level():
     """依赖方向单向：services → platform，不得反向。
 
@@ -258,31 +339,72 @@ def test_platform_layer_does_not_import_services_at_module_level():
     """
     offenders = []
     for f in _py_files("platform"):
-        tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
-        for node in tree.body:  # 只看模块级语句
-            bad: list[str] = []
-            if isinstance(node, ast.Import):
-                bad = [a.name for a in node.names if _touches(a.name, "fip.services")]
-            elif isinstance(node, ast.ImportFrom):
-                if node.level > 0:
-                    if node.module:
-                        # 相对导入且带 module：如 `from ...services.x import y`。
-                        # module 本身不带 fip. 前缀，需按首段判断。
-                        if node.module.split(".")[0] == "services":
-                            bad = [f"{'.' * node.level}{node.module}"]
-                    else:
-                        # 相对导入且 module 为 None：包名在 names 里，
-                        # 如 `from .. import services`。
-                        bad = [
-                            f"{'.' * node.level}{a.name}"
-                            for a in node.names
-                            if a.name == "services"
-                        ]
-                elif node.module and _touches(node.module, "fip.services"):
-                    bad = [node.module]
-            if bad:
-                offenders.append((f.relative_to(SRC), bad))
+        bad = module_level_service_imports(f.read_text(encoding="utf-8"), str(f))
+        if bad:
+            offenders.append((f.relative_to(SRC), bad))
     assert not offenders, f"platform 层模块级依赖了 services 层：{offenders}"
+
+
+# --- 扫描器自身的单元测试 -------------------------------------------------
+# 扫描器只遍历 tree.body 且只认 Import / ImportFrom，不进入 ast.If / ast.Try
+# 体内，因此任何藏在模块级 if / try 里的真实违规都会被静默放过 —— 一条对
+# 违规失明的适应度测试比没有测试更糟，因为它给出的是虚假的安全感。
+# 下面这组用例直接对扫描器断言，不依赖仓库当前状态。
+
+VIOLATION_HIDDEN_IN_MODULE_LEVEL_IF = """
+import os
+
+if os.environ.get("FIP_EAGER"):
+    from fip.services.data_service.ingest import IngestService
+"""
+
+VIOLATION_HIDDEN_IN_MODULE_LEVEL_TRY = """
+try:
+    import fip.services.data_service.ingest
+except ImportError:
+    from fip.services.data_service import ingest
+"""
+
+TYPE_CHECKING_GUARD_IS_ALLOWED = """
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fip.services.data_service.ingest import IngestService
+"""
+
+DEFERRED_IMPORT_IN_FUNCTION_IS_ALLOWED = """
+def build():
+    from fip.services.data_service.ingest import IngestService
+    return IngestService
+"""
+
+
+def test_scanner_catches_violation_hidden_in_module_level_if():
+    """模块级 if 体内的 import 在运行期【会】真的执行，是真实的模块级依赖。"""
+    assert module_level_service_imports(VIOLATION_HIDDEN_IN_MODULE_LEVEL_IF) == [
+        "fip.services.data_service.ingest"
+    ]
+
+
+def test_scanner_catches_violation_hidden_in_module_level_try():
+    """try/except 是「可选依赖」最常见的写法，同样必须被抓到（含 handler 体）。"""
+    assert module_level_service_imports(VIOLATION_HIDDEN_IN_MODULE_LEVEL_TRY) == [
+        "fip.services.data_service.ingest",
+        "fip.services.data_service",
+    ]
+
+
+def test_scanner_exempts_type_checking_guard():
+    """`if TYPE_CHECKING:` 在运行期恒为 False，不构成模块级依赖，必须放行。
+
+    platform/cli.py 顶部正是这个写法（见该文件的注释），它必须继续通过。
+    """
+    assert module_level_service_imports(TYPE_CHECKING_GUARD_IS_ALLOWED) == []
+
+
+def test_scanner_does_not_descend_into_function_bodies():
+    """函数体内的延迟 import 是本项目【鼓励】的模式，不得误报。"""
+    assert module_level_service_imports(DEFERRED_IMPORT_IN_FUNCTION_IS_ALLOWED) == []
 
 
 ENV_PY = pathlib.Path(__file__).resolve().parents[2] / "db" / "migrations" / "env.py"

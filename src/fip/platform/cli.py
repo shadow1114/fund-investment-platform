@@ -40,18 +40,49 @@ def _service(session: Session) -> "IngestService":
 
 
 def _resolve(session: Session, symbol: str) -> "FundShareClass":
+    """把 provider 的基金代码解析为份额类别，经 fund.provider_fund_identity。
+
+    symbol 是 AKShare 的数字代码（如 "000001"）。它与平台份额类别之间【唯一】
+    的桥是 provider_fund_identity —— 它由 ingest-funds 登记。
+
+    这里【没有】也不得有任何兜底分支：解析不到就报错退出。此前的实现先用
+    `display_name LIKE %symbol%` 匹配（display_name 是中文简称，永远不含数字
+    代码，是死代码），再兜底 `ORDER BY id LIMIT 1` 返回全表最小 id 的份额类别
+    并报告成功 —— CLI 会从 AKShare 抓到【这只】基金的真实净值，写进【别人】的
+    PIT 历史，无错误、无告警、退出码 0。静默取错基金比报错退出坏得多。
+    """
     # 延迟 import：见文件顶部说明。
-    from fip.services.data_service.models.fund import FundShareClass
+    from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
+    from fip.services.data_service.models.fund import (
+        FundShareClass,
+        ProviderFundIdentity,
+    )
+    from fip.services.data_service.models.governance import DataProvider
 
     share_class = session.execute(
-        select(FundShareClass).where(FundShareClass.display_name.like(f"%{symbol}%"))
+        select(FundShareClass)
+        .join(
+            ProviderFundIdentity,
+            ProviderFundIdentity.share_class_id == FundShareClass.id,
+        )
+        .join(DataProvider, DataProvider.id == ProviderFundIdentity.provider_id)
+        .where(
+            DataProvider.provider_code == AkShareSourceAdapter.provider_code,
+            ProviderFundIdentity.provider_fund_id == symbol,
+            # 只认仍然开放的映射区间；已被关闭的历史映射不参与当下的解析。
+            ProviderFundIdentity.valid_to.is_(None),
+        )
+        # 同一段开放区间正常只有一条；显式定序保证结果确定，不靠数据库返回顺序。
+        .order_by(ProviderFundIdentity.valid_from.desc())
+        .limit(1)
     ).scalars().first()
     if share_class is None:
-        share_class = session.execute(
-            select(FundShareClass).order_by(FundShareClass.id).limit(1)
-        ).scalar_one_or_none()
-    if share_class is None:
-        raise SystemExit("未找到任何份额类别，请先执行 ingest-funds")
+        raise SystemExit(
+            f"symbol {symbol} 尚未登记到 {AkShareSourceAdapter.provider_code} 的"
+            "基金标识映射（fund.provider_fund_identity）。请先执行 "
+            "`fip ingest-funds` 灌入基金列表；若灌入后仍解析不到，说明该代码不在"
+            "上游基金列表中，请核对代码，不要绕过本检查。"
+        )
     return share_class
 
 

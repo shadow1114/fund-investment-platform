@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from fip.platform.source.availability import declared_lag_availability
+from fip.platform.source.availability import declared_lag_availability, resolve_availability
 from fip.platform.source.port import SourceAdapter, SourceRecord
 from fip.services.data_service.adapters.akshare.parse import (
     ParsedDistribution,
@@ -17,7 +17,11 @@ from fip.services.data_service.adapters.akshare.parse import (
     parse_split_frame,
 )
 from fip.services.data_service.grouping import split_share_class_name
-from fip.services.data_service.models.fund import Fund, FundShareClass
+from fip.services.data_service.models.fund import (
+    Fund,
+    FundShareClass,
+    ProviderFundIdentity,
+)
 from fip.services.data_service.models.governance import DataProvider, DataProviderDataset
 from fip.services.data_service.models.market import FundDistribution, FundNav
 from fip.services.data_service.models.raw import CanonicalRaw, RawPayload
@@ -119,6 +123,69 @@ class IngestService:
             "ingested_at": ingested_at,
         }
 
+    def _ensure_provider_identity(
+        self,
+        provider: DataProvider,
+        provider_fund_id: str,
+        share_class_id: int,
+        ingested_at: dt.datetime,
+    ) -> None:
+        """登记 (provider, provider_fund_id) → share_class 的映射，幂等。
+
+        这张映射是 provider 代码与平台份额类别之间【唯一】的桥。没有它，
+        任何「按 provider 代码找份额类别」的调用方都只能靠猜，而猜错的
+        后果是把一只基金的净值静默写进另一只基金的 PIT 历史 —— 不报错、
+        不告警（这正是 cli._resolve 此前的行为）。
+
+        provider_fund_id 【不得】做成 share class 的列（03-erd §5.3）：那会
+        锁死单 provider，且映射变化会污染主数据。因此它登记在这张区间型表上。
+
+        三时点按 C-12 如实填写：AKShare 既给不出 provider 推送时刻也给不出
+        公告时刻，两列留 NULL，available_at 只能取落库时刻，质量恒为
+        INFERRED。valid_from 取落库当日 —— 我们【就是】在这一刻才知道这条
+        映射，不去伪造一个更早的生效日（那会让区间表宣称平台在看到映射前
+        它就已生效）。
+        """
+        existing = self._session.execute(
+            select(ProviderFundIdentity)
+            .where(
+                ProviderFundIdentity.provider_id == provider.id,
+                ProviderFundIdentity.provider_fund_id == provider_fund_id,
+                ProviderFundIdentity.valid_to.is_(None),
+            )
+            .order_by(ProviderFundIdentity.valid_from.desc())
+            .limit(1)
+        ).scalars().first()
+        if existing is not None:
+            if existing.share_class_id != share_class_id:
+                # Provider 把同一个代码重新指派给了另一个份额类别（§6.2.1）。
+                # 这需要「关闭旧区间、另开新区间」，且必须由人确认哪一段历史
+                # 归属谁 —— 自动改写会让既有 PIT 历史的归属静默改变。
+                # Plan-1 不处理它，但【绝不】静默沿用旧映射：那等价于继续把
+                # 新基金的数据写进旧基金。
+                raise ValueError(
+                    f"provider {provider.provider_code} 的代码 {provider_fund_id} "
+                    f"已登记到份额类别 {existing.share_class_id}，本次却解析到 "
+                    f"{share_class_id}。这是一次 provider 映射重指派，需要人工"
+                    "关闭旧区间后再重跑（Plan-1 不自动处理）。"
+                )
+            return
+
+        available_at, quality = resolve_availability(None, None, ingested_at)
+        self._session.add(ProviderFundIdentity(
+            provider_id=provider.id,
+            provider_fund_id=provider_fund_id,
+            share_class_id=share_class_id,
+            valid_from=ingested_at.astimezone(dt.UTC).date(),
+            valid_to=None,
+            available_at=available_at,
+            availability_quality=quality.value,
+            published_at=None,           # AKShare 给不出，如实留空（C-12）
+            provider_available_at=None,  # 同上
+            ingested_at=ingested_at,
+        ))
+        self._session.flush()
+
     # ---------- 基金主数据 ----------
 
     def ingest_fund_list(self, limit: int | None = None) -> int:
@@ -128,6 +195,7 @@ class IngestService:
         if limit is not None:
             frame = frame.head(limit)
 
+        provider = self._provider()
         created = 0
         for _, row in frame.iterrows():
             code = str(row["基金代码"]).strip()
@@ -150,23 +218,28 @@ class IngestService:
                 self._session.add(fund)
                 self._session.flush()
 
-            exists = self._session.execute(
+            share_class = self._session.execute(
                 select(FundShareClass).where(
                     FundShareClass.fund_id == fund.id,
                     FundShareClass.share_class_code == grouping.share_class_code,
                 )
             ).scalar_one_or_none()
-            if exists is not None:
-                continue
+            if share_class is None:
+                share_class = FundShareClass(
+                    fund_id=fund.id,
+                    share_class_code=grouping.share_class_code,
+                    display_name=display_name,
+                )
+                self._session.add(share_class)
+                self._session.flush()
+                created += 1
 
-            self._session.add(FundShareClass(
-                fund_id=fund.id,
-                share_class_code=grouping.share_class_code,
-                display_name=display_name,
-            ))
-            self._session.flush()
-            created += 1
-            _ = code  # provider_fund_id 的映射登记在 ingest_nav 时按需建立
+            # 已存在的份额类别也要走这一步：映射本身可能是上一轮遗漏的，
+            # 「份额类别已存在」不蕴含「映射已存在」。_ensure_provider_identity
+            # 是幂等的。
+            self._ensure_provider_identity(
+                provider, code, share_class.id, record.ingested_at
+            )
         return created
 
     # ---------- 净值与事件 ----------
@@ -234,6 +307,25 @@ class IngestService:
 
         inserted = 0
         for day, merged_event in sorted(merged.items()):
+            # 与 ingest_nav 同一条规则：值没变就不产生新版本。重跑是预期的
+            # 日常增量用法，若无条件 _next_version + insert，每次重跑都会把
+            # 整部分红/拆分史重新插一遍，version（语义是「真实修订」）被无界
+            # 污染。两个值【都】相等才算未变，只比其中一个会漏掉另一个的修订。
+            latest = self._session.execute(
+                select(FundDistribution)
+                .where(
+                    FundDistribution.share_class_id == share_class_id,
+                    FundDistribution.effective_at == day,
+                )
+                .order_by(FundDistribution.version.desc())
+                .limit(1)
+            ).scalars().first()
+            if (
+                latest is not None
+                and latest.dividend_per_unit == merged_event.dividend
+                and latest.split_ratio == merged_event.split_ratio
+            ):
+                continue  # 值未变，不产生新版本
             self._session.add(FundDistribution(
                 share_class_id=share_class_id,
                 effective_at=day,
