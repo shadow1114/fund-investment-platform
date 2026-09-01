@@ -64,6 +64,27 @@ def test_unconfirmed_grouping_is_persisted_as_its_own_fund(db_session):
     assert sc.share_class_code == "DEFAULT"
 
 
+_VALID_FROM = dt.date(2020, 1, 1)
+_AVAILABLE_AT = dt.datetime(2020, 1, 1, 9, 0, tzinfo=dt.UTC)
+_INGESTED_AT = dt.datetime(2020, 1, 1, 10, 0, tzinfo=dt.UTC)
+
+
+def _identity_kwargs(**overrides):
+    """provider_fund_identity 是 IntervalMixin（anchor=valid_from）表，
+    available_at / availability_quality / ingested_at 均为 NOT NULL
+    （fix round 1，04-database-design §6.2）。"""
+    base = dict(
+        valid_from=_VALID_FROM,
+        available_at=_AVAILABLE_AT,
+        availability_quality="INFERRED",
+        published_at=None,
+        provider_available_at=None,
+        ingested_at=_INGESTED_AT,
+    )
+    base.update(overrides)
+    return base
+
+
 def test_one_share_class_can_have_multiple_provider_identities(db_session):
     sc = _make_fund(db_session, "华夏成长混合", "P-0004")
     p1 = DataProvider(provider_code="AKSHARE", display_name="AKShare")
@@ -72,10 +93,29 @@ def test_one_share_class_can_have_multiple_provider_identities(db_session):
     db_session.flush()
     db_session.add_all([
         ProviderFundIdentity(provider_id=p1.id, provider_fund_id="000001",
-                             share_class_id=sc.id, valid_from=dt.date(2020, 1, 1)),
+                             share_class_id=sc.id, **_identity_kwargs()),
         ProviderFundIdentity(provider_id=p2.id, provider_fund_id="CN000001",
-                             share_class_id=sc.id, valid_from=dt.date(2020, 1, 1)),
+                             share_class_id=sc.id, **_identity_kwargs()),
     ])
     db_session.flush()
     assert db_session.query(ProviderFundIdentity).filter_by(
         share_class_id=sc.id).count() == 2
+
+
+def test_provider_fund_identity_available_at_cannot_precede_valid_from(db_session):
+    """fix round 1 的回归测试：ck_provider_fund_identity_time_order 必须以
+    anchor="valid_from" 生效 —— available_at 早于 valid_from 意味着平台在
+    这条 Provider 映射生效前就“看到”了它，是前视偏差，必须被拒绝。"""
+    sc = _make_fund(db_session, "华夏成长混合", "P-0005")
+    provider = DataProvider(provider_code="AKSHARE2", display_name="AKShare")
+    db_session.add(provider)
+    db_session.flush()
+    early = _VALID_FROM - dt.timedelta(days=1)
+    db_session.add(ProviderFundIdentity(
+        provider_id=provider.id, provider_fund_id="000002", share_class_id=sc.id,
+        **_identity_kwargs(available_at=dt.datetime(
+            early.year, early.month, early.day, 9, 0, tzinfo=dt.UTC
+        )),
+    ))
+    with pytest.raises(IntegrityError):
+        db_session.flush()

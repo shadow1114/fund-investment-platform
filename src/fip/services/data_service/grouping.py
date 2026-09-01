@@ -40,6 +40,11 @@ def split_share_class_name(display_name: str) -> GroupingResult:
         stem = match.group("stem").strip()
         if stem:
             return GroupingResult(stem, match.group("cls"), GroupingStatus.CONFIRMED)
+        # 防御性分支：理论上不可达。_SUFFIX 的 stem 组从 name 的下标 0 开始，
+        # 而 name 已经过上面的 display_name.strip()，下标 0 处必是非空白字符，
+        # 因此 stem 至少含一个非空白字符，.strip() 后不可能为空。保留该分支
+        # 是为了防止未来有人修改上面的正则或去掉顶层 strip() 后，在没有
+        # 单元测试兜底的情况下把空 stem 错误地当作 CONFIRMED 产品名返回。
         return GroupingResult(name, DEFAULT_SHARE_CLASS, GroupingStatus.UNCONFIRMED)
 
     if name[-1].isupper() and name[-1].isascii():

@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     String,
     UniqueConstraint,
     func,
@@ -12,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
+from fip.platform.db.mixins import IntervalMixin, interval_check, temporal_check_constraints
 
 
 class Fund(Base):
@@ -61,20 +63,28 @@ class FundShareClass(Base):
     )
 
 
-class ProviderFundIdentity(Base):
-    """Provider 的基金 ID 映射。
+class ProviderFundIdentity(Base, IntervalMixin):
+    """Provider 的基金 ID 映射 —— 【区间型表】（04-database-design §6.2）。
 
     【不得】把 provider_fund_id 做成 Share Class 的列 —— 那会限制为单
     Provider，且映射变化会污染主数据（03-erd §5.3）。映射本身可能变化，
-    因此带 valid_from / valid_to。
+    因此带 valid_from / valid_to；而 Provider 可能重新分配同一个
+    (provider_id, provider_fund_id) 指向不同的 Share Class（§6.2.1），
+    所以本表必须携带 IntervalMixin 的完整时序列 —— available_at 是判定
+    「某个时点我们知道的映射是哪一条」的唯一依据，缺失它会让 PIT 查询
+    静默退化为读今天的映射（前视偏差）。anchor 必须显式传 "valid_from"，
+    因为本表没有 effective_at。
     """
 
     __tablename__ = "provider_fund_identity"
     __table_args__ = (
         UniqueConstraint(
             "provider_id", "provider_fund_id", "valid_from",
-            name="uq_provider_identity",
+            name="uq_pfi_provider_key",
         ),
+        *temporal_check_constraints("provider_fund_identity", anchor="valid_from"),
+        interval_check("provider_fund_identity"),
+        Index("idx_pfi_share_class", "share_class_id"),
         {"schema": "fund"},
     )
 
@@ -85,9 +95,4 @@ class ProviderFundIdentity(Base):
     provider_fund_id: Mapped[str] = mapped_column(String(64), nullable=False)
     share_class_id: Mapped[int] = mapped_column(
         ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
-    )
-    valid_from: Mapped[dt.date] = mapped_column(Date, nullable=False)
-    valid_to: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
