@@ -298,7 +298,11 @@ def test_series_uses_one_event_set_across_all_points(db_session, share_class):
     """
     _late_event_scenario(db_session, share_class)
 
-    points = _series(db_session, share_class, dt.date(2020, 6, 1),
+    # decision_at 刻意取 2020-03-01 —— v2 的 available_at 正是
+    # 2020-03-01T00:00Z，这是全文件唯一一处 available_at 与 decision_at
+    # 同日的边界探针，试的是可见性判定 `available_at <= decision_at` 的
+    # 【等号侧】。改成任何更晚的日期，断言值不变但这条边界就丢了。
+    points = _series(db_session, share_class, dt.date(2020, 3, 1),
                      dt.date(2020, 1, 1), dt.date(2020, 12, 31))
     assert [(p.effective_at, p.version) for p in points] == [
         (dt.date(2020, 1, 1), 1),
@@ -373,7 +377,7 @@ def test_unavailable_propagates_out_of_the_pit_query(db_session, share_class):
     ]
 
 
-def test_unavailable_checkpoint_does_not_void_whole_share_class(db_session, share_class):
+def test_unavailable_checkpoint_does_not_void_the_whole_backfill(db_session, share_class):
     """回填的逐 checkpoint 容错：单个 checkpoint 算不出来只影响它首发的那些行。
 
     2020-01-06 这个 checkpoint 上事件日缺净值，compute_adjusted_nav 抛
@@ -397,3 +401,72 @@ def test_unavailable_checkpoint_does_not_void_whole_share_class(db_session, shar
         (dt.date(2020, 1, 5), 1): Decimal("1.1"),
         (dt.date(2020, 1, 6), 1): Decimal("1.32"),
     }
+
+
+def test_gap_after_date_to_does_not_void_a_computable_window(db_session, share_class):
+    """请求区间【之后】的数据缺口，不得废掉区间内完全可算的历史。
+
+    链路是前向累乘：adj_t 只依赖 effective_at ≤ t 的事件，所以 date_to
+    之后的行对区间内的值毫无贡献。但只要它们进了 compute_adjusted_nav，
+    就会把抛 AdjustedNavUnavailable 的面一并扩大 —— 一个落在区间之后
+    17 个月的缺口（有分红事件、当天却没有净值观测）会让整个 2020 年 1 月
+    的查询失败，而那段历史本身是完好的。
+
+    这就是为什么两条查询【只设上界、不设下界】：下界会截断累乘链路的起点
+    （绝对水平出错），上界只是排除掉本就无贡献的行。
+    """
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.0")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "1.1")
+    # 远在请求区间之后的事件，且当天【没有】净值行 —— 这正是
+    # compute_adjusted_nav 会拒绝计算的形态。
+    _add_dist(db_session, share_class, dt.date(2021, 6, 1), "0.1",
+              available_at=_utc(2021, 6, 2))
+    db_session.flush()
+
+    points = _series(db_session, share_class, dt.date(2026, 8, 31),
+                     dt.date(2020, 1, 1), dt.date(2020, 1, 31))
+    assert [p.adjusted_nav for p in points] == [Decimal("1.0"), Decimal("1.1")]
+
+
+def test_materialized_column_matches_recomputed_across_a_multi_event_chain(
+    db_session, share_class
+):
+    """加厚版一致性对照：物化列的逐行盖章必须用到事件集的【不同前缀】。
+
+    上一条对照测试（两行净值、一次分红）区分力有限：其中一点的列值是在
+    某个 checkpoint 上用与读路径【完全相同】的输入、调【同一个】
+    compute_adjusted_nav 算出来的，那一半接近同义反复 —— 它能抓写入侧的
+    key 映射 bug 和读路径的切片/装配 bug，但抓不到算法 bug。
+
+    这里把链路拉长到「分红 + 拆分、跨四期」，使四行的首个 checkpoint 分别
+    落在事件集的四个不同前缀上：
+      · (01-02) 盖章于 01-03，事件集为【空】
+      · (01-03) 盖章于 01-04，事件集为 {01-03 分红}
+      · (01-06) 盖章于 01-07，事件集为 {01-03 分红, 01-06 拆分}
+      · (01-07) 盖章于 01-08，同上
+    而读路径在 2026 用【完整】事件集一次算完。两者仍须逐点相等 —— 这不是
+    巧合而是前向性的结构性推论：adj_t 只依赖 effective_at ≤ t 的事件，
+    对齐场景下这些事件在 t 行自己的首个 checkpoint 上恰好全部可见。
+    """
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.0")
+    _add_dist(db_session, share_class, dt.date(2020, 1, 3), "0.1",
+              available_at=_utc(2020, 1, 4))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "1.0")
+    _add_dist(db_session, share_class, dt.date(2020, 1, 6), "0",
+              available_at=_utc(2020, 1, 7), split="2")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 6), "0.55")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 7), "0.6")
+    db_session.flush()
+
+    updated = backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
+    assert updated == 4
+
+    points = _series(db_session, share_class, dt.date(2026, 8, 31),
+                     dt.date(2020, 1, 1), dt.date(2020, 12, 31))
+    assert [p.adjusted_nav for p in points] == [
+        Decimal("1.0"), Decimal("1.1"), Decimal("1.21"), Decimal("1.32"),
+    ]
+
+    stored = _column(db_session, share_class)
+    for point in points:
+        assert point.adjusted_nav == stored[(point.effective_at, point.version)]

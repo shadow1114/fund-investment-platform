@@ -10,15 +10,19 @@ from fip.services.data_service.normalization.adjusted_nav import (
     compute_adjusted_nav,
 )
 
-# 刻意【不】限定 effective_at 区间：复权是一条累乘链路，起点被截断会让
-# 整段序列的绝对水平错掉（截断点之前的全部分红/拆分都会凭空消失）。
-# 因此这里取该份额类别【自成立以来】的全部当前版本净值，算完之后再切片。
+# 【只设上界，不设下界】——这个不对称是刻意的：
+# · 无下界：复权是一条前向累乘链路，起点被截断会让整段序列的绝对水平错掉
+#   （截断点之前的全部分红/拆分都会凭空消失）。因此必须从成立日算起。
+# · 有上界：date_to 之后的行对区间内的值【毫无贡献】（adj_t 只依赖
+#   effective_at ≤ t 的事件），却会扩大抛 AdjustedNavUnavailable 的面 ——
+#   一个落在请求区间之后的数据缺口会把一个完全可算的历史窗口整段废掉。
 _NAV_SQL = text("""
     SELECT DISTINCT ON (effective_at)
            effective_at, unit_nav, version, availability_quality
     FROM market.fund_nav
     WHERE share_class_id = :share_class_id
       AND available_at <= :visible_until
+      AND effective_at <= :date_to
     ORDER BY effective_at, version DESC
 """)
 
@@ -30,6 +34,7 @@ _EVENT_SQL = text("""
     FROM market.fund_distribution
     WHERE share_class_id = :share_class_id
       AND available_at <= :visible_until
+      AND effective_at <= :date_to
     ORDER BY effective_at, version DESC
 """)
 
@@ -73,7 +78,11 @@ class SqlNavPitRepository:
         visible_until = dt.datetime.combine(
             self._decision_at, dt.time.max, tzinfo=dt.UTC
         )
-        params = {"share_class_id": share_class_id, "visible_until": visible_until}
+        params = {
+            "share_class_id": share_class_id,
+            "visible_until": visible_until,
+            "date_to": date_to,
+        }
         nav_rows = self._session.execute(_NAV_SQL, params).mappings().all()
         if not nav_rows:
             return []
