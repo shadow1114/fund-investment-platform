@@ -292,6 +292,10 @@ def _scan_module_level_body(body: list[ast.stmt]) -> list[str]:
     它们完全失明 —— 一条对违规失明的适应度测试比没有测试更糟，因为它给出
     虚假的安全感。
 
+    for / while / match 同理：模块级的循环体、else 分支与每个 case 体在 import
+    期都【会】执行（`for _m in (...): import _m` 这类动态注册写法并不罕见），
+    对它们失明与对 if / try 失明是同一个问题。
+
     但【不得】进入 FunctionDef / AsyncFunctionDef / ClassDef：函数体内的延迟
     import 只在调用时执行，是本项目明确鼓励的模式（platform 层就靠它调用
     services 层），进入函数体会把合法写法全部误报。
@@ -312,6 +316,14 @@ def _scan_module_level_body(body: list[ast.stmt]) -> list[str]:
             bad.extend(_scan_module_level_body(node.finalbody))
         elif isinstance(node, ast.With | ast.AsyncWith):
             bad.extend(_scan_module_level_body(node.body))
+        elif isinstance(node, ast.For | ast.AsyncFor | ast.While):
+            # for / while 的 else 分支同样在 import 期执行（循环正常结束时），
+            # 因此 body 与 orelse 都要扫。
+            bad.extend(_scan_module_level_body(node.body))
+            bad.extend(_scan_module_level_body(node.orelse))
+        elif isinstance(node, ast.Match):
+            for case in node.cases:
+                bad.extend(_scan_module_level_body(case.body))
     return bad
 
 
@@ -346,10 +358,12 @@ def test_platform_layer_does_not_import_services_at_module_level():
 
 
 # --- 扫描器自身的单元测试 -------------------------------------------------
-# 扫描器只遍历 tree.body 且只认 Import / ImportFrom，不进入 ast.If / ast.Try
-# 体内，因此任何藏在模块级 if / try 里的真实违规都会被静默放过 —— 一条对
+# 扫描器若只遍历 tree.body 且只认 Import / ImportFrom，任何藏在模块级
+# if / try / with / for / while / match 里的真实违规都会被静默放过 —— 一条对
 # 违规失明的适应度测试比没有测试更糟，因为它给出的是虚假的安全感。
-# 下面这组用例直接对扫描器断言，不依赖仓库当前状态。
+# 下面这组用例直接对扫描器断言，不依赖仓库当前状态；每加一种模块级复合语句
+# 形态，都必须在这里补一条对应的用例（fix round 2 item 5 补的正是
+# for / while / match 这三种）。
 
 VIOLATION_HIDDEN_IN_MODULE_LEVEL_IF = """
 import os
@@ -524,3 +538,56 @@ def test_peer_group_guard_is_visible_not_silent():
         "Peer Group 决策边界一起落地；在此之前 C-4 检查是 vacuous 的（可见占位，"
         "非静默通过）。"
     )
+
+
+VIOLATION_HIDDEN_IN_MODULE_LEVEL_FOR = """
+for _name in ("a", "b"):
+    from fip.services.data_service.ingest import IngestService
+"""
+
+VIOLATION_HIDDEN_IN_MODULE_LEVEL_WHILE = """
+_ready = False
+while not _ready:
+    from fip.services.data_service.ingest import IngestService
+    _ready = True
+else:
+    from fip.services.data_service import grouping
+"""
+
+VIOLATION_HIDDEN_IN_MODULE_LEVEL_MATCH = """
+import os
+
+match os.environ.get("FIP_MODE"):
+    case "eager":
+        from fip.services.data_service.ingest import IngestService
+    case _:
+        from fip.services.data_service import grouping
+"""
+
+
+def test_scanner_catches_violation_hidden_in_module_level_for():
+    """模块级 for 体在 import 期【会】执行，藏在里面的 import 是真实依赖。"""
+    assert module_level_service_imports(VIOLATION_HIDDEN_IN_MODULE_LEVEL_FOR) == [
+        "fip.services.data_service.ingest"
+    ]
+
+
+def test_scanner_catches_violation_hidden_in_module_level_while():
+    """while 的 body 与 orelse 都要扫 —— for/while 的 else 分支同样在 import 期执行。
+
+    第二项是 "fip.services.data_service"（而非 ...grouping）：
+    `from fip.services.data_service import grouping` 这条语句本身依赖的是
+    package，_service_import_names 记录的正是 node.module。
+    """
+    assert module_level_service_imports(VIOLATION_HIDDEN_IN_MODULE_LEVEL_WHILE) == [
+        "fip.services.data_service.ingest",
+        "fip.services.data_service",
+    ]
+
+
+def test_scanner_catches_violation_hidden_in_module_level_match():
+    """match 的每个 case 体同样在 import 期执行。"""
+    assert module_level_service_imports(VIOLATION_HIDDEN_IN_MODULE_LEVEL_MATCH) == [
+        "fip.services.data_service.ingest",
+        "fip.services.data_service",
+    ]

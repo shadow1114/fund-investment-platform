@@ -50,6 +50,24 @@ def _resolve(session: Session, symbol: str) -> "FundShareClass":
     代码，是死代码），再兜底 `ORDER BY id LIMIT 1` 返回全表最小 id 的份额类别
     并报告成功 —— CLI 会从 AKShare 抓到【这只】基金的真实净值，写进【别人】的
     PIT 历史，无错误、无告警、退出码 0。静默取错基金比报错退出坏得多。
+
+    ── 已知限制：本函数不做 PIT 标识解析 ──
+
+    它只读 valid_to IS NULL 的开放区间，不接受 decision_at、也不按
+    available_at 过滤。这【不是】「暂不支持」或「留待后续实现」：
+
+    Plan-1 的标识映射数据【本身没有历史】。AKShare 的基金列表接口只返回
+    「今天」的代码与简称，拿不到任何一条「这个代码在 2023-05-01 指向谁」的
+    记录；provider_fund_identity 里每一行的 valid_from 都是我们【落库当日】
+    （见 IngestService._ensure_provider_identity —— 按 C-12 不得伪造一个更早
+    的生效日）。因此即使这里写上 `available_at <= decision_at` 的过滤，灌数日
+    之前的任何 decision_at 都只会解析出【零条】映射，而不是一条更正确的映射。
+
+    真实限制因此是：**Plan-1 的标识数据无历史，灌数日之前的回测无法做 PIT
+    标识解析**。放宽区间表的 clause 4（fix round 2 item 1）不改变这一点 ——
+    它让数据库能【存下】提前公告的区间，但我们手上根本没有这样的历史数据可存。
+    要解除这条限制，需要的是一个能提供标识变更历史的数据源，不是这里多写
+    一个 WHERE。
     """
     # 延迟 import：见文件顶部说明。
     from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
@@ -88,9 +106,23 @@ def _resolve(session: Session, symbol: str) -> "FundShareClass":
 
 def cmd_ingest_funds(args: argparse.Namespace) -> None:
     with _session() as session:
-        created = _service(session).ingest_fund_list(limit=args.limit)
+        result = _service(session).ingest_fund_list(limit=args.limit)
+        # 冲突不影响本批其余部分：已成功处理的照常提交，包括本次抓到的
+        # raw payload。此前 _ensure_provider_identity 直接抛 ValueError 穿出
+        # 这里，整批 ingest-funds 全废 —— 一条映射冲突不该毁掉一整批已抓数据。
         session.commit()
-    print(f"新建份额类别 {created} 个")
+    print(f"新建份额类别 {result.created} 个")
+    if result.reassignments:
+        # 响亮失败：逐条列出冲突并以非零退出码结束。绝不静默沿用旧映射
+        # （那等价于继续把新基金的数据写进旧基金），也绝不自动改写
+        # （那会让既有 PIT 历史的归属静默改变）。
+        detail = "\n".join(f"  · {c.describe()}" for c in result.reassignments)
+        raise SystemExit(
+            f"检测到 {len(result.reassignments)} 处 provider 映射重指派，"
+            f"这些映射【未被改动】，其余基金已正常登记并提交：\n{detail}\n"
+            "请人工确认每一条历史的归属、关闭旧区间后再重跑"
+            "（Plan-1 不自动处理重指派）。"
+        )
 
 
 def cmd_ingest_nav(args: argparse.Namespace) -> None:

@@ -23,12 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-from fip.platform.db.mixins import (
-    INTERVAL_SQL,
-    QUALITY_SOURCE_SQL,
-    TIME_ORDER_SQL,
-    time_order_sql,
-)
+from fip.platform.db.mixins import INTERVAL_SQL, QUALITY_SOURCE_SQL
 
 revision = "0013"
 down_revision = "0012"
@@ -37,6 +32,26 @@ depends_on = None
 
 _SCHEMA = "fund"
 _TABLE = "investment_eligibility"
+
+# 【已冻结的字面量】迁移是不可编辑的历史，它产出的 DDL 必须与当初执行时
+# 逐字相同。此前这里 import 的是 mixins.py 里的共享常量/生成器，于是
+# fix round 2 修改 mixins 时，这支【旧】迁移在一次全新的 upgrade 里会产出
+# 【新】定义 —— 迁移历史被追溯性地改写，downgrade 也再无法还原当初的形状。
+# 因此把当时的 SQL 原样固化在这里；今后的语义变更一律由新迁移承担。
+_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= effective_at) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= effective_at)"
+)
+_INTERVAL_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= valid_from) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= valid_from)"
+)
 
 _QUALITY_ENUM = postgresql.ENUM(
     "EXACT", "DERIVED", "INFERRED",
@@ -72,7 +87,7 @@ def upgrade() -> None:
         sa.Column("eligibility_status", sa.String(length=32), nullable=False),
         *_time_source_columns(),
         sa.CheckConstraint(QUALITY_SOURCE_SQL, name=f"ck_{_TABLE}_quality_source"),
-        sa.CheckConstraint(TIME_ORDER_SQL, name=f"ck_{_TABLE}_time_order"),
+        sa.CheckConstraint(_TIME_ORDER_SQL, name=f"ck_{_TABLE}_time_order"),
         sa.ForeignKeyConstraint(
             ["share_class_id"], ["fund.fund_share_class.id"], ondelete="RESTRICT"
         ),
@@ -104,7 +119,7 @@ def downgrade() -> None:
         *_time_source_columns(),
         sa.CheckConstraint(QUALITY_SOURCE_SQL, name=f"ck_{_TABLE}_quality_source"),
         sa.CheckConstraint(
-            time_order_sql("valid_from"), name=f"ck_{_TABLE}_time_order"
+            _INTERVAL_TIME_ORDER_SQL, name=f"ck_{_TABLE}_time_order"
         ),
         sa.CheckConstraint(INTERVAL_SQL, name=f"ck_{_TABLE}_interval"),
         sa.ForeignKeyConstraint(

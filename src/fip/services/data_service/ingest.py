@@ -28,6 +28,45 @@ from fip.services.data_service.models.raw import CanonicalRaw, RawPayload
 from fip.services.data_service.normalization.backfill import backfill_adjusted_nav
 
 
+@dataclass(frozen=True)
+class IdentityReassignment:
+    """一次 provider 映射重指派冲突的如实记录。
+
+    「重指派」指同一个 (provider, provider_fund_id) 此前登记到份额类别 X、
+    本次却解析到 Y。这需要「关闭旧区间、另开新区间」，且必须由人确认哪一段
+    历史归属谁 —— 自动改写会让既有 PIT 历史的归属静默改变。Plan-1 不处理它。
+    """
+
+    provider_code: str
+    provider_fund_id: str
+    existing_share_class_id: int
+    incoming_share_class_id: int
+
+    def describe(self) -> str:
+        return (
+            f"provider={self.provider_code} 代码={self.provider_fund_id}："
+            f"原指向份额类别 {self.existing_share_class_id}，"
+            f"本次解析到 {self.incoming_share_class_id}"
+        )
+
+
+@dataclass(frozen=True)
+class FundListIngestResult:
+    """ingest_fund_list 的结果：新建了多少份额类别，以及本批全部的重指派冲突。
+
+    冲突【收集】而不是抛出：原先 _ensure_provider_identity 直接抛 ValueError，
+    一路穿出本方法，而 cmd_ingest_funds 不捕获 —— 整批 ingest-funds 全废，
+    包括本次已抓到的 raw payload。触发条件并不罕见：上游基金简称改名导致
+    split_share_class_name 归到另一个 product_name 就会触发。
+
+    方向不变（响亮失败优于静默沿用旧映射），但失败面收窄到「那一条映射」：
+    其余基金照常登记，冲突跑完再由调用方统一报告（CLI 以非零退出码结束）。
+    """
+
+    created: int
+    reassignments: tuple[IdentityReassignment, ...]
+
+
 @dataclass
 class _MergedEvent:
     """同一天的分红与拆分合并态：分红相加、拆分比例相乘（见模块末尾说明）。"""
@@ -129,7 +168,7 @@ class IngestService:
         provider_fund_id: str,
         share_class_id: int,
         ingested_at: dt.datetime,
-    ) -> None:
+    ) -> IdentityReassignment | None:
         """登记 (provider, provider_fund_id) → share_class 的映射，幂等。
 
         这张映射是 provider 代码与平台份额类别之间【唯一】的桥。没有它，
@@ -145,6 +184,11 @@ class IngestService:
         INFERRED。valid_from 取落库当日 —— 我们【就是】在这一刻才知道这条
         映射，不去伪造一个更早的生效日（那会让区间表宣称平台在看到映射前
         它就已生效）。
+
+        遇到重指派时返回一条 IdentityReassignment 而【不写入】任何东西，也
+        【不抛异常】：调用方负责把整批冲突收集齐、跑完再统一报告。抛异常会
+        让一条映射冲突废掉整批已抓数据（见 FundListIngestResult 的说明）。
+        返回 None 表示这一条映射已就位（新登记或本就存在）。
         """
         existing = self._session.execute(
             select(ProviderFundIdentity)
@@ -159,17 +203,16 @@ class IngestService:
         if existing is not None:
             if existing.share_class_id != share_class_id:
                 # Provider 把同一个代码重新指派给了另一个份额类别（§6.2.1）。
-                # 这需要「关闭旧区间、另开新区间」，且必须由人确认哪一段历史
-                # 归属谁 —— 自动改写会让既有 PIT 历史的归属静默改变。
-                # Plan-1 不处理它，但【绝不】静默沿用旧映射：那等价于继续把
-                # 新基金的数据写进旧基金。
-                raise ValueError(
-                    f"provider {provider.provider_code} 的代码 {provider_fund_id} "
-                    f"已登记到份额类别 {existing.share_class_id}，本次却解析到 "
-                    f"{share_class_id}。这是一次 provider 映射重指派，需要人工"
-                    "关闭旧区间后再重跑（Plan-1 不自动处理）。"
+                # 【绝不】静默沿用旧映射，也【绝不】自动改写：前者等价于继续
+                # 把新基金的数据写进旧基金，后者会让既有 PIT 历史的归属静默
+                # 改变。原样保留旧映射并如实上报这一条冲突。
+                return IdentityReassignment(
+                    provider_code=provider.provider_code,
+                    provider_fund_id=provider_fund_id,
+                    existing_share_class_id=existing.share_class_id,
+                    incoming_share_class_id=share_class_id,
                 )
-            return
+            return None
 
         available_at, quality = resolve_availability(None, None, ingested_at)
         self._session.add(ProviderFundIdentity(
@@ -185,10 +228,17 @@ class IngestService:
             ingested_at=ingested_at,
         ))
         self._session.flush()
+        return None
 
     # ---------- 基金主数据 ----------
 
-    def ingest_fund_list(self, limit: int | None = None) -> int:
+    def ingest_fund_list(self, limit: int | None = None) -> FundListIngestResult:
+        """灌入基金列表并登记 provider 标识映射。
+
+        重指派冲突【不中断本批】：逐条收集，跑完连同 created 一起返回，由
+        调用方决定如何报告（CLI 以非零退出码逐条列出）。已成功处理的部分
+        照常留在 session 里等待提交。
+        """
         record = self._adapter.fetch("fund_list")
         self._store_raw(record)
         frame = pd.read_parquet(io.BytesIO(record.payload))
@@ -197,6 +247,7 @@ class IngestService:
 
         provider = self._provider()
         created = 0
+        reassignments: list[IdentityReassignment] = []
         for _, row in frame.iterrows():
             code = str(row["基金代码"]).strip()
             display_name = str(row["基金简称"]).strip()
@@ -237,10 +288,12 @@ class IngestService:
             # 已存在的份额类别也要走这一步：映射本身可能是上一轮遗漏的，
             # 「份额类别已存在」不蕴含「映射已存在」。_ensure_provider_identity
             # 是幂等的。
-            self._ensure_provider_identity(
+            conflict = self._ensure_provider_identity(
                 provider, code, share_class.id, record.ingested_at
             )
-        return created
+            if conflict is not None:
+                reassignments.append(conflict)
+        return FundListIngestResult(created=created, reassignments=tuple(reassignments))
 
     # ---------- 净值与事件 ----------
 

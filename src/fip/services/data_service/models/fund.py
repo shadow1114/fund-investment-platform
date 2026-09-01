@@ -20,6 +20,7 @@ from fip.platform.db.mixins import (
     IntervalMixin,
     VersionedMixin,
     interval_check,
+    interval_temporal_check_constraints,
     temporal_check_constraints,
 )
 from fip.platform.db.types import RatioNumeric
@@ -81,8 +82,18 @@ class ProviderFundIdentity(Base, IntervalMixin):
     (provider_id, provider_fund_id) 指向不同的 Share Class（§6.2.1），
     所以本表必须携带 IntervalMixin 的完整时序列 —— available_at 是判定
     「某个时点我们知道的映射是哪一条」的唯一依据，缺失它会让 PIT 查询
-    静默退化为读今天的映射（前视偏差）。anchor 必须显式传 "valid_from"，
-    因为本表没有 effective_at。
+    静默退化为读今天的映射（前视偏差）。
+
+    时序约束用 interval_temporal_check_constraints（不含 clause 1 / clause 4）
+    而非版本化表的 temporal_check_constraints：Provider 重指派几乎总是提前
+    公告，available_at / published_at 早于 valid_from 是常态，不是违规。
+
+    uq_pfi_open_interval 是「同一 (provider, provider_fund_id) 至多一条开放
+    区间」的【数据库不变式】。唯一键 uq_pfi_provider_key 带 valid_from，
+    允许两条 valid_to IS NULL、valid_from 不同的行共存，此时 cli._resolve 的
+    `ORDER BY valid_from DESC LIMIT 1` 会静默挑一条 —— 挑错就是把一只基金的
+    净值写进另一只基金的 PIT 历史。应用层的 read-then-write 守卫不是数据库
+    不变式：它拦不住并发，也拦不住任何绕开 IngestService 的写入路径。
     """
 
     __tablename__ = "provider_fund_identity"
@@ -91,9 +102,19 @@ class ProviderFundIdentity(Base, IntervalMixin):
             "provider_id", "provider_fund_id", "valid_from",
             name="uq_pfi_provider_key",
         ),
-        *temporal_check_constraints("provider_fund_identity", anchor="valid_from"),
+        *interval_temporal_check_constraints("provider_fund_identity"),
         interval_check("provider_fund_identity"),
         Index("idx_pfi_share_class", "share_class_id"),
+        # 部分唯一索引，须与迁移 0014 里的 CREATE UNIQUE INDEX 逐字一致
+        # （含 WHERE 子句），否则 autogenerate 会把它当成待删除对象 ——
+        # 本仓库已三次被「库里有约束而 ORM metadata 里没有」咬出误删迁移。
+        Index(
+            "uq_pfi_open_interval",
+            "provider_id",
+            "provider_fund_id",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
+        ),
         {"schema": "fund"},
     )
 
@@ -141,7 +162,7 @@ class FundManagerAssignment(Base, IntervalMixin):
 
     __tablename__ = "fund_manager_assignment"
     __table_args__ = (
-        *temporal_check_constraints("fund_manager_assignment", anchor="valid_from"),
+        *interval_temporal_check_constraints("fund_manager_assignment"),
         interval_check("fund_manager_assignment"),
         {"schema": "fund"},
     )
@@ -160,7 +181,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 
     __tablename__ = "fund_classification_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_classification_history", anchor="valid_from"),
+        *interval_temporal_check_constraints("fund_classification_history"),
         interval_check("fund_classification_history"),
         {"schema": "fund"},
     )
@@ -176,7 +197,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 class FundStatusHistory(Base, IntervalMixin):
     __tablename__ = "fund_status_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_status_history", anchor="valid_from"),
+        *interval_temporal_check_constraints("fund_status_history"),
         interval_check("fund_status_history"),
         {"schema": "fund"},
     )
@@ -195,7 +216,7 @@ class FundFee(Base, IntervalMixin):
 
     __tablename__ = "fund_fee"
     __table_args__ = (
-        *temporal_check_constraints("fund_fee", anchor="valid_from"),
+        *interval_temporal_check_constraints("fund_fee"),
         interval_check("fund_fee"),
         {"schema": "fund"},
     )
@@ -216,8 +237,11 @@ class InvestmentEligibility(Base, VersionedMixin):
     什么」。version 记录的正是「这条结论出自哪一版派生规则」，因此本表
     与 fund_nav / fund_distribution / risk_free_rate 同属三时点 + version
     的事实型模式（03-erd §15.1 状态型清单未列出本实体），PK 为
-    (share_class_id, effective_at, version)。anchor 用默认值
-    "effective_at"，不得传 "valid_from" —— 本表没有 valid_from/valid_to。
+    (share_class_id, effective_at, version)。因此用版本化表的
+    temporal_check_constraints（四子句，anchor = effective_at），
+    【不得】改用 interval_temporal_check_constraints —— 本表没有
+    valid_from/valid_to，它的 effective_at 是「事实成立日」而非
+    「区间起点」，clause 1 / clause 4 在这里仍然是真正的前视偏差防线。
     """
 
     __tablename__ = "investment_eligibility"

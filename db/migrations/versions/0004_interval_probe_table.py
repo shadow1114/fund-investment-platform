@@ -21,13 +21,25 @@ from fip.platform.db.mixins import (
     INTERVAL_SQL,
     QUALITY_SOURCE_SQL,
     availability_quality_enum,
-    time_order_sql,
 )
 
 revision = "0004"
 down_revision = "0003"
 branch_labels = None
 depends_on = None
+
+# 【已冻结的字面量】迁移是不可编辑的历史，它产出的 DDL 必须与当初执行时
+# 逐字相同。此前这里 import 的是 mixins.py 里的共享常量/生成器，于是
+# fix round 2 修改 mixins 时，这支【旧】迁移在一次全新的 upgrade 里会产出
+# 【新】定义 —— 迁移历史被追溯性地改写，downgrade 也再无法还原当初的形状。
+# 因此把当时的 SQL 原样固化在这里；今后的语义变更一律由新迁移承担。
+_INTERVAL_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= valid_from) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= valid_from)"
+)
 
 
 def upgrade() -> None:
@@ -49,7 +61,7 @@ def upgrade() -> None:
                   nullable=False, server_default=sa.func.now()),
         sa.CheckConstraint(QUALITY_SOURCE_SQL, name="ck_interval_probe_quality_source"),
         sa.CheckConstraint(
-            time_order_sql("valid_from"), name="ck_interval_probe_time_order"
+            _INTERVAL_TIME_ORDER_SQL, name="ck_interval_probe_time_order"
         ),
         sa.CheckConstraint(INTERVAL_SQL, name="ck_interval_probe_interval"),
         schema="governance",

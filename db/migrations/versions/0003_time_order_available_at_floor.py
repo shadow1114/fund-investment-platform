@@ -18,12 +18,24 @@ Revises: 0002
 """
 from alembic import op
 
-from fip.platform.db.mixins import TIME_ORDER_SQL
-
 revision = "0003"
 down_revision = "0002"
 branch_labels = None
 depends_on = None
+
+# 【已冻结的字面量】迁移是不可编辑的历史，它产出的 DDL 必须与当初执行时
+# 逐字相同。此前这里 import 的是 mixins.py 里的共享常量/生成器，于是
+# fix round 2 修改 mixins 时，这支【旧】迁移在一次全新的 upgrade 里会产出
+# 【新】定义 —— 迁移历史被追溯性地改写，downgrade 也再无法还原当初的形状。
+# 因此把当时的 SQL 原样固化在这里；今后的语义变更一律由新迁移承担。
+
+_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= effective_at) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= effective_at)"
+)
 
 # 旧的三子句定义，供 downgrade() 还原。
 _OLD_TIME_ORDER_SQL = (
@@ -41,7 +53,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_mixin_probe_time_order",
         "mixin_probe",
-        TIME_ORDER_SQL,
+        _TIME_ORDER_SQL,
         schema="governance",
     )
 

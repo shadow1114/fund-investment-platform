@@ -5,12 +5,25 @@ Revises: 0009
 """
 from alembic import op
 
-from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
+from fip.platform.db.mixins import QUALITY_SOURCE_SQL
 
 revision = "0010"
 down_revision = "0009"
 branch_labels = None
 depends_on = None
+
+# 【已冻结的字面量】迁移是不可编辑的历史，它产出的 DDL 必须与当初执行时
+# 逐字相同。此前这里 import 的是 mixins.py 里的共享常量/生成器，于是
+# fix round 2 修改 mixins 时，这支【旧】迁移在一次全新的 upgrade 里会产出
+# 【新】定义 —— 迁移历史被追溯性地改写，downgrade 也再无法还原当初的形状。
+# 因此把当时的 SQL 原样固化在这里；今后的语义变更一律由新迁移承担。
+_TIME_ORDER_SQL = (
+    "(published_at IS NULL OR published_at >= effective_at) AND "
+    "(provider_available_at IS NULL OR published_at IS NULL "
+    " OR provider_available_at >= published_at) AND "
+    "(ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND "
+    "(available_at >= effective_at)"
+)
 
 
 def upgrade() -> None:
@@ -31,7 +44,7 @@ def upgrade() -> None:
             created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
             PRIMARY KEY (share_class_id, effective_at, version),
             CONSTRAINT ck_fund_distribution_quality_source CHECK ({QUALITY_SOURCE_SQL}),
-            CONSTRAINT ck_fund_distribution_time_order     CHECK ({TIME_ORDER_SQL}),
+            CONSTRAINT ck_fund_distribution_time_order     CHECK ({_TIME_ORDER_SQL}),
             CONSTRAINT ck_fund_distribution_dividend CHECK (dividend_per_unit >= 0),
             CONSTRAINT ck_fund_distribution_split    CHECK (split_ratio > 0)
         )

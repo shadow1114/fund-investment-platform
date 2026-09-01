@@ -67,8 +67,9 @@ def service(db_session) -> IngestService:
 
 def test_fund_list_creates_funds_and_share_classes(db_session, service):
     """两个类别归入同一产品。"""
-    created = service.ingest_fund_list()
-    assert created == 2
+    result = service.ingest_fund_list()
+    assert result.created == 2
+    assert result.reassignments == ()
     assert db_session.query(Fund).count() == 1
     assert db_session.query(FundShareClass).count() == 2
     codes = {sc.share_class_code for sc in db_session.query(FundShareClass).all()}
@@ -291,3 +292,103 @@ def test_provider_identity_registration_is_idempotent(db_session, service):
     service.ingest_fund_list()
     service.ingest_fund_list()
     assert db_session.query(ProviderFundIdentity).count() == 2
+
+
+# --- 份额类别已存在但映射缺失 -------------------------------------------
+# fix round 2 item 6：上一轮只覆盖了「份额类别与映射【都】已存在」的重跑，
+# 没有覆盖「份额类别已存在、映射缺失」这条分支 —— 而这正是
+# _ensure_provider_identity 必须无条件被调用（而不是塞进 `if share_class is
+# None` 里）的理由：映射可能是上一轮遗漏的、也可能被人工清理过，
+# 「份额类别已存在」不蕴含「映射已存在」。
+
+def test_missing_mapping_is_registered_even_when_share_class_exists(db_session, service):
+    """删掉映射后重跑：份额类别一个不新建，映射必须被补回来。"""
+    service.ingest_fund_list()
+    db_session.query(ProviderFundIdentity).delete()
+    db_session.flush()
+    assert db_session.query(ProviderFundIdentity).count() == 0
+
+    result = service.ingest_fund_list()
+
+    assert result.created == 0, "份额类别已存在，不得重复新建"
+    assert db_session.query(FundShareClass).count() == 2
+    provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
+    mapping = {
+        row.provider_fund_id: row.share_class_id
+        for row in db_session.query(ProviderFundIdentity).filter_by(
+            provider_id=provider.id
+        ).all()
+    }
+    a = db_session.query(FundShareClass).filter_by(share_class_code="A").one()
+    c = db_session.query(FundShareClass).filter_by(share_class_code="C").one()
+    assert mapping == {"000001": a.id, "000002": c.id}
+
+
+# --- 重指派冲突不得丢掉整批已抓数据 --------------------------------------
+# fix round 2 item 4：_ensure_provider_identity 原先直接抛 ValueError，一路
+# 穿出 ingest_fund_list，而 cmd_ingest_funds 不捕获 —— 整批 ingest-funds 全废，
+# 包括本次已抓到的 raw payload。触发条件并不罕见：上游基金简称改名导致
+# split_share_class_name 归到另一个 product_name 就会触发。
+# 方向保持（响亮失败优于静默沿用旧映射），但改为收集全部冲突、跑完再统一报告。
+
+RENAMED_FUND_LIST = pd.DataFrame({
+    # 000001 的简称改了名，split_share_class_name 会把它归到另一个
+    # product_name，于是解析到一个新的份额类别 —— 这就是一次重指派冲突。
+    # 000003 是全新的代码，必须照常登记。
+    "基金代码": ["000001", "000003"],
+    "基金简称": ["测试改名混合A", "测试另一只混合A"],
+    "基金类型": ["混合型", "混合型"],
+})
+
+
+def _renamed_caller(name, **params):
+    if name == "fund_name_em":
+        return RENAMED_FUND_LIST
+    raise AssertionError(f"未预期的调用 {name} {params}")
+
+
+def _renamed_service(session) -> IngestService:
+    adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=_renamed_caller)
+    return IngestService(session, adapter, disclosure_lag_days=1)
+
+
+def test_reassignment_conflict_is_collected_not_raised(db_session, service):
+    """冲突逐条收集并如实报告，而不是抛异常炸掉整批。"""
+    service.ingest_fund_list()
+    a = db_session.query(FundShareClass).filter_by(
+        display_name="测试蓝筹混合A").one()
+
+    result = _renamed_service(db_session).ingest_fund_list()
+
+    assert len(result.reassignments) == 1
+    conflict = result.reassignments[0]
+    assert conflict.provider_code == "AKSHARE"
+    assert conflict.provider_fund_id == "000001"
+    assert conflict.existing_share_class_id == a.id
+    assert conflict.incoming_share_class_id != a.id
+
+
+def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
+    """有冲突时其余基金仍被正常登记 —— 一条冲突不得废掉整批已抓数据。"""
+    service.ingest_fund_list()
+    # 改名后的批次里也会出现 share_class_code == "A" 的新份额类别，
+    # 因此这里必须在第二批之前把「原来那一条」记下来。
+    a_id = db_session.query(FundShareClass).filter_by(
+        display_name="测试蓝筹混合A").one().id
+
+    result = _renamed_service(db_session).ingest_fund_list()
+    assert result.reassignments, "前置条件：本批确实有冲突"
+
+    provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
+    mapping = {
+        row.provider_fund_id: row.share_class_id
+        for row in db_session.query(ProviderFundIdentity).filter_by(
+            provider_id=provider.id
+        ).all()
+    }
+    # 000003 是本批新代码，必须已登记；
+    # 000001 的旧映射必须【原样保留】，绝不静默改指向新份额类别。
+    assert "000003" in mapping
+    assert mapping["000001"] == a_id
+    # raw payload 也照常留存（重跑抓到的这一份不得因冲突被丢弃）。
+    assert db_session.query(RawPayload).count() == 2
