@@ -9,7 +9,7 @@ from fip.platform.decision_data.context import DecisionExecutionContext
 @dataclass(frozen=True, slots=True)
 class NavPoint:
     effective_at: dt.date
-    adjusted_nav: Decimal
+    adjusted_nav: Decimal | None
     unit_nav: Decimal
     version: int
     availability_quality: str
@@ -59,8 +59,6 @@ class PitDataContext:
         # 反转了架构规定的依赖方向（Task 6 的 fitness test 会对此断言）。
         from fip.services.data_service.repositories.nav import SqlNavPitRepository
 
-        # Task 15 之前该模块不存在，mypy 在 ignore_missing_imports 下将其
-        # 类型解析为 Any；strict 模式下需要显式声明返回值类型。
-        return SqlNavPitRepository(  # type: ignore[no-any-return]
+        return SqlNavPitRepository(
             session=self._session, decision_at=self.decision_at
         )
