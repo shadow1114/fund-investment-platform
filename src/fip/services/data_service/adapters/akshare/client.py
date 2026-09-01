@@ -81,6 +81,19 @@ class AkShareSourceAdapter:
 
     @staticmethod
     def _assert_columns(spec: DatasetSpec, frame: pd.DataFrame) -> None:
+        """校验列契约。
+
+        AKShare 对“该基金没有这类记录”（如从未拆分过）与“上游改了列结构”
+        这两种情况的表达方式恰好都可能是缺列，必须区分：
+        - 完全无 schema（0 行 0 列，即 df.columns 为空）：这是上游对“无此类
+          记录”的合法表达，不校验列、原样放行，row_count=0。
+        - 0 行但列集不为空、或列集不为空但内容不符：无论有没有数据行，
+          只要上游声明了列结构且与契约不符，都说明 schema 变了，必须显式
+          失败 —— 不要把这条弱化成“空的就放行”，判据是“上游有没有给出
+          schema”，不是“有没有数据”。
+        """
+        if len(frame.columns) == 0:
+            return
         missing = spec.required_columns - set(frame.columns)
         if missing:
             raise AkShareContractError(

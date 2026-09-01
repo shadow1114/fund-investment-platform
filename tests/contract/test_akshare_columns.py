@@ -32,3 +32,18 @@ def test_every_dataset_has_probe_params():
     assert set(PROBE_PARAMS) == set(DATASETS), (
         "新增数据集时必须同时补探查参数，否则该数据集没有契约保护"
     )
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    ["161725", "110022"],
+    ids=["has_split_history", "no_split_history"],
+)
+def test_fund_split_handles_both_split_and_no_split_funds(symbol):
+    """161725 有拆分历史；110022 从未拆分过，上游返回 0 行 0 列（无 schema）
+    的空 DataFrame。只探测有数据的基金（如原先只覆盖 161725）看不出“无
+    schema 的合法空结果”被误判为契约违反的问题 —— 两种形状都必须成功。"""
+    adapter = AkShareSourceAdapter()
+    record = adapter.fetch("fund_split", symbol=symbol)
+    assert record.row_count >= 0
+
