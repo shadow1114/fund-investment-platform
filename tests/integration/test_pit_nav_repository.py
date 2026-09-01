@@ -168,3 +168,80 @@ def test_availability_quality_is_returned(db_session, share_class):
 def test_empty_range_returns_empty_list(db_session, share_class):
     assert _series(db_session, share_class, dt.date(2026, 8, 31),
                    dt.date(2020, 1, 1), dt.date(2020, 12, 31)) == []
+
+
+def _add_dist(session, sc, day, dividend, available_at, split="1", version=1):
+    session.add(FundDistribution(
+        share_class_id=sc.id, effective_at=day, version=version,
+        dividend_per_unit=Decimal(dividend), split_ratio=Decimal(split),
+        available_at=available_at, availability_quality="INFERRED",
+        published_at=None, provider_available_at=None, ingested_at=_utc(2026, 8, 31),
+    ))
+
+
+def test_late_event_does_not_rewrite_already_visible_version(db_session, share_class):
+    """前视偏差回归：迟到事件不得回头改写它披露之前就已可见的那一版。
+
+    v1(2020-01-02) 从 2020-01-03 起可见，直到 2020-03-01 才被 v2 取代；
+    一个 effective_at=2020-01-01 的分红事件迟到，2020-01-15 才披露 ——
+    落在 v1 的 reign 内。若按「reign 内最后一个 checkpoint 盖章」，v1 行
+    存的就是含该事件的 1.21；decision_at=2020-01-10（早于披露 5 天）解析
+    到 v1 时便读到了当时还不存在的信息 —— 静默前视偏差。
+    """
+    _add_nav(db_session, share_class, dt.date(2020, 1, 1), "1.0",
+             available_at=_utc(2020, 1, 2))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.1", version=1,
+             available_at=_utc(2020, 1, 3))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.2", version=2,
+             available_at=_utc(2020, 3, 1))
+    _add_dist(db_session, share_class, dt.date(2020, 1, 1), "0.1",
+              available_at=_utc(2020, 1, 15))
+    db_session.flush()
+
+    backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
+
+    day = dt.date(2020, 1, 2)
+    before = _series(db_session, share_class, dt.date(2020, 1, 10), day, day)
+    assert before[0].version == 1
+    # 1.1 = 不含事件；1.21 = 含事件（前视）
+    assert before[0].adjusted_nav == Decimal("1.1")
+
+    # v2 首次成为当前版本时事件已披露，故它带该事件：1.2 × 1.1 = 1.32
+    after = _series(db_session, share_class, dt.date(2020, 3, 1), day, day)
+    assert after[0].version == 2
+    assert after[0].adjusted_nav == Decimal("1.32")
+
+
+def test_unavailable_checkpoint_does_not_void_whole_share_class(db_session, share_class):
+    """逐 checkpoint 容错：单个 checkpoint 算不出来只影响它首发的那些行。
+
+    2020-01-05 的分红事件在 2020-01-06 就披露，而 2020-01-05 当天的净值
+    要到 2020-01-10 才可见 —— 2020-01-06 这个 checkpoint 上事件日缺净值，
+    compute_adjusted_nav 抛 AdjustedNavUnavailable。只有在该 checkpoint
+    才首次成为当前版本的 2020-01-04 行保持 NULL（下游标 UNAVAILABLE，
+    不填 0、不沿用上期，C-6），其余行照常盖章。
+    """
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.0",
+             available_at=_utc(2020, 1, 3))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 4), "1.05",
+             available_at=_utc(2020, 1, 6))
+    _add_dist(db_session, share_class, dt.date(2020, 1, 5), "0.1",
+              available_at=_utc(2020, 1, 6))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 5), "1.0",
+             available_at=_utc(2020, 1, 10))
+    _add_nav(db_session, share_class, dt.date(2020, 1, 6), "1.2",
+             available_at=_utc(2020, 1, 11))
+    db_session.flush()
+
+    updated = backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
+    assert updated == 3
+
+    points = _series(db_session, share_class, dt.date(2026, 8, 31),
+                     dt.date(2020, 1, 1), dt.date(2020, 12, 31))
+    by_day = {p.effective_at: p.adjusted_nav for p in points}
+    assert by_day == {
+        dt.date(2020, 1, 2): Decimal("1.0"),
+        dt.date(2020, 1, 4): None,
+        dt.date(2020, 1, 5): Decimal("1.1"),
+        dt.date(2020, 1, 6): Decimal("1.32"),
+    }

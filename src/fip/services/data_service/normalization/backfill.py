@@ -14,10 +14,10 @@ from fip.services.data_service.normalization.adjusted_nav import (
 )
 
 # 与 Step 3 的 PIT 查询不同：这里取【全部】在 decision_at 可见的版本
-# （不做 DISTINCT ON 版本折叠），因为回填需要为每个版本分别计算它在
-# 「自己成为当前版本」到「被下一版本取代」这段时间里应有的复权净值——
-# 只回填 decision_at 那一刻折叠出的单一版本，会让被取代的旧版本的
-# adjusted_nav 永远停留在 NULL（见 Task 15 fix round 1）。
+# （不做 DISTINCT ON 版本折叠），因为回填需要为每个版本分别计算它
+# 【首次成为当前版本】那一刻应有的复权净值——只回填 decision_at 那一刻
+# 折叠出的单一版本，会让被取代的旧版本的 adjusted_nav 永远停留在
+# NULL（见 Task 15 fix round 1）。
 _ALL_NAV_SQL = text("""
     SELECT effective_at, unit_nav, version, available_at
     FROM market.fund_nav
@@ -64,24 +64,39 @@ def backfill_adjusted_nav(
 ) -> int:
     """按 decision_at 可见的净值与事件计算复权净值并回填。
 
-    每个 (effective_at, version) 行都会被回填，值取「该版本成为当前
-    版本、直到被下一版本取代」这段时期内、随着更多净值/事件披露而演进
-    出的最终已知值——即以该版本的 reign 内所见过的最新 checkpoint 为准。
-    这样任何决策时点解析到的行都带有正确的复权净值，而不只是
-    decision_at 折叠出的那一个版本。
+    adjusted_nav 在 market.fund_nav 里是【每行一个标量】，而「正确的复权
+    净值」其实是 (行, decision_at) 的二元函数：同一行在不同决策时点应有
+    不同的值，因为它之后可能又披露了迟到的分红/拆分事件。一个标量列装不下
+    这个二元函数，必须选定一个盖章时刻。
+
+    本函数选择【首个 checkpoint 盖章】：每个 (effective_at, version) 只在
+    它第一次成为当前版本的那个 checkpoint 被赋值，之后任何 checkpoint 都
+    不得覆盖它。
+
+    为什么必须是「首个」而不是「reign 内最后一个」（fix round 2）：全平台
+    唯一的可见性规则是 available_at <= decision_at，所以任何能解析到某行的
+    decision_at 都 >= 该行的 available_at；而该行首次成为当前版本的
+    checkpoint 就等于它的 available_at。于是「存的值绝不比行本身更新」是
+    构造性成立的 —— 读到的 adjusted_nav 绝不可能含有该行可见时尚不存在的
+    信息。反之若按 reign 内最后一个 checkpoint 盖章，一个在 reign 中途才
+    披露的迟到事件会回头改写该版本已存的值，而 SqlNavPitRepository 逐字读
+    该列，早于该事件披露时刻的查询就会读到含未来信息的值 —— 静默前视偏差。
+
+    代价是对称的另一侧：迟到事件披露之后，早期版本行的 adjusted_nav 会偏
+    「旧」（不含该事件）。这是标量列的固有取舍，且方向安全——宁可信息偏少，
+    不可信息偏多（C-12：不回填/伪造时间戳，也不让旧行冒充知道后来的事）。
 
     做法：取 decision_at 可见的全部净值/事件行（不折叠版本），把两者的
     available_at 并集排序为一组 checkpoint；在每个 checkpoint 上重新做
-    PIT 版本解析并调用 compute_adjusted_nav，把结果写给该 checkpoint 下
-    解析出的「当前」(effective_at, version)。checkpoint 按时间升序处理，
-    同一行被更晚的 checkpoint 覆盖是有意为之——它代表该版本在被取代前
-    最后已知的正确值。
+    PIT 版本解析，候选 key 取「该 checkpoint 解析出的当前 key 中尚未盖过章
+    的那些」，调用 compute_adjusted_nav 成功则只给候选 key 盖章；无论成功
+    失败，最后都把该 checkpoint 的全部当前 key 记为已出现过。
 
-    先在内存里算完全部 checkpoint 再统一执行 UPDATE：只要某个 checkpoint
-    的计算抛出 AdjustedNavUnavailable，整次回填就不会有任何写入
-    （与回填单一 decision_at 时点的原有语义一致，见 C-6）——该份额类别
-    的 adjusted_nav 保持为 NULL，下游据此标记 UNAVAILABLE，不填 0、
-    不沿用上期。
+    容错粒度是【单个 checkpoint】：某个 checkpoint 抛 AdjustedNavUnavailable
+    只跳过它自己，不再牵连整只份额类别。只有「首次成为当前版本的那个
+    checkpoint 恰好失败」的行才保持 NULL，下游据此标记 UNAVAILABLE，不填 0、
+    不沿用上期（C-6）。C-6 的「全有或全无」语义保留在【写入】这一侧：所有
+    checkpoint 都算完之后才统一执行 UPDATE。
     """
     visible_until = dt.datetime.combine(decision_at, dt.time.max, tzinfo=dt.UTC)
     params = {"share_class_id": share_class_id, "visible_until": visible_until}
@@ -96,29 +111,47 @@ def backfill_adjusted_nav(
         | {row["available_at"] for row in event_rows}
     )
 
-    writes: dict[tuple[dt.date, int], Decimal | None] = {}
+    writes: dict[tuple[dt.date, int], Decimal] = {}
+    # 已经作为「当前版本」出现过的 key；出现过即失去盖章资格（首个盖章）。
+    stamped: set[tuple[dt.date, int]] = set()
     for checkpoint in checkpoints:
         current_navs = _resolve_current(nav_rows, checkpoint)
         if not current_navs:
             continue
-        current_events = _resolve_current(event_rows, checkpoint)
+        current_keys = {
+            (effective_at, row["version"])
+            for effective_at, row in current_navs.items()
+        }
+        candidates = current_keys - stamped
+        # 无论本 checkpoint 算得出算不出，它的当前 key 都算「出现过」：
+        # 若写成「只在 writes 里不存在时才写」，下面失败跳过的行会在后续
+        # checkpoint 被补上一个更新的值，前视偏差又回来了。
+        stamped |= current_keys
+        if not candidates:
+            continue
 
-        points = compute_adjusted_nav(
-            [
-                NavObservation(effective_at, row["unit_nav"])
-                for effective_at, row in current_navs.items()
-            ],
-            [
-                DistributionEvent(
-                    effective_at, row["dividend_per_unit"], row["split_ratio"]
-                )
-                for effective_at, row in current_events.items()
-            ],
-        )
+        current_events = _resolve_current(event_rows, checkpoint)
+        try:
+            points = compute_adjusted_nav(
+                [
+                    NavObservation(effective_at, row["unit_nav"])
+                    for effective_at, row in current_navs.items()
+                ],
+                [
+                    DistributionEvent(
+                        effective_at, row["dividend_per_unit"], row["split_ratio"]
+                    )
+                    for effective_at, row in current_events.items()
+                ],
+            )
+        except AdjustedNavUnavailable:
+            # 逐 checkpoint 容错：只放弃本 checkpoint 的候选行，其余照常。
+            continue
 
         for point in points:
-            version = current_navs[point.effective_at]["version"]
-            writes[(point.effective_at, version)] = point.adjusted_nav
+            key = (point.effective_at, current_navs[point.effective_at]["version"])
+            if key in candidates:
+                writes[key] = point.adjusted_nav
 
     for (effective_at, version), adjusted_nav in writes.items():
         session.execute(
