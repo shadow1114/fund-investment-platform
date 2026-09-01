@@ -2,6 +2,7 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from fip.platform.decision_data.context import DecisionExecutionContext
@@ -41,7 +42,15 @@ class JobSubmitter:
         idempotency_key: str,
         decision_id: str | None = None,
     ) -> CalculationJob:
-        """提交任务。相同幂等键的重复提交返回既有任务，不产生第二条记录。"""
+        """提交任务。相同幂等键的重复提交返回既有任务，不产生第二条记录。
+
+        并发下也安全：`idempotency_key` 有数据库唯一约束兜底。先 SELECT
+        是为常见的非并发路径省一次异常；真正撞上并发提交时，INSERT 会
+        因唯一约束触发 IntegrityError —— 此时回滚到该次 INSERT 之前的
+        SAVEPOINT，再按 idempotency_key 重新 SELECT 并返回胜出的既有行。
+        若重新 SELECT 仍找不到该行，说明 IntegrityError 另有原因（例如
+        其他约束冲突），此时必须重新抛出，不能静默吞掉。
+        """
         existing = self._session.execute(
             select(CalculationJob).where(
                 CalculationJob.idempotency_key == idempotency_key
@@ -58,8 +67,19 @@ class JobSubmitter:
             status=ExecutionStatus.RUNNING.value,
             progress=0,
         )
-        self._session.add(job)
-        self._session.flush()
+        try:
+            with self._session.begin_nested():
+                self._session.add(job)
+                self._session.flush()
+        except IntegrityError:
+            existing = self._session.execute(
+                select(CalculationJob).where(
+                    CalculationJob.idempotency_key == idempotency_key
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                raise
+            return existing
         return job
 
     @staticmethod
