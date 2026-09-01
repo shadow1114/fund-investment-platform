@@ -110,10 +110,36 @@ def test_revision_is_resolved_by_decision_time(db_session, share_class):
     before = _series(db_session, share_class, dt.date(2020, 1, 10), day, day)
     assert before[0].unit_nav == Decimal("1.0")
     assert before[0].version == 1
+    assert before[0].adjusted_nav == Decimal("1.0")
 
     after = _series(db_session, share_class, dt.date(2020, 3, 1), day, day)
     assert after[0].unit_nav == Decimal("1.2")
     assert after[0].version == 2
+    assert after[0].adjusted_nav == Decimal("1.2")
+
+
+def test_superseded_version_keeps_its_own_adjusted_nav(db_session, share_class):
+    """被取代的旧版本不能永远停留在 adjusted_nav = NULL（fix round 1）。
+
+    两个版本都在【同一次】批量回填运行【之前】就已存在——这正是 Task 19
+    历史全量回填会遇到的形状：回填只跑一次，但 fund_nav 里已经有多版本。
+    """
+    day = dt.date(2020, 1, 2)
+    _add_nav(db_session, share_class, day, "1.0", version=1,
+             available_at=_utc(2020, 1, 3))
+    _add_nav(db_session, share_class, day, "1.2", version=2,
+             available_at=_utc(2020, 2, 1))
+    db_session.flush()
+
+    backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
+
+    before = _series(db_session, share_class, dt.date(2020, 1, 10), day, day)
+    assert before[0].version == 1
+    assert before[0].adjusted_nav == Decimal("1.0")
+
+    after = _series(db_session, share_class, dt.date(2020, 3, 1), day, day)
+    assert after[0].version == 2
+    assert after[0].adjusted_nav == Decimal("1.2")
 
 
 def test_series_is_sorted_and_bounded_by_date_range(db_session, share_class):
