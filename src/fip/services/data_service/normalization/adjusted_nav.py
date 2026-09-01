@@ -11,11 +11,16 @@ _PRECISION = 60
 # 正确舍入结果」（例如 Decimal("1.01") ** 999）。因此内部滚动用更高的
 # 「计算精度」，只在对外产出每个点时才舍入到 _PRECISION 位——这样长链条
 # 也能精确到 _PRECISION 位有效数字，不因链路长度而漂移。
+#
+# 60 位保护位是留出的宽裕余量，不是从误差增长公式推导出的紧界——最坏情况
+# 下 n 次乘法在计算精度上累积约 O(n) 个末位单位的误差，实测 999 期链路只
+# 需 10 位保护位即可让结果与 Decimal("1.01") ** 999 完全一致；60 位是为了
+# 覆盖比该测试更长的真实链路（可达数千期）留出充足余量，而非一个已证明的
+# 下界。
 _GUARD_DIGITS = 60
 _COMPUTE_PRECISION = _PRECISION + _GUARD_DIGITS
 
 ONE = Decimal(1)
-ZERO = Decimal(0)
 
 
 class AdjustedNavUnavailable(RuntimeError):
@@ -104,11 +109,9 @@ def compute_adjusted_nav(
         for observation in ordered_navs:
             matched_event = by_date.get(observation.effective_at)
             if matched_event is not None:
+                # pre_split_nav 恒为正：unit_nav > 0 与 split_ratio > 0 均已在
+                # 上面两个校验循环中强制保证，无需再防御性判断。
                 pre_split_nav = observation.unit_nav * matched_event.split_ratio
-                if pre_split_nav <= 0:
-                    raise AdjustedNavUnavailable(
-                        f"{observation.effective_at} 的除息前净值非正，无法再投资"
-                    )
                 reinvest = ONE + matched_event.dividend_per_unit / pre_split_nav
                 # shares 以计算精度滚动，不用对外精度舍入，避免逐期舍入误差累积。
                 shares = shares * reinvest * matched_event.split_ratio

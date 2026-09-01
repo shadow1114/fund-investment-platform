@@ -142,6 +142,31 @@ def test_quant_engine_has_no_io_dependency():
     assert not offenders, f"quant_engine 出现 I/O 依赖：{offenders}"
 
 
+ADJUSTED_NAV_PY = SRC / "services" / "data_service" / "normalization" / "adjusted_nav.py"
+
+
+def test_adjusted_nav_has_no_io_dependency():
+    """本 Plan 的承重计算模块：adjusted_nav.py 是全平台每个 Factor / μ / Σ /
+    回测净值曲线的共同上游，且是纯函数——不接触数据库，不做任何 I/O。
+
+    这里刻意只点名这一个文件，而不是扫描整个
+    services/data_service/normalization 包：同包内的兄弟模块 backfill.py
+    必须访问数据库（那正是它的职责），若按目录扫描会立刻炸掉，且炸得没有
+    意义——真正需要锁住『无 I/O』契约的只是这一个纯函数文件。与
+    db/migrations/env.py 里 include_object 排除清单是同一个原则：窄而准
+    胜过宽而错。
+
+    在此之前，strategy_library / quant_engine 两个 I/O 纯净性测试都不覆盖
+    这个文件（它们只扫描各自目录），全仓库唯一覆盖它的扫描是 ML 依赖测试，
+    而那条测试检查的是另一份库清单（ML_LIBS，不含 sqlalchemy 等 I/O 库）。
+    也就是说，在补上这条测试之前，若有人在这里加一行 `import sqlalchemy`，
+    没有任何自动化检查会失败。
+    """
+    imported = _imported_roots(ADJUSTED_NAV_PY)
+    offenders = sorted(imported & IO_LIBS)
+    assert not offenders, f"adjusted_nav.py 出现 I/O 依赖：{offenders}"
+
+
 def test_no_ml_dependency_anywhere():
     """Constraint C-14：第一阶段不引入任何 ML / AI 技术栈。"""
     offenders = [
