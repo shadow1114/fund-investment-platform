@@ -3478,7 +3478,7 @@ def parse_nav_frame(payload: bytes) -> list[ParsedNav]:
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, ForeignKey
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -3499,6 +3499,9 @@ class FundNav(Base, VersionedMixin):
     __tablename__ = "fund_nav"
     __table_args__ = (
         *temporal_check_constraints("fund_nav"),
+        # 值域约束必须【同时】声明在 ORM 与迁移中。只写进迁移会让
+        # Base.metadata 不知道它，后续 autogenerate 便会生成一条 DROP。
+        CheckConstraint("unit_nav > 0", name="ck_fund_nav_positive"),
         {"schema": "market", "postgresql_partition_by": "RANGE (effective_at)"},
     )
 
@@ -3927,6 +3930,9 @@ class FundDistribution(Base, VersionedMixin):
     __tablename__ = "fund_distribution"
     __table_args__ = (
         *temporal_check_constraints("fund_distribution"),
+        # 同 fund_nav：值域约束必须与迁移保持一致，否则 autogenerate 会想删掉它们。
+        CheckConstraint("dividend_per_unit >= 0", name="ck_fund_distribution_dividend"),
+        CheckConstraint("split_ratio > 0", name="ck_fund_distribution_split"),
         {"schema": "market"},
     )
 
@@ -4925,7 +4931,7 @@ class RiskFreeRate(Base, VersionedMixin):
 在 `models/market.py` 顶部的 import 中补上 `String` 与 `RatioNumeric`：
 
 ```python
-from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, String
 from fip.platform.db.types import NavNumeric, RatioNumeric
 ```
 
