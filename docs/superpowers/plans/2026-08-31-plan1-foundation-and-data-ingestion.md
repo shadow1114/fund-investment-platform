@@ -2769,7 +2769,7 @@ DATASETS: dict[str, DatasetSpec] = {
         code="fund_distribution",
         callable_name="fund_open_fund_info_em",
         fixed_params={"indicator": "分红送配详情"},
-        required_columns=frozenset({"年份", "权益登记日", "除息日", "每份分红"}),
+        required_columns=frozenset({"年份", "权益登记日", "除息日", "每10份分红"}),
     ),
     "fund_split": DatasetSpec(
         code="fund_split",
@@ -3731,18 +3731,38 @@ def test_dividend_uses_ex_date_not_record_date():
         "年份": ["2020"],
         "权益登记日": ["2020-06-10"],
         "除息日": ["2020-06-11"],
-        "每份分红": ["0.1000"],
+        "每10份分红": ["每10份派现金1.0000元"],
     }))
     rows = parse_distribution_frame(payload)
     assert rows[0].effective_at == dt.date(2020, 6, 11)
-    assert rows[0].dividend_per_unit == Decimal("0.1000")
+    assert rows[0].dividend_per_unit == Decimal("0.1")   # 1.0000 / 10
     assert rows[0].split_ratio == Decimal(1)
+
+
+def test_dividend_is_divided_by_the_stated_base():
+    """⚠️ 最关键的一条：列名里的基数必须被除掉。
+
+    漏掉除以 10，每笔分红放大 10 倍，复权净值系统性高估且不报错。
+    """
+    payload = _payload(pd.DataFrame({
+        "年份": ["2021"], "权益登记日": ["2021-12-31"], "除息日": ["2021-12-31"],
+        "每10份分红": ["每10份派现金0.4500元"],
+    }))
+    assert parse_distribution_frame(payload)[0].dividend_per_unit == Decimal("0.045")
+
+
+def test_unparseable_dividend_text_is_dropped_not_guessed():
+    payload = _payload(pd.DataFrame({
+        "年份": ["2021"], "权益登记日": ["2021-12-31"], "除息日": ["2021-12-31"],
+        "每10份分红": ["暂无数据"],
+    }))
+    assert parse_distribution_frame(payload) == []
 
 
 def test_dividend_amount_is_decimal():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": ["2020-06-11"], "每份分红": ["0.1000"],
+        "除息日": ["2020-06-11"], "每10份分红": ["每10份派现金1.0000元"],
     }))
     assert isinstance(parse_distribution_frame(payload)[0].dividend_per_unit, Decimal)
 
@@ -3750,7 +3770,7 @@ def test_dividend_amount_is_decimal():
 def test_negative_dividend_is_rejected():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": ["2020-06-11"], "每份分红": ["-0.1"],
+        "除息日": ["2020-06-11"], "每10份分红": ["每10份派现金-0.1元"],
     }))
     with pytest.raises(ValueError, match="分红"):
         parse_distribution_frame(payload)
@@ -3759,7 +3779,7 @@ def test_negative_dividend_is_rejected():
 def test_rows_without_ex_date_are_dropped():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": [None], "每份分红": ["0.1"],
+        "除息日": [None], "每10份分红": ["每10份派现金1.0000元"],
     }))
     assert parse_distribution_frame(payload) == []
 
@@ -3814,6 +3834,32 @@ def _to_date(raw: object) -> dt.date | None:
     return pd.to_datetime(text).date()
 
 
+_DIVIDEND_RE = re.compile(r"每\s*(?P<base>\d+)\s*份[^0-9]*(?P<amount>\d+(?:\.\d+)?)")
+
+
+def _parse_dividend_per_unit(raw: object) -> Decimal | None:
+    """把「每10份分红」列解析为【每一份】的分红金额。
+
+    ⚠️ 实测（AKShare 1.18.94）：该列不是数字，而是字符串，形如
+    `每10份派现金0.4500元`。必须同时提取【基数 10】与【金额 0.4500】并相除。
+
+    若直接把 0.4500 当作每份分红，每一笔分红会放大 10 倍，复权净值系统性高估，
+    而且【不会有任何报错】—— 这正是最危险的一类缺陷。
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    match = _DIVIDEND_RE.search(text)
+    if match is None:
+        return None
+    base = Decimal(match.group("base"))
+    if base <= 0:
+        return None
+    return Decimal(match.group("amount")) / base
+
+
 def parse_distribution_frame(payload: bytes) -> list[ParsedDistribution]:
     """分红送配详情 → 除息事件。
 
@@ -3823,7 +3869,7 @@ def parse_distribution_frame(payload: bytes) -> list[ParsedDistribution]:
     rows: list[ParsedDistribution] = []
     for _, record in frame.iterrows():
         day = _to_date(record.get("除息日"))
-        amount = _to_decimal(record.get("每份分红"))
+        amount = _parse_dividend_per_unit(record.get("每10份分红"))
         if day is None or amount is None:
             continue
         if amount < 0:
@@ -5734,7 +5780,7 @@ NAV_FRAME = pd.DataFrame({
 
 DIVIDEND_FRAME = pd.DataFrame({
     "年份": ["2020"], "权益登记日": ["2020-01-02"],
-    "除息日": ["2020-01-03"], "每份分红": ["0.1000"],
+    "除息日": ["2020-01-03"], "每10份分红": ["每10份派现金1.0000元"],
 })
 
 SPLIT_FRAME = pd.DataFrame({"年份": [], "拆分折算日": [], "拆分折算比例": []})
