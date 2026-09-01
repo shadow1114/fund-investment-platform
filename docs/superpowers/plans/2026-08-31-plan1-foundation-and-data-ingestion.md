@@ -3694,7 +3694,7 @@ PK (share_class_id, effective_at, version) 同时充当唯一约束、分区键
 **Files:**
 - Modify: `src/fip/services/data_service/models/market.py`（追加 `FundDistribution`）
 - Modify: `src/fip/services/data_service/adapters/akshare/parse.py`（追加两个解析函数）
-- Create: `db/migrations/versions/0009_fund_distribution.py`
+- Create: `db/migrations/versions/0010_fund_distribution.py`
 - Test: `tests/unit/test_distribution_parsing.py`, `tests/integration/test_fund_distribution.py`
 
 **Interfaces:**
@@ -3947,20 +3947,20 @@ class FundDistribution(Base, VersionedMixin):
     raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0009_fund_distribution.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0010_fund_distribution.py`**
 
 ```python
 """market.fund_distribution
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0010
+Revises: 0009
 """
 from alembic import op
 
 from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
 
-revision = "0009"
-down_revision = "0008"
+revision = "0010"
+down_revision = "0009"
 branch_labels = None
 depends_on = None
 
@@ -4777,7 +4777,7 @@ Plan-1 的核心交付：给定任意历史 decision_at，取回当时可见的�
 **Files:**
 - Modify: `src/fip/services/data_service/models/market.py`（追加 `RiskFreeRate`）
 - Modify: `src/fip/services/data_service/adapters/akshare/parse.py`（追加 `parse_yield_curve_frame`）
-- Create: `db/migrations/versions/0010_risk_free_rate.py`
+- Create: `db/migrations/versions/0011_risk_free_rate.py`
 - Test: `tests/unit/test_yield_curve_parsing.py`, `tests/integration/test_risk_free_rate.py`
 
 **Interfaces:**
@@ -4935,20 +4935,20 @@ from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, String
 from fip.platform.db.types import NavNumeric, RatioNumeric
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0010_risk_free_rate.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0011_risk_free_rate.py`**
 
 ```python
 """market.risk_free_rate
 
-Revision ID: 0010
-Revises: 0009
+Revision ID: 0011
+Revises: 0010
 """
 from alembic import op
 
 from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
 
-revision = "0010"
-down_revision = "0009"
+revision = "0011"
+down_revision = "0010"
 branch_labels = None
 depends_on = None
 
@@ -5066,7 +5066,7 @@ git commit -m "feat(market): risk_free_rate 曲线
 **Files:**
 - Modify: `src/fip/services/data_service/models/fund.py`（追加 5 个 ORM）
 - Create: `src/fip/services/data_service/eligibility.py`
-- Create: `db/migrations/versions/0011_fund_dimensions.py`
+- Create: `db/migrations/versions/0012_fund_dimensions.py`
 - Test: `tests/unit/test_eligibility_derivation.py`, `tests/integration/test_fund_dimensions.py`
 
 **Interfaces:**
@@ -5327,7 +5327,7 @@ from fip.platform.db.types import RatioNumeric
 - [ ] **Step 5：生成并核对迁移**
 
 ```bash
-.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 维度与历史表" --rev-id 0011
+.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 维度与历史表" --rev-id 0012
 ```
 
 打开生成文件逐行核对：应只包含 7 张新表的 `create_table`。**特别检查每张区间型表都带上了三个 CHECK 约束**（`ck_*_quality_source`、`ck_*_time_order`、`ck_*_interval`）；autogenerate 有时会漏掉 Mixin 提供的约束，缺失则手工补上。然后：
