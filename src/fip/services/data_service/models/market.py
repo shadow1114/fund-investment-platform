@@ -47,3 +47,40 @@ class FundNav(Base, VersionedMixin):
     unit_nav: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
     adjusted_nav: Mapped[Decimal | None] = mapped_column(NavNumeric, nullable=True)
     raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class FundDistribution(Base, VersionedMixin):
+    """除息与拆分事件。复权净值计算的唯一事件来源。
+
+    dividend 与 split 合并为一张表：同日同时发生除息与拆分是真实场景，
+    分两张表会让「同日先后顺序」这一关键语义无处安放。
+    """
+
+    __tablename__ = "fund_distribution"
+    __table_args__ = (
+        *temporal_check_constraints("fund_distribution"),
+        # 同 fund_nav：值域约束必须与迁移保持一致，否则 autogenerate 会想删掉它们。
+        CheckConstraint("dividend_per_unit >= 0", name="ck_fund_distribution_dividend"),
+        CheckConstraint("split_ratio > 0", name="ck_fund_distribution_split"),
+        # 同 fund_nav 的 ix_fund_nav_pit：迁移 0010 里建了这个索引，此处必须
+        # 逐列声明（含 version DESC），否则 Base.metadata 看不到它，
+        # autogenerate 会把数据库里已存在的索引当成待删除对象。
+        Index(
+            "ix_fund_distribution_pit",
+            "share_class_id",
+            "effective_at",
+            "available_at",
+            text("version DESC"),
+        ),
+        {"schema": "market"},
+    )
+
+    share_class_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    effective_at: Mapped[dt.date] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    dividend_per_unit: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
+    split_ratio: Mapped[Decimal] = mapped_column(NavNumeric, nullable=False)
+    raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
