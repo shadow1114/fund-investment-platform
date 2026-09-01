@@ -83,6 +83,33 @@ def _touches(module: str, prefix: str) -> bool:
     return module == prefix or module.startswith(prefix + ".")
 
 
+@pytest.mark.parametrize(
+    ("module", "prefix", "expected"),
+    [
+        # 精确相等
+        ("fip.services.factor_service", "fip.services.factor_service", True),
+        # 子模块
+        ("fip.services.factor_service.x", "fip.services.factor_service", True),
+        # 仅共享字符串前缀，不落在点边界上 —— round-1 的回归就出在这类输入上，
+        # 必须锁死为 False（否则又退化回裸 startswith）。
+        ("fip.services.factor_service_utils", "fip.services.factor_service", False),
+        # 父包本身不算依赖子模块
+        ("fip.services", "fip.services.factor_service", False),
+    ],
+)
+def test_touches_matches_on_dot_boundary_only(module: str, prefix: str, expected: bool):
+    """锁死 _touches 的点边界语义，防止再退化回裸 str.startswith。
+
+    Round-1 fix 把 `_dotted_imports` 改成同时记录 alias 拼接后的完整路径，
+    但两处消费者当时仍用裸前缀比较，导致 `fip.services.factor_service_utils`
+    被误判为依赖 `fip.services.factor_service` —— 仅仅共享字符串前缀，并非
+    同一模块也不是其子模块。这条测试直接对 `_touches` 断言，不依赖任何
+    文件系统探针；探针验证的是『今天』修复生效，这里锁住的是『明天』不
+    退化。
+    """
+    assert _touches(module, prefix) is expected
+
+
 IO_LIBS = {
     "sqlalchemy", "psycopg", "psycopg2", "asyncpg", "alembic",
     "requests", "httpx", "aiohttp", "urllib", "akshare", "socket",
@@ -208,7 +235,7 @@ def test_platform_layer_does_not_import_services_at_module_level():
         for node in tree.body:  # 只看模块级语句
             bad: list[str] = []
             if isinstance(node, ast.Import):
-                bad = [a.name for a in node.names if a.name.startswith("fip.services")]
+                bad = [a.name for a in node.names if _touches(a.name, "fip.services")]
             elif isinstance(node, ast.ImportFrom):
                 if node.level > 0:
                     if node.module:
@@ -224,7 +251,7 @@ def test_platform_layer_does_not_import_services_at_module_level():
                             for a in node.names
                             if a.name == "services"
                         ]
-                elif node.module and node.module.startswith("fip.services"):
+                elif node.module and _touches(node.module, "fip.services"):
                     bad = [node.module]
             if bad:
                 offenders.append((f.relative_to(SRC), bad))
