@@ -5906,7 +5906,9 @@ Expected: FAIL —— `ModuleNotFoundError: ...data_service.ingest`
 
 ```python
 import datetime as dt
+import hashlib
 import io
+from decimal import Decimal
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -6032,7 +6034,11 @@ class IngestService:
             ).scalar_one_or_none()
             if fund is None:
                 fund = Fund(
-                    fund_code=f"P-{grouping.product_name}",
+                    # fund_code 是 String(32)，中文基金全称会超长。
+                    # 用 product_name 的稳定短哈希派生；可读性由 product_name 承担。
+                    fund_code="P-" + hashlib.sha1(
+                        grouping.product_name.encode("utf-8")
+                    ).hexdigest()[:16],
                     product_name=grouping.product_name,
                     grouping_status=grouping.status.value,
                 )
@@ -6113,7 +6119,7 @@ class IngestService:
         merged: dict[dt.date, list] = {}
         for parsed, ingested_at, payload_id in events:
             slot = merged.setdefault(
-                parsed.effective_at, [Decimal_zero(), Decimal_one(), ingested_at, payload_id]
+                parsed.effective_at, [Decimal(0), Decimal(1), ingested_at, payload_id]
             )
             slot[0] += parsed.dividend_per_unit
             slot[1] *= parsed.split_ratio
@@ -6138,17 +6144,6 @@ class IngestService:
     def rebuild_adjusted_nav(self, share_class_id: int, decision_at: dt.date) -> int:
         return backfill_adjusted_nav(self._session, share_class_id, decision_at)
 
-
-def Decimal_zero():
-    from decimal import Decimal
-
-    return Decimal(0)
-
-
-def Decimal_one():
-    from decimal import Decimal
-
-    return Decimal(1)
 ```
 
 > **同日事件的合并规则**：同一天可能同时出现在分红表与拆分表中。分红相加、拆分比例相乘，合并为一行 —— 与 `compute_adjusted_nav` 的「同日先除息后拆分」口径一致。
