@@ -66,12 +66,22 @@ def _to_date(raw: object) -> dt.date | None:
     return parsed
 
 
-#   份与金额之间的分隔符排除 “-”：若把负号并入分隔符，负号会被吞掉，
-#   金额组只能匹配到裸的正数，负分红（脏数据）就会被当成正分红悄悄
-#   接受 —— brief 原正则 `[^0-9]*` 正是这个疏漏，`amount` 组补上可选的
-#   `-?` 前缀、分隔符改成 `[^0-9-]*`，负号才会被保留进 amount 而不是被
-#   分隔符吃掉，下游 `amount < 0` 校验才有机会触发。
-_DIVIDEND_RE = re.compile(r"每\s*(?P<base>\d+)\s*份[^0-9-]*(?P<amount>-?\d+(?:\.\d+)?)")
+#   两处修正（均是 fix round 1 code review 发现的真实缺陷，不是风格问题）：
+#
+#   1. 金额锚定到「现金」/「派」，不能让分隔符匹配任意非数字字符。
+#      若分隔符是不受限的 `[^0-9]*`，遇到「每10份转增2股派现金0.30元」这种
+#      转增 + 现金分红同时出现的形状，`amount` 组会先撞上「转增2股」里的
+#      「2」，把 0.30 元的现金分红误解析成 2（放大约 6.7 倍），且不报错。
+#      要求分隔符里必须出现「现金」或「派」才能到达金额数字，锚定的是
+#      「现金分红金额」这个语义，而不是「份后面第一个数」这个位置。
+#   2. 份与金额之间的分隔符排除 “-”：若把负号并入分隔符，负号会被吞掉，
+#      金额组只能匹配到裸的正数，负分红（脏数据）就会被当成正分红悄悄
+#      接受 —— brief 原正则 `[^0-9]*` 正是这个疏漏，`amount` 组补上可选的
+#      `-?` 前缀、分隔符改成 `[^0-9-]*`，负号才会被保留进 amount 而不是被
+#      分隔符吃掉，下游 `amount < 0` 校验才有机会触发。
+_DIVIDEND_RE = re.compile(
+    r"每\s*(?P<base>\d+)\s*份.*?(?:现金|派)[^0-9-]*(?P<amount>-?\d+(?:\.\d+)?)"
+)
 
 
 def _parse_dividend_per_unit(raw: object) -> Decimal | None:
@@ -129,8 +139,13 @@ def _parse_ratio(raw: object) -> Decimal | None:
         left, _, right = text.replace("：", ":").partition(":")
         base = _to_decimal(left)
         target = _to_decimal(right)
-        if base is None or target is None or base == 0:
+        if base is None or target is None:
+            # 左右两侧本身就不是数字：判定为无法解析，丢弃而非猜测。
             return None
+        if base == 0:
+            # 分母为 0 不是「缺失记录」，是脏数据 —— 与下方 ratio <= 0 的
+            # 拒绝逻辑保持一致，都应该报错而不是被静默丢弃（fix round 1）。
+            raise ValueError(f"拆分折算比例的分母不得为 0，得到 {text!r}")
         return target / base
     return _to_decimal(text)
 
