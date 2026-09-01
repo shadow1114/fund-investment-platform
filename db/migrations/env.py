@@ -3,8 +3,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from fip.platform.db import registry  # noqa: F401  —— 填充 Base.metadata，勿删
+from fip.platform.db import registry  # noqa: F401  —— 填充 platform 层 Base.metadata，勿删
 from fip.platform.db.base import Base
+from fip.services.data_service.models import governance  # noqa: F401  —— 同上，services 层
+from fip.services.data_service.models import raw  # noqa: F401  —— 同上，services 层
 from fip.settings import settings
 
 config = context.config
