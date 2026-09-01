@@ -1,4 +1,5 @@
 import datetime as dt
+import pathlib
 
 import pytest
 from sqlalchemy import text
@@ -314,3 +315,74 @@ def test_time_order_rejects_pre_utc_midnight_row_in_every_timezone(db_session, s
             available_at=TZ_PREVIOUS_EVENING_UTC,
             ingested_at=TZ_PREVIOUS_EVENING_UTC))
         db_session.flush()
+
+
+# --------------------------------------------------------------------------
+# CHECK 约束的黄金快照
+# --------------------------------------------------------------------------
+
+_SNAPSHOT = pathlib.Path(__file__).with_name("check_constraints.snapshot")
+
+_ALL_CHECKS = text("""
+    SELECT n.nspname||'.'||t.relname||'.'||c.conname AS k,
+           pg_get_constraintdef(c.oid) AS d
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE c.contype = 'c'
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY 1
+""")
+
+
+def test_check_constraints_match_the_committed_snapshot(db_session):
+    """库里【实际】的 CHECK 定义必须与提交在仓库里的快照逐字相同。
+
+    为什么需要这条测试：本仓库一直把「alembic revision --autogenerate 报告
+    零操作」当作硬闸门，它确实抓出过三次误删。但 autogenerate【根本不比较
+    CHECK 表达式】—— 实测把 market.fund_nav 的整条时序 CHECK 换成恒真的
+    `CHECK (1=1)`（即把全平台 PIT 强制彻底废掉），autogenerate 依然报告
+    零操作。也就是说那道闸门对 CHECK 漂移完全失明，而本平台的载重时序
+    不变式恰恰全部住在 CHECK 里。
+
+    本测试的对象是【迁移的产出】而非 ORM 声明：测试库由 conftest 跑真实
+    alembic upgrade head 建起（见 tests/conftest.py），所以快照比对验的是
+    迁移真正在数据库里建出了什么。
+
+    快照【故意】做成逐字比对：任何对 mixins.py 或迁移的改动都会让它失败，
+    强制改动者重新生成快照并在 diff 里正面看到 DDL 到底变了什么 —— 这正是
+    autogenerate 给不了的那一眼。合法改动后重新生成：
+
+        .venv/bin/python -c "
+        import psycopg, pathlib
+        q = open('tests/integration/_snapshot_query.sql').read()
+        ..."
+
+    或直接照搬本测试的查询语句，把结果按同样格式写回快照文件。
+    """
+    rows = db_session.execute(_ALL_CHECKS).all()
+    actual = "\n".join(f"{k}\n    {d}" for k, d in rows) + "\n"
+    expected = _SNAPSHOT.read_text(encoding="utf-8")
+
+    if actual != expected:
+        actual_map = {k: d for k, d in rows}
+        expected_map = {}
+        lines = expected.splitlines()
+        for i in range(0, len(lines) - 1, 2):
+            expected_map[lines[i]] = lines[i + 1].strip()
+        added = sorted(set(actual_map) - set(expected_map))
+        removed = sorted(set(expected_map) - set(actual_map))
+        changed = sorted(
+            k for k in set(actual_map) & set(expected_map)
+            if actual_map[k] != expected_map[k]
+        )
+        pytest.fail(
+            "数据库里的 CHECK 定义与快照不符。\n"
+            f"新增 {len(added)}：{added}\n"
+            f"消失 {len(removed)}：{removed}\n"
+            f"变更 {len(changed)}：{changed}\n"
+            + "".join(
+                f"\n  {k}\n    快照: {expected_map[k]}\n    实际: {actual_map[k]}"
+                for k in changed[:5]
+            )
+        )
