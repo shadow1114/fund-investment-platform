@@ -47,3 +47,25 @@ def test_fund_split_handles_both_split_and_no_split_funds(symbol):
     record = adapter.fetch("fund_split", symbol=symbol)
     assert record.row_count >= 0
 
+
+@pytest.mark.parametrize(
+    ("symbol", "expect_zero_rows"),
+    [("161725", False), ("110022", True)],
+    ids=["has_dividend_history", "no_dividend_history"],
+)
+def test_fund_distribution_handles_both_dividend_and_no_dividend_funds(
+    symbol, expect_zero_rows
+):
+    """与 fund_split 的空结果走的是同一套 _assert_columns 代码路径，但这是
+    两个不同的数据集 —— 若只靠 split 测试“顺带”覆盖，一旦有人给 split
+    加特例或收窄空结果分支，分红这边会静默失效而没有测试变红。161725 有
+    分红历史（3 行）；110022 从未分红过，上游同样返回 0 行 0 列（无 schema）
+    的空 DataFrame。用 row_count 的具体取值而非“没有抛异常”来断言 ——
+    后者无法区分“处理正确”与“恰好没崩”。"""
+    adapter = AkShareSourceAdapter()
+    record = adapter.fetch("fund_distribution", symbol=symbol)
+    if expect_zero_rows:
+        assert record.row_count == 0
+    else:
+        assert record.row_count > 0
+
