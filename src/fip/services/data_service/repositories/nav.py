@@ -1,8 +1,10 @@
 import datetime as dt
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from fip.platform.db.types import NavNumeric
 from fip.platform.decision_data.pit import NavPoint
 from fip.services.data_service.normalization.adjusted_nav import (
     DistributionEvent,
@@ -39,6 +41,37 @@ _EVENT_SQL = text("""
 """)
 
 
+# 出口量化的标度直接取自 NavNumeric（= NUMERIC(18, 8)），不写死 8 ——
+# 标度若哪天改了，读路径与物化列必须一起改，不能靠人记得同步两处。
+_NAV_SCALE = int(NavNumeric.scale or 0)
+_NAV_QUANTUM = Decimal(1).scaleb(-_NAV_SCALE)
+
+
+def _quantize_nav(value: Decimal) -> Decimal:
+    """把现算的复权净值量化到 NavNumeric 的标度。
+
+    为什么必须在【出口】量化（fix round 4）：
+
+    compute_adjusted_nav 内部用 60 位有效数字 + 60 位保护位滚动累乘，产出的
+    是 60 位有效数字的值；而 market.fund_nav.adjusted_nav 是 NUMERIC(18, 8)，
+    由 PostgreSQL 舍入到 8 位。两条路径于是有两个不同精度的口径：
+      · 实测（fip_dev，share_class 4，5997 行 / 25 次分红）：5893 行不相等，
+        max|diff| = 5.0e-9，恰是 8 位小数的半个 ulp；
+      · NavPoint.adjusted_nav 没有精度契约，60 位里有 52 位是计算保护位的
+        噪声，会直接流进 Plan-2 的因子计算；
+      · spec §9.3 的可复现性容差是 1e-10，「回读列 vs 现算」的相对误差约
+        5e-9，超标一个半数量级。
+
+    舍入方式取 ROUND_HALF_UP（半个 ulp 向远离零的方向），与 PostgreSQL 的
+    numeric 舍入一致 —— 若这里用 Python Decimal 默认的 ROUND_HALF_EVEN，
+    恰好落在半个 ulp 上的值会与列里的值差 1 个 ulp，一致性对照又会分叉。
+
+    【只在出口量化】：compute_adjusted_nav 这个纯函数不动，累乘链路仍然全程
+    高精度 —— 先降精度再累乘会让舍入误差随链路长度累积，那是另一个 bug。
+    """
+    return value.quantize(_NAV_QUANTUM, rounding=ROUND_HALF_UP)
+
+
 class SqlNavPitRepository:
     """PIT NAV 访问的 SQL 实现。
 
@@ -73,6 +106,9 @@ class SqlNavPitRepository:
 
         计算不出复权净值时 compute_adjusted_nav 抛 AdjustedNavUnavailable，
         本方法【不】捕获它、不回退成读旧列、不填 0、不沿用上期（C-6）。
+
+        精度契约：返回的 adjusted_nav 一律量化到 NavNumeric 的标度
+        （NUMERIC(18, 8)），与物化列同一口径 —— 见 _quantize_nav。
         """
         # decision_at 是业务日期；可见性判定取该日终了时刻。
         visible_until = dt.datetime.combine(
@@ -97,7 +133,7 @@ class SqlNavPitRepository:
                 for r in event_rows
             ],
         )
-        adjusted = {p.effective_at: p.adjusted_nav for p in points}
+        adjusted = {p.effective_at: _quantize_nav(p.adjusted_nav) for p in points}
         # unit_nav / version / availability_quality 仍取自净值行本身；
         # 只有 adjusted_nav 来自现算结果。切片放在最后一步。
         return [

@@ -104,19 +104,38 @@ def test_materialized_column_matches_recomputed_series_when_aligned(
 
     这条测试是保护物化列不悄悄跑偏的网：现算是真值来源，列是排查用的物化
     副本；对齐场景下两者必须一致，一旦分叉就说明其中一条路径出了 bug。
+
+    ⚠️ 夹具在 fix round 4 被改写过（原值 1.0 / 1.1 / 1.21 / 1.32）——
+    那些值在 8 位小数内【都能精确表示】，于是这条测试在真实数据上是恒真的
+    假测试：读路径把 compute_adjusted_nav 的 60 位有效数字结果原样放进
+    NavPoint，物化列却是 NUMERIC(18,8)，两条路径只有在夹具值恰好落在 8 位
+    内时才相等。实测（fip_dev，share_class 4，5997 行 / 25 次分红）：
+    5893 行不相等，max|diff| = 5.0e-9（正好是 8 位小数的半个 ulp）。
+
+    现在夹具刻意让 1/3 出现：4/3 在十进制里无限循环，任何「不量化就比较」
+    的实现都会在这里失败。修复方式是在 repository 出口按 NavNumeric 的标度
+    量化（内部计算仍是高精度，纯函数不动），两条路径这才真正一致。
     """
-    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.1")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.0")
+    # 除息日净值 0.3、每份分红 0.1 → 再投资比例 1 + 1/3，累计份额 4/3。
     _add_dist(db_session, share_class, dt.date(2020, 1, 3), "0.1",
               available_at=_utc(2020, 1, 4))
-    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "1.0")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "0.3")
+    # 这一点的复权净值 = 1.0 × 4/3 = 1.333…，十进制无限循环。
+    _add_nav(db_session, share_class, dt.date(2020, 1, 6), "1.0")
     db_session.flush()
 
     updated = backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
-    assert updated == 2
+    assert updated == 3
 
     points = _series(db_session, share_class, dt.date(2026, 8, 31),
                      dt.date(2020, 1, 1), dt.date(2020, 12, 31))
-    assert [p.adjusted_nav for p in points] == [Decimal("1.1"), Decimal("1.1")]
+    assert [p.adjusted_nav for p in points] == [
+        Decimal("1.0"), Decimal("0.4"), Decimal("1.33333333"),
+    ]
+    # 精度契约：读路径产出的 adjusted_nav 就是 NavNumeric(18, 8) 的标度，
+    # 不是 60 位有效数字里带 52 位计算保护位噪声的数。
+    assert all(-p.adjusted_nav.as_tuple().exponent == 8 for p in points)
 
     stored = _column(db_session, share_class)
     for point in points:
@@ -447,11 +466,18 @@ def test_materialized_column_matches_recomputed_across_a_multi_event_chain(
     而读路径在 2026 用【完整】事件集一次算完。两者仍须逐点相等 —— 这不是
     巧合而是前向性的结构性推论：adj_t 只依赖 effective_at ≤ t 的事件，
     对齐场景下这些事件在 t 行自己的首个 checkpoint 上恰好全部可见。
+
+    ⚠️ 夹具在 fix round 4 被改写过，理由与上一条一致：原来的四个值
+    （1.0 / 1.1 / 1.21 / 1.32）在 8 位小数内都能精确表示，所以「加厚版」
+    加厚的只是算法覆盖面，对【口径精度】这条它自称守卫的不变式仍然恒真。
+    现在把除息日净值改成 0.3（累计份额出现 4/3），01-06 的复权净值
+    0.55 × 8/3 = 1.4666…67 在 8 位小数外仍有无穷多位 —— 未量化的读路径
+    与 NUMERIC(18,8) 列必然分叉。
     """
     _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.0")
     _add_dist(db_session, share_class, dt.date(2020, 1, 3), "0.1",
               available_at=_utc(2020, 1, 4))
-    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "1.0")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "0.3")
     _add_dist(db_session, share_class, dt.date(2020, 1, 6), "0",
               available_at=_utc(2020, 1, 7), split="2")
     _add_nav(db_session, share_class, dt.date(2020, 1, 6), "0.55")
@@ -463,8 +489,11 @@ def test_materialized_column_matches_recomputed_across_a_multi_event_chain(
 
     points = _series(db_session, share_class, dt.date(2026, 8, 31),
                      dt.date(2020, 1, 1), dt.date(2020, 12, 31))
+    # 份额：1 → 4/3（分红）→ 8/3（拆分）。0.55 × 8/3 = 1.4666…，
+    # 按 NavNumeric 的标度四舍五入（PostgreSQL 与读路径都用 half-up）为
+    # 1.46666667；0.6 × 8/3 = 1.6 则是精确值。
     assert [p.adjusted_nav for p in points] == [
-        Decimal("1.0"), Decimal("1.1"), Decimal("1.21"), Decimal("1.32"),
+        Decimal("1.0"), Decimal("0.4"), Decimal("1.46666667"), Decimal("1.6"),
     ]
 
     stored = _column(db_session, share_class)

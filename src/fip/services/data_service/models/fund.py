@@ -238,10 +238,12 @@ class InvestmentEligibility(Base, VersionedMixin):
     与 fund_nav / fund_distribution / risk_free_rate 同属三时点 + version
     的事实型模式（03-erd §15.1 状态型清单未列出本实体），PK 为
     (share_class_id, effective_at, version)。因此用版本化表的
-    temporal_check_constraints（四子句，anchor = effective_at），
-    【不得】改用 interval_temporal_check_constraints —— 本表没有
-    valid_from/valid_to，它的 effective_at 是「事实成立日」而非
-    「区间起点」，clause 1 / clause 4 在这里仍然是真正的前视偏差防线。
+    temporal_check_constraints（自迁移 0015 起是【五子句】，anchor =
+    effective_at），【不得】改用 interval_temporal_check_constraints ——
+    本表没有 valid_from/valid_to，它的 effective_at 是「事实成立日」而非
+    「区间起点」，clause 1 / clause 4 在这里仍然是真正的前视偏差防线；
+    clause 5（available_at 不得早于它自己声明的来源）与 anchor 无关，
+    两类表都适用。
     """
 
     __tablename__ = "investment_eligibility"

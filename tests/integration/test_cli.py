@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from fip.platform import cli
 from fip.platform.cli import _resolve
+from fip.services.data_service.adapters.akshare import client as akshare_client
 from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
 from fip.services.data_service.ingest import IngestService
 from fip.services.data_service.models.fund import (
@@ -29,6 +30,7 @@ from fip.services.data_service.models.fund import (
     FundShareClass,
     ProviderFundIdentity,
 )
+from fip.services.data_service.models.market import FundNav
 
 pytestmark = pytest.mark.integration
 
@@ -260,8 +262,24 @@ def committed_session(db_engine):
     """真提交的会话；结束时清空本测试写进去的行。
 
     不能复用 db_session：它的 rollback 兜底正是这条测试要绕开的东西。
-    收尾用 TRUNCATE ... CASCADE 把维度、映射与 raw 全部清干净，
-    保证不污染后续用例（测试库里这些表本来就是空的）。
+    收尾用 TRUNCATE ... CASCADE 把维度、映射与 raw 清干净，保证不污染后续
+    用例（测试库里这些表本来就是空的）。
+
+    ⚠️ CASCADE 的实际波及面远不止 TRUNCATE 语句里点名的 7 张表（fix round 4
+    item 5：此处原先只列了那 7 张，读者会以为范围就到此为止）。按外键图，
+    CASCADE 还会连带清空：
+
+      · market.fund_nav 及其 31 张分区子表、market.fund_distribution
+        （都外键指向 fund.fund_share_class）
+      · fund.fund_fee、fund.fund_status_history、fund.investment_eligibility
+        （指向 fund_share_class）
+      · fund.fund_classification_history、fund.fund_manager_assignment
+        （指向 fund.fund）
+      · governance.data_source_priority（指向 governance.data_provider_dataset）
+
+    也就是说这个 fixture 会清空【几乎整个业务数据面】。它只在测试库里跑
+    （db_engine 来自 settings.test_database_url），但任何人若把它复制到别处
+    连上 dev 库，会一次性抹掉全部已灌数据。
     """
     session = Session(db_engine, future=True)
     try:
@@ -321,3 +339,56 @@ def test_ingest_funds_really_commits_the_successful_part(
     assert mapping["000001"] == a_id, "旧映射必须原样保留，不被静默改写"
     assert "测试改名混合A" in share_classes, "冲突批次的孤儿维度行同样已提交"
     assert payloads == 2, "两批 fund_list 的 raw payload 都必须已提交"
+
+
+# --- 生产装配路径的披露时滞 ---------------------------------------------
+# fix round 4 item 4：把 cli.DISCLOSURE_LAG_DAYS 从 1 改成 7，全套测试依然
+# 全绿 —— 8 处测试各自注入 disclosure_lag_days=1，没有任何测试走过
+# cli._service() 这条【生产装配】路径。于是那个常量事实上没有任何测试保护，
+# 而它决定了全库每一行净值的 available_at，也就决定了每一个 decision_at 上
+# 什么可见、什么不可见。
+
+NAV_FRAME = pd.DataFrame({"净值日期": ["2020-01-02"], "单位净值": [1.2345]})
+
+
+def _nav_caller(name, **params):
+    if name == "fund_open_fund_info_em" and params.get("indicator") == "单位净值走势":
+        return NAV_FRAME
+    raise AssertionError(f"未预期的调用 {name} {params}")
+
+
+class _OfflineAdapter(AkShareSourceAdapter):
+    """真适配器，只把时钟与上游调用换成固定的离线夹具。
+
+    刻意用子类而不是一个 lambda：cli._resolve 会读
+    AkShareSourceAdapter.provider_code 这个【类属性】，换成 lambda 会让被测
+    的装配路径在与本测试无关的地方断掉。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(clock=lambda: FIXED_NOW, caller=_nav_caller)
+
+
+def test_production_assembly_pins_the_disclosure_lag(db_session, ingested, monkeypatch):
+    """钉住【生产装配路径】的披露时滞：净值可见时刻 = 净值日 + 1 天。
+
+    刻意不走 IngestService(..., disclosure_lag_days=1)，而是走
+    cli._service(session) —— 常量 cli.DISCLOSURE_LAG_DAYS 就装配在那里。
+    断言里的 1 天是【写死的字面量】而不是 cli.DISCLOSURE_LAG_DAYS：若写成
+    后者，把常量改成 7 时本测试会跟着一起变，等于什么也没钉住。
+
+    只替换适配器（AkShareSourceAdapter 需要联网），装配链路的其余部分原样
+    保留。改动那个常量必须让本测试失败。
+    """
+    monkeypatch.setattr(akshare_client, "AkShareSourceAdapter", _OfflineAdapter)
+
+    share_class = _resolve(db_session, "000001")
+    assert cli._service(db_session).ingest_nav(share_class.id, "000001") == 1
+
+    row = db_session.query(FundNav).filter_by(share_class_id=share_class.id).one()
+    assert row.effective_at == dt.date(2020, 1, 2)
+    assert row.available_at == dt.datetime(2020, 1, 3, tzinfo=dt.UTC)
+    # C-12：AKShare 给不出这两个时刻，必须如实留空，质量恒为 INFERRED。
+    assert row.published_at is None
+    assert row.provider_available_at is None
+    assert row.availability_quality == "INFERRED"

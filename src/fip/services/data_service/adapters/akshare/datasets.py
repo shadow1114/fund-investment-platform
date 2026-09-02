@@ -7,6 +7,22 @@
 
 from dataclasses import dataclass, field
 
+# `bond_china_yield` 的期限列。探查结果（AKShare 1.18.94，见 task-10-report.md）：
+# 实际列为 [曲线名称, 日期, 3月, 6月, 1年, 3年, 5年, 7年, 10年, 30年] —— 8 个期限列，
+# 【没有】「2年」。
+#
+# 这 8 列必须进 required_columns：它们是 parse_yield_curve_frame 真正读取的列。
+# 契约此前只声明 {曲线名称, 日期}，于是上游把「1年」改成「1Y」时，解析器会静默
+# 返回零行（宽表展开找不到任何期限列），而契约测试照样绿 —— 缺列是上游 schema
+# 漂移最常见的形状，恰恰必须由契约来接。
+#
+# parse.TENOR_LABELS 里还认得「2年」：认得但不要求。上游目前不给这一列，
+# 把它写进契约会让契约测试对着一列上游从未提供的东西报错。二者的一致性由
+# tests/unit/test_yield_curve_parsing.py 的漂移测试守住。
+YIELD_TENOR_COLUMNS: frozenset[str] = frozenset(
+    {"3月", "6月", "1年", "3年", "5年", "7年", "10年", "30年"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DatasetSpec:
@@ -51,6 +67,9 @@ DATASETS: dict[str, DatasetSpec] = {
     "risk_free_rate": DatasetSpec(
         code="risk_free_rate",
         callable_name="bond_china_yield",
-        required_columns=frozenset({"曲线名称", "日期"}),
+        # 「曲线名称」不是可选的装饰：同一个日期下有三条不同的曲线（国债 /
+        # 中短期票据AAA / 商业银行普通债AAA），缺了它就无法回答「这是哪条
+        # 曲线」，而 RiskFreeRate 的主键第一列正是 curve_code。
+        required_columns=frozenset({"曲线名称", "日期"}) | YIELD_TENOR_COLUMNS,
     ),
 }

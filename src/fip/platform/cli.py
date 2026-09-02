@@ -24,7 +24,24 @@ if TYPE_CHECKING:
     from fip.services.data_service.ingest import IngestService
     from fip.services.data_service.models.fund import FundShareClass
 
-DISCLOSURE_LAG_DAYS = 1  # 与 governance.data_source_priority 中登记的时滞一致
+# 生产装配路径上的披露时滞（天）。AKShare 给不出披露时刻，净值的 available_at
+# 由这条【声明的推导规则】算出：available_at = effective_at + 时滞，质量恒为
+# INFERRED。
+#
+# ⚠️ 如实登记（fix round 4 item 4）：这个时滞【当前只住在这行代码里】，
+# 【尚未】登记进 governance.data_source_priority ——那张表由迁移 0006 建出，
+# 但全库迁移没有任何 INSERT/bulk_insert 往它写过一行，也没有任何读取方。
+# 此前这行注释写的是「与 governance.data_source_priority 中登记的时滞一致」，
+# 那是在说谎：它让读者以为存在一套治理机制，而实际上并不存在。
+#
+# 引入第二个 provider 之前【必须】补上：多 provider 时「哪个源优先、各自的
+# 时滞是多少」必须是可查询、可版本化的数据，不能是各个模块里的常量 ——
+# 否则回测报告无法复述它当时用的是哪一套时滞。
+#
+# 本常量由 tests/integration/test_cli.py::
+# test_production_assembly_pins_the_disclosure_lag 钉住（走的是本文件的
+# _service() 生产装配路径，不是各测试自己注入的 disclosure_lag_days）。
+DISCLOSURE_LAG_DAYS = 1
 
 
 def _session() -> Session:

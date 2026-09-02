@@ -34,8 +34,14 @@ def declared_lag_availability(
     """用【声明的披露时滞】推导 available_at，质量恒为 INFERRED。
 
     用于 AKShare 净值历史回补：上游没有披露时刻，但净值的披露节奏是
-    已知且稳定的。这是一条【声明的推导规则】而非猜测 —— 时滞取值写入
-    governance.data_source_priority 并版本化，回测报告必须复述它。
+    已知且稳定的。这是一条【声明的推导规则】而非猜测。
+
+    ⚠️ 如实登记（fix round 4 item 4）：本函数此前的注释声称时滞「写入
+    governance.data_source_priority 并版本化」——那是假的。该表由迁移 0006
+    建出，但全库没有任何一处往它写行，也没有任何读取方。时滞的唯一取值点是
+    调用方传进来的 lag（生产装配路径上来自 fip.platform.cli.DISCLOSURE_LAG_DAYS
+    这个常量）。引入第二个 provider 之前必须把它登记进那张表并版本化，否则
+    回测报告无法复述「当时用的是哪一套时滞」。
 
     质量恒为 INFERRED，绝不因为规则可信就升级为 DERIVED。
     """

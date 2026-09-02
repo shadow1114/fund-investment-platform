@@ -1,4 +1,5 @@
 import datetime as dt
+import os
 import pathlib
 
 import pytest
@@ -438,17 +439,27 @@ def test_check_constraints_match_the_committed_snapshot(db_session):
 
     快照【故意】做成逐字比对：任何对 mixins.py 或迁移的改动都会让它失败，
     强制改动者重新生成快照并在 diff 里正面看到 DDL 到底变了什么 —— 这正是
-    autogenerate 给不了的那一眼。合法改动后重新生成：
+    autogenerate 给不了的那一眼。合法改动后这样重新生成（fix round 4 item 5：
+    此处原先指向 tests/integration/_snapshot_query.sql，而【该文件不存在】，
+    照着做只会得到一个 FileNotFoundError）：
 
-        .venv/bin/python -c "
-        import psycopg, pathlib
-        q = open('tests/integration/_snapshot_query.sql').read()
-        ..."
+        FIP_WRITE_CHECK_SNAPSHOT=1 .venv/bin/pytest \
+            tests/integration/test_temporal_constraints.py -k snapshot
 
-    或直接照搬本测试的查询语句，把结果按同样格式写回快照文件。
+    它按当前测试库（conftest 跑真实 alembic upgrade head 建起）重写快照文件，
+    然后【故意以失败结束】—— 重新生成永远不能顺带变绿，改动者必须去看
+    git diff 再不带该环境变量重跑一次。
     """
     rows = db_session.execute(_ALL_CHECKS).all()
     actual = "\n".join(f"{k}\n    {d}" for k, d in rows) + "\n"
+
+    if os.environ.get("FIP_WRITE_CHECK_SNAPSHOT") == "1":
+        _SNAPSHOT.write_text(actual, encoding="utf-8")
+        pytest.fail(
+            f"已按当前数据库重新生成 {_SNAPSHOT.name}。请在 git diff 里逐条确认"
+            "这些 DDL 变化确实是你想要的，再不带 FIP_WRITE_CHECK_SNAPSHOT 重跑。"
+        )
+
     expected = _SNAPSHOT.read_text(encoding="utf-8")
 
     if actual != expected:
