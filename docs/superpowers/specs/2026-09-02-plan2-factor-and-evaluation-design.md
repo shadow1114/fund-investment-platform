@@ -539,3 +539,363 @@ CI 不跑**。按 Plan-1 交接项六.1「只由阅读/推理保证的性质等�
 这条目前没有保护。**裁定：Task 1 用 `alembic.autogenerate.compare_metadata`
 把它写成集成测试**（约 15 行），与黄金快照互补——快照管 CHECK 表达式，
 它管表/列/索引/唯一键。
+
+---
+
+## 9. 表设计起草期的追加裁定（Task 7–8）
+
+### P2-11【采纳】`factor_value` 改用代理主键
+
+**这是 BLOCK-6 之外的第二处矛盾，D-12 没覆盖到**：上游给的五列 PK 与它自己已定案的
+两个部分唯一索引**互相抵消**——`ux_factor_value_with_policy` 存在的全部意义
+就是让五元组相同、仅 `evaluation_policy_version` 不同的两行共存（D-13 前半句），
+而五列 PK 会把这条定案索引变成**永不触发的死代码**；六列 PK 又不成立
+（该列对非 MAR 因子必须为 NULL，NULL 不能进 PK）。
+
+**裁定：代理主键，身份完全交给那两个部分唯一索引。**
+
+### P2-12【采纳，补 BLOCK-4】`factor_value → factor_version` 用 FK，不留 VARCHAR 副本
+
+D-16 只说了 `factor_version` 引用 `factor_definition`，没说 `factor_value` 怎么引。
+**裁定：FK。** 与 D-15「引用而非复制」同一条原则。
+
+### P2-13【采纳，补 BLOCK-14】`risk_free_rate_ref` 用列组而非 JSONB
+
+并记一处**对不上的地方**：上游提到 `rate_source_quality` 的取值 `INTERPOLATED`，
+而 Plan-1 的 `market.risk_free_rate` 用的是 `availability_quality_enum`
+（EXACT / DERIVED / INFERRED），既没有插值路径也没有这个值。
+**裁定：复用 Plan-1 的枚举**（一致性优先），并标为待重审——
+若将来真的引入期限插值，那是一个新的 quality 维度，不应硬塞进 availability。
+
+### P2-14【扩大 D-14 的授权】`factor_value` 与 `fund_score` 同样不分区
+
+D-14 只授权了 `peer_group_member`。起草方把这两张也取消了分区，超出字面授权。
+
+**裁定：批准扩大。** 理由：M1 量级（约 300 只 × 10 因子 × 少数决策日）远未到需要分区；
+Plan-1 已证明分区表在约束递归、TRUNCATE 级联、迁移往返上都要额外处理。
+
+**并记一条起草方的实测结论**：我原先担心的「部分唯一索引 + 分区表不兼容」
+**在 PG 17 上不成立**（已在 `fip_dev` 上含子分区验证）——所以将来补分区没有结构性障碍。
+**触发阈值**：若走向全市场（27718 只 × 10 因子 × 252 日 ≈ 7000 万行/年），
+`factor_value` 必须分区；M1 规模不必。
+
+### P2-15【采纳，补 BLOCK-9 前半】组内 Sharpe / MDD 中位数落 `fund_tier`
+
+上游没说这两个中位数（G-9 要求与 Tier 同屏的那两个）落哪张表。
+
+**裁定：落 `fund_tier`。** 起草方的理由正确且是 G-5 的直接推论：这两个中位数是
+**因子派生量**，放进 `peer_group_snapshot` 会让 **B1 依赖因子计算**——
+而 Peer Group 构建不得依赖评分链路。
+
+**副作用如实登记**：组内 Sharpe 全 `UNAVAILABLE` 时该组不产出 Tier。
+这是诚实的，符合 G-3。
+
+### P2-16【采纳】副本 vs 引用按「会不会分叉」分别处理
+
+D-15 定的是「引用而非复制」，但起草方指出这条不能无差别套用，并给出了正确的判据：
+
+| 场景 | 处置 | 理由 |
+|---|---|---|
+| `fund_score_attribution.raw_value` | **保留副本** | `factor_value` 禁 UPDATE + version 钉死，**结构上不可能分叉**。与 `adjusted_nav` 不是一类问题——后者是 `(行, decision_at)` 的二元函数，标量列装不下；前者是一个已冻结的标量 |
+| `fund_universe_member.investment_eligibility` | **复合 FK 版本引用** | 按 D-15 |
+
+**并采纳一处起草方的额外发现**：复合 FK 复用 `share_class_id` 那一列，
+能让**数据库自己保证**「引用的那一版确实属于这只份额类别」——代理键做不到这件事。
+
+### P2-17【采纳，补 BLOCK-11】`selection_condition_result` 增加 `NOT_EVALUABLE`
+
+上游除 `condition_version` 外**一个字段名都没给**，六列全属补齐。
+起草方在 `PASS` / `FAIL` 之外加了第三个 outcome 值 `NOT_EVALUABLE`。
+
+**裁定：采纳。** 理由正确：把「输入 `UNAVAILABLE` 所以判不了」记成 `FAIL`，
+就是 G-3 在条件层的同一个错误——那是**编造了一个否定结论**，
+而事实是「不知道」。
+
+### P2-18【采纳】`fund_tier` 的分位阈值刻意不进 CHECK
+
+阈值 5/20/50/80 属配置（C-1 明令阈值配置化）。写进 CHECK 的后果：
+业务方改一次阈值就要发一支迁移，且**历史行会被新阈值判为违规**（C-8）。
+**裁定：不进 CHECK。**
+
+### P2-19 迁移编号最终确定
+
+P2-3 已把 0016 给了 Task 5。起草稿用的是 0016/0017，**整合时统一顺延**：
+
+| 迁移 | 归属 |
+|---|---|
+| `0016` | Task 5 —— `fund_classification_history` 开放区间唯一索引 |
+| `0017` | Task 7 —— `factor` schema 五张表 |
+| `0018` | Task 8 —— `evaluation` schema 九张表 |
+
+---
+
+## 10. 计算流起草期的追加裁定（Task 9–13）
+
+### P2-20【修订 D-10】「分母为 0」不是 INVALID，是 UNAVAILABLE
+
+D-10 把「分母为 0」列在 `INVALID`，而 D-9 与上游 `10-api/03` §4.3.5 把
+`ZERO_MAX_DRAWDOWN` 明标为「**好消息型不可用**」。差别是实质的：
+`INVALID` 会传导到 `evaluation_status = FAILED` **并须告警**——
+按原 D-10 实现，**一只从未回撤的基金会触发告警**。
+
+**修订 D-10 的表格**：
+
+| Status | 触发条件（修订后） |
+|---|---|
+| `INVALID` | 计算过程产生**数学上无意义**的结果：NaN、负方差、序列自相矛盾 |
+| `UNAVAILABLE` | 观测数 < `min_obs`；必需依赖缺失；**或分母为 0 这类良性不可算**（`ZERO_MAX_DRAWDOWN`、`ZERO_VOLATILITY`） |
+
+### P2-21【修订 D-10】链路 quality 移出 `FactorStatus`，改为独立 `quality_flag`
+
+D-10 的 `WARNING` 第二触发条件是「输入序列的链路含 `INFERRED`」。
+而 **AKShare 链路 100% 是 `INFERRED`**（G-15）——两者相乘的结果是
+**每个因子、每只基金、每个时点都是 `WARNING`，`VALID` 在 M1 完全不可达**。
+下游若把 `WARNING` 当异常处理，M1 会表现为「什么都不正常」。
+
+**修订**：`FactorStatus` 只反映**可计算性**，不反映**数据出处**。
+链路 quality 移到 `FactorResult.quality_flag`（独立字段，取值即
+`EXACT` / `DERIVED` / `INFERRED`），随结果传递但不占用 status。
+
+`WARNING` 只保留第一个触发条件：观测数落在 `[min_obs, min_obs × 1.5)`。
+
+> 这与 D-19「M1 常态是 `PARTIAL`」是同一类问题——**必须写测试把「常态」钉住**，
+> 否则下游会把正常状态当异常。
+
+### P2-22【修订接口契约】MAR 一律是逐期序列
+
+契约的 `mar: Decimal | None` 是标量，**装不下 `RISK_FREE` 模式的 MAR 序列**。
+取均值/首值/末值都是**伪造一个从未被决策的标尺**——与 `adjusted_nav` 标量列
+那三轮的教训同型。
+
+**裁定：`FactorInput.mar_daily: tuple[Decimal, ...] | None`，与收益率序列 1:1 对齐。**
+三种模式统一产出序列，消费方**不分支**：
+
+| 模式 | 产出 |
+|---|---|
+| `ZERO` | 全零序列 |
+| `CUSTOM` | 常数序列（由 `mar_quotation_basis` 声明的年化口径折算到逐期） |
+| `RISK_FREE` | 真实的 R_f 逐期序列 |
+
+这样 `RISK_FREE` 在 M1 **可用**，不必登记为缺口。
+
+### P2-23【采纳上游命名】MAR 第三模式是 `CUSTOM` 不是 `FIXED`
+
+上游 `01-fund-evaluation.md` §16.3 逐字是 `CUSTOM`。它会进
+`evaluation_policy_version` 的可复现链路，改名要带数据迁移，**现在定死**。
+`CUSTOM` 模式**必填 `mar_quotation_basis`**（年化口径），一并实现。
+
+### P2-24【补 D-16】`factor_effectiveness` 必须带 Peer Group 维度
+
+D-16 给的是 `(profile, factor_id, valid/invalid, IC, ICIR, 检验区间)`——**漏了横截面**。
+IC 是横截面统计量，而本平台的横截面**就是 Peer Group**。
+同一因子在股票型有效、在债券型无效是**正常结果**；不带 `peer_group_key`
+只能互相覆盖，或被迫跨组池化（把不同收益分布放进同一条相关系数）。
+
+**裁定**：`factor_effectiveness` 增加 `peer_group_key` 与 `segment` 两列。
+**Task 7 的实现者只看 D-16 不会知道这一条**，必须写进任务正文。
+
+### P2-25【补】`peer_group_snapshot` 必须落「所用分类版本」
+
+`FR-PEER-001` 与架构文档都要求 B1 = 组成员 + **所用分类版本**，
+而 digest 明记「字段清单文档未给值」。缺了它，
+「只存构建规则不存结果则历史不可重建」直接落空。
+
+**裁定**：`peer_group_snapshot` 增加 `classification_history_ids`
+（指向 `fund.fund_classification_history` 的引用集合）。
+
+### P2-26【补 D-9】Rolling Return 的聚合式与两处单位
+
+D-9 的公式表只有 9 条，`F-RET-002` 的**聚合式缺失**——滚动窗口年化收益率是个
+**序列**，落成一个因子值需要一次聚合。
+
+| 项 | 取值 | status |
+|---|---|---|
+| `rolling_return.aggregation` | `MEAN` | `PROVISIONAL` |
+| `rolling.window_unit` | `NAV_POINTS`（净值点数，非自然日） | `PROVISIONAL` |
+| `mar.daily_conversion` | `SIMPLE_DIVISION`（年化值 / 252） | `PROVISIONAL` |
+
+### P2-27【补】`fund_share_class.base_currency` 不存在，需建
+
+`FR:105` 把 Currency 定为 Peer Group **强制维度**、`FR:116` 要求它与 R_f 解析键
+取自**同一字段** `fund_share_class.base_currency`——而 `grep base_currency src/` **零命中**。
+
+**裁定**：Task 11 带一次 schema 变更（**迁移 0019**），新增：
+
+- `base_currency`（如 `CNY`）
+- `base_currency_source`（声明的推导规则，**不设 NOT NULL 兜底**）
+
+AKShare 的 `fund_name_em` 不提供币种。第一版推导规则：
+**全部 AKShare 场外基金以 CNY 计价**（QDII 投向海外但份额仍以 CNY 申赎），
+`source = "DECLARED_RULE_ALL_AKSHARE_CNY"`，标 `PROVISIONAL`。
+
+### P2-28【补接口契约】`normalize_peer_group`
+
+契约的 `percentile_rank` 签名里**没有 `n_effective`、没有 Rank、没有阈值**，
+单独承担不了 G-7/G-8。**裁定**：`percentile_rank` 保持纯内核不动，
+接口契约补入承担那一层的函数：
+
+```python
+def normalize_peer_group(
+    results: Sequence[FactorResult], direction: PreferenceDirection, min_size: int
+) -> list[NormalizedFactor]:
+    """排除 UNAVAILABLE/INVALID → 算 n_effective → 判 INSUFFICIENT_SAMPLE
+    → 产出 (rank, n_effective, percentile) 三元组（G-8 要求三者都落库）。"""
+```
+
+### P2-29【补 File Structure】Threshold Resolver 的落点
+
+`strategy_library/` 目录树漏了 threshold。**裁定**：
+`strategy_library/threshold/mar.py`（纯函数）+
+`services/factor_service/thresholds.py`（碰库的 R_f PIT 解析）。
+
+### P2-30【补】R_f 溯源必须带 `curve_code`，`ParsedYieldPoint` 必须带 `currency`
+
+- `risk_free_rate_ref` 的四个必备字段**不含 `curve_code`**，而 Plan-1 的
+  `RiskFreeRate` 主键第一列就是它，中债同一天三条曲线（实测信用债 10Y 高约 30bp）。
+  缺了它，溯源答不出「用的是哪条曲线」。**补为第五字段。**
+- `ParsedYieldPoint` **不带 `currency`**，而 `RiskFreeRate` 主键含它——
+  Plan-1 交接没提这个空档。**在适配器层补 `CURVE_CURRENCIES` 映射**（中债三条曲线均为 CNY）。
+
+### P2-31 迁移编号再次顺延
+
+| 迁移 | 归属 |
+|---|---|
+| `0016` | Task 5 —— `fund_classification_history` 开放区间唯一索引 |
+| `0017` | Task 7 —— `factor` schema 五张表（含 P2-24 的两列） |
+| `0018` | Task 8 —— `evaluation` schema 九张表（含 P2-25 的一列） |
+| `0019` | Task 11 —— `fund_share_class.base_currency` + `base_currency_source` |
+
+---
+
+## 11. 评价流起草期的追加裁定（Task 14–18）
+
+### D-22【严重 · Plan-1 代码 bug】`derive_eligibility` 的两个分支与上游语义互换
+
+上游三处文档**完全一致**（`05-fund-selection.md:217-223` = `02-business-requirements.md`
+§18.2 = `03-data/02-data-domain-model.md:400-406`）：
+
+| 状态 | 含义 | 可持有 | 可减仓 |
+|---|---|:---:|:---:|
+| `HOLD_ONLY` | **暂停申购** | ✓ | ✓ |
+| `NOT_TRADABLE` | 已清盘 / **暂停赎回** | — | ✗ |
+| `EXIT_ONLY` | **即将清盘 / 转型** | ✓ | ✓ |
+
+而 `src/fip/services/data_service/eligibility.py:56-61`：
+
+```python
+if subscription_open and not redemption_open:   # 暂停【赎回】
+    return EligibilityStatus.HOLD_ONLY          # ← 上游说这是 NOT_TRADABLE
+if not subscription_open and redemption_open:   # 暂停【申购】
+    return EligibilityStatus.EXIT_ONLY          # ← 上游说这是 HOLD_ONLY
+```
+
+**两个分支都错了。** 而且该函数**自己的 docstring** 写着「『暂停申购』意味着不可加仓
+但仍可持有与减仓」——与上游一致、与它自己的代码矛盾。
+
+Plan-1 里它没有消费方，错了不显形。Task 16 一旦按 §9.3 消费它：
+暂停申购（常见、良性、期满即恢复）→ 判 `EXIT_ONLY` → **不入池**；
+暂停赎回（真正不可交易）→ 判 `HOLD_ONLY` → **入池并标注约束**。
+**该排除的进了池，不该排除的被赶了出去**，而全部条件结果照常落库，没有一条测试会红。
+
+**裁定**：修正为——
+
+```python
+if subscription_open and not redemption_open:
+    return EligibilityStatus.NOT_TRADABLE   # 暂停赎回
+if not subscription_open and redemption_open:
+    return EligibilityStatus.HOLD_ONLY      # 暂停申购
+```
+
+并如实登记第二处缺口：`EXIT_ONLY`（即将清盘/转型）**根本不能由这两个布尔推出**，
+它是生命周期条件。本函数**永不返回 `EXIT_ONLY`**——与既有的 `LIMITED` 缺口同类，
+照那条的写法在 docstring 里写明。**并入 Task 1**（Plan-1 交接性质的修复）。
+
+### D-23【补齐 C-2】子分层权重五项各 `0.2`，标 `PROVISIONAL`
+
+上游只把**因子层**权重定案为 `EQUAL_WITHIN_VALID`，**子分层**推给「由 Profile 定义」，
+而 `§8.5` 只定了个别因子在个别画像下的相对高低——**那四项在 M1 全都不可算**。
+同时 `BR:278` 明确禁止「现在拍一个 25%/25%/25%/25%」。
+
+于是：没有子分权重 → 没有总分 → 没有 Tier → M1.4 验收通不过。
+**这正是 D-1 的同一条论证链，只是发生在上一层，而 D-1 没有处理它。**
+
+**裁定**：`sub_score_weights` 五项各 `0.2`，`status: PROVISIONAL`，
+`source` 写明「上游禁止拍板但未给值」。于是 LIVE 模式下每次取用都会发出
+`ProvisionalParameterUsed` 告警——**这正是 IMP-4 的机制存在的理由**。
+它与因子层的 `EQUAL_WITHIN_VALID` **性质不同**：后者已定案，前者是占位，不得混同。
+
+### D-24【补齐 C-3】Profile 声明 13 个因子，可算 10 个，`data_completeness = 10/13`
+
+若分母取「可算的 10 个」，则 `data_completeness ≡ 1.0`，
+而 spec §6.2 与 M1.4 判据要求「Relative Performance Score 呈现为 `UNAVAILABLE`
+**且 `Data Completeness` 反映之**」——理由是「基于 4 个子分的 85 分与基于 5 个子分的
+85 分必须可区分」。分母取 10 会把这句话**静默抹掉**，M1 用来跑通 `UNAVAILABLE` 机制的
+唯一场景随之消失。
+
+**裁定**：区分**声明**与**可算**。Profile 声明 **13** 个（10 可算 + 3 个 REL），
+分母取 13，M1 的 `data_completeness` 恒为 `10/13 = 0.76923077`。
+
+三个 REL 取 D-8 已点名的、从现存文档中**泄露出的真实 ID**：
+`F-REL-002` Alpha / `F-REL-003` Beta / `F-REL-004` IR。
+Tracking Error 与 Benchmark 超额收益**不声明**——它们的真实 ID 未泄露，
+凭空编号会在拿到正式文档时与真 ID 冲突。
+
+**必须写进接口契约**：`FACTOR_IDS`（可算，10 个）与 `PROFILE_DECLARED_FACTOR_IDS`
+（声明，13 个）是**两个不同的常量**。只定义前者的话，Task 14 的分母会静默变回 10。
+
+### D-25【补齐 C-4】`score_status` 的层级与优先级
+
+`FS:344` 说的是「某**子分**标 `INSUFFICIENT_FACTORS`」，而 D-19 把它列为
+**基金层** `score_status` 的取值——两个层级被混进同一个枚举。
+
+**裁定**：同一枚举用于两层（取值含义一致），基金层优先级钉为：
+
+```
+VALIDATION_PENDING > UNAVAILABLE > INSUFFICIENT_FACTORS > PARTIAL > COMPLETED
+```
+
+理由：越靠前的状态越是「这个分数**不能按字面使用**」的强信号。
+M1 常态是 `PARTIAL`（REL 恒缺）——必须有测试显式断言它是**正常**的。
+
+### D-26【裁定 C-5】`N = 1` 归入 `INSUFFICIENT_SAMPLE`
+
+`FR §7.3` 要求 `N = 1` → `Percentile = UNAVAILABLE`（此时 `Rank = 1` 存在），
+但 `fund_ranking` 的联动 CHECK 只允许两种形态，**没有第三种能容纳「有名次但无分位」**。
+
+**裁定**：`N = 1` 归入 `INSUFFICIENT_SAMPLE`（生产配置下 `1 < 30` 恒成立，语义无损），
+并用一条测试钉住。若将来 `MIN_PEER_GROUP_SIZE` 被调到 1，这条冲突会立刻显形——
+测试的注释里要写明这一点。
+
+### D-27【修正 D-3 的断言字符串】QE-1 / SDL-1
+
+P2-1 撤销了 `libs/` 落位，但 D-3 表格里 QE-1 仍写「不得 import
+`fip.libs.strategy_library`」——照抄它写出的检查**永远不会触发**（真实路径是
+`fip.strategy_library`）。**这与 SB-1「静默缺席」是同一种病，只是换成了
+「检查存在但永远为真」。**
+
+**修正**：
+
+| # | 断言（修正后） |
+|---|---|
+| QE-1 | `quant_engine` 不得 import `fip.strategy_library` / `fip.services` / `fip.platform` |
+| SDL-1 | `strategy_library` 不得 import `sqlalchemy` / `psycopg` **以及 `fip.services.*`（含 repositories）** |
+
+并记一处**既有实现的缺口**：现有 `tests/fitness/test_architecture.py` 查的是
+`IO_LIBS`（顶层包名），**根本不检查 `fip.services.*` 前缀**。Task 4 落实 SDL-1
+时必须把这一半补上。
+
+### D-28【采纳 C-8 三条】
+
+| # | 裁定 |
+|---|---|
+| BLOCK-9 | 组内 Sharpe / MDD 中位数落 `fund_tier`，**每行自带**。与 P2-15 结论一致，此处补上第二条理由：落 `peer_group_snapshot` 需要多一次 join 才能满足 G-9，而**「少 join 一次就违规」的约束活不长** |
+| TBD-DBD-3 | `fund_score_attribution` 用**完整明细表**（非 JSONB）：`03-erd §9.3` 要求进入 `WHERE` / `GROUP BY` 的字段必须结构化，归因分析要按 `factor_id` 聚合 |
+| — | `fund_score` / `fund_ranking` / `fund_tier` 的唯一约束**必须含 `profile_id`**。G-10 要求按 Profile 拆分子排名；不含它的唯一键会在 M2 加第二个 Profile 那天变成主键冲突，而**M1 全程不会显形** |
+
+### D-29【采纳 C-9】A-2 判据的期望值与 D-24 联动
+
+Task 18 的判据 A-2 期望 `data_completeness = 0.76923077`（10/13）。
+这条依赖关系**是有意写出来的**：若 D-24 被改为「分母只算可算因子」，
+A-2 的期望值要改成 `1.0`，而那样它就**退化成一条恒真的判据**，
+M1.4 的完成判据「`Data Completeness` 反映之」随之失去被验证的对象。
+**改一个必须改另一个**，任务正文要写明这条联动。

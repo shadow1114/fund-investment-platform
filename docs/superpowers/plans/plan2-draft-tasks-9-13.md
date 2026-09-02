@@ -3292,3 +3292,1290 @@ UNCLASSIFIED / 无分类 / 无币种三种排除原因分开登记（D-6）。
 G-5 的适应度检查改扫 libs/strategy_library/peer_group，并补一条
 『被扫目录必须存在』断言 —— 原检查在目录不存在时恒真。"
 ```
+
+---
+
+### Task 12: 因子标准化（Peer Group 内 Percentile Rank + 方向转换）
+
+**Files:**
+
+- Create: `src/fip/libs/strategy_library/factor/normalize.py`
+- Modify: `src/fip/libs/strategy_library/peer_group/build.py`（加一个配置路径常量）
+- Modify: `tests/fitness/test_architecture.py`
+- Test: `tests/unit/test_factor_normalize.py`
+- Test: `tests/fitness/test_single_config_source.py`
+
+**Interfaces:**
+
+*Consumes*：
+
+```python
+from fip.libs.strategy_library.factor.definitions import PreferenceDirection   # Task 9
+from fip.libs.strategy_library.factor.status import FactorStatus               # Task 9
+```
+
+*Produces*：
+
+```python
+# fip.libs.strategy_library.factor.normalize
+class CrossSectionStatus(StrEnum):
+    NORMAL = "NORMAL"; INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"   # = cross_section_status_enum
+PERCENTILE_SCALE: int = 8
+
+def percentile_rank(values: Sequence[Decimal],
+                    direction: PreferenceDirection) -> list[Decimal | None]:
+    """契约原文。p = (N − Rank) / (N − 1) × 100；N == 1 → None；
+    LOWER_IS_BETTER 先取负再排。"""
+
+def competition_ranks(values: Sequence[Decimal]) -> list[int]
+    """COMPETITION_RANK（D-20）：并列占用相同名次，随后名次被跳过。Rank=1 最优。"""
+
+@dataclass(frozen=True, slots=True)
+class NormalizedFactorValue:
+    share_class_id: int
+    rank: int | None
+    n_effective: int
+    percentile: Decimal | None
+    status: CrossSectionStatus
+
+def normalize_peer_group(
+    entries: Sequence[tuple[int, Decimal | None]],
+    direction: PreferenceDirection,
+    min_peer_group_size: int,
+) -> list[NormalizedFactorValue]
+
+# fip.libs.strategy_library.peer_group.build（追加）
+MIN_PEER_GROUP_SIZE_CONFIG_PATH: str = "peer_group.min_peer_group_size"
+```
+
+---
+
+- [ ] **Step 1: 失败测试 —— 分位公式、并列、方向转换、N==1、n_effective**
+
+```python
+# tests/unit/test_factor_normalize.py
+"""Percentile Rank 与方向转换。
+
+期望值全部手算：
+  公式 p = (N − Rank) / (N − 1) × 100，COMPETITION_RANK（并列占同名次）。
+"""
+
+from decimal import Decimal
+
+import pytest
+
+from fip.libs.strategy_library.factor.definitions import PreferenceDirection
+from fip.libs.strategy_library.factor.normalize import (
+    CrossSectionStatus,
+    competition_ranks,
+    normalize_peer_group,
+    percentile_rank,
+)
+
+D = Decimal
+HIGH = PreferenceDirection.HIGHER_IS_BETTER
+LOW = PreferenceDirection.LOWER_IS_BETTER
+
+
+def test_无并列时分位落在_0_到_100_的两端():
+    """values = [50, 40, 30, 20, 10]，N = 5，Rank = 1..5
+       p = (5−1)/4×100, (5−2)/4×100, … = 100, 75, 50, 25, 0"""
+    assert percentile_rank([D(50), D(40), D(30), D(20), D(10)], HIGH) == [
+        D("100.00000000"), D("75.00000000"), D("50.00000000"),
+        D("25.00000000"), D("0.00000000"),
+    ]
+
+
+def test_COMPETITION_RANK_并列占用相同名次并跳过后续名次():
+    """values = [50, 40, 40, 20, 10] → Rank = 1, 2, 2, 4, 5（没有 3）。"""
+    assert competition_ranks([D(50), D(40), D(40), D(20), D(10)]) == [1, 2, 2, 4, 5]
+    assert percentile_rank([D(50), D(40), D(40), D(20), D(10)], HIGH) == [
+        D("100.00000000"), D("75.00000000"), D("75.00000000"),
+        D("25.00000000"), D("0.00000000"),
+    ]
+
+
+def test_LOWER_IS_BETTER_先取负再排_与排完再100减p_结果不同():
+    """D-11 第 2 点的判据。values = [10, 20, 20, 30, 40]，LOWER_IS_BETTER。
+
+    先取负：oriented = [−10, −20, −20, −30, −40]
+            Rank = 1, 2, 2, 4, 5  →  p = 100, 75, 75, 25, 0
+    排完再 100 − p：按原值降序 Rank = 5, 3, 3, 2, 1
+            p_high = 0, 50, 50, 75, 100  →  100 − p_high = 100, 50, 50, 25, 0
+    并列的那一对：75 ≠ 50。这就是「两者在有并列时结果不同」的确切形状。"""
+    values = [D(10), D(20), D(20), D(30), D(40)]
+    got = percentile_rank(values, LOW)
+    assert got == [D("100.00000000"), D("75.00000000"), D("75.00000000"),
+                   D("25.00000000"), D("0.00000000")]
+
+    naive = [D(100) - p for p in percentile_rank(values, HIGH)]
+    assert naive == [D("100.00000000"), D("50.00000000"), D("50.00000000"),
+                     D("25.00000000"), D("0.00000000")]
+    assert got != naive          # ← 这条断言就是裁定本身
+
+
+def test_N为1时返回_None_不是50也不是100():
+    assert percentile_rank([D(42)], HIGH) == [None]
+
+
+def test_N为0时返回空列表():
+    assert percentile_rank([], HIGH) == []
+
+
+def test_全部并列时人人100():
+    """N = 3 全相等 → Rank 全为 1 → p = (3−1)/2×100 = 100。
+    这是公式的直接后果，不是特例分支 —— 若实现里出现 if all_equal 就说明写错了。"""
+    assert percentile_rank([D(7), D(7), D(7)], HIGH) == [D("100.00000000")] * 3
+
+
+# ---- normalize_peer_group：UNAVAILABLE 的排除与 n_effective -----------------
+
+def _entries(n_valid: int, n_missing: int = 0):
+    entries = [(i, D(1000 - i)) for i in range(n_valid)]
+    entries += [(1000 + i, None) for i in range(n_missing)]
+    return entries
+
+
+def test_UNAVAILABLE_不参与分位计算也不被当作最差值():
+    """FS:250 —— 不得把 UNAVAILABLE 当作最差值参与排名。"""
+    out = normalize_peer_group(_entries(30, n_missing=5), HIGH, 30)
+    by_id = {o.share_class_id: o for o in out}
+    assert all(by_id[1000 + i].percentile is None for i in range(5))
+    assert all(by_id[1000 + i].rank is None for i in range(5))
+    assert by_id[0].percentile == D("100.00000000")
+    assert by_id[0].n_effective == 30            # 不是 35
+
+
+def test_判定基数是_n_effective_不是组规模():
+    """G-7 / BR:542 —— 一个 50 只基金的组里若某指标只有 25 只可算，
+    该指标仍属小样本。"""
+    out = normalize_peer_group(_entries(25, n_missing=25), HIGH, 30)
+    assert all(o.status is CrossSectionStatus.INSUFFICIENT_SAMPLE for o in out)
+    assert all(o.percentile is None and o.rank is None for o in out)
+    assert {o.n_effective for o in out} == {25}   # FR:356：仍须返回，调用方要知道差多少
+
+
+def test_恰好达到阈值时正常产出():
+    out = normalize_peer_group(_entries(30), HIGH, 30)
+    assert all(o.status is CrossSectionStatus.NORMAL for o in out)
+    assert max(o.percentile for o in out) == D("100.00000000")
+
+
+def test_INSUFFICIENT_SAMPLE_不是错误状态且每个成员都有一行():
+    """FR:358 + BLOCK-12 的 CHECK：INSUFFICIENT_SAMPLE 的行仍然落库。
+    不落库会让历史查询无法区分『当时样本不足』与『当时根本没算』。"""
+    out = normalize_peer_group(_entries(3), HIGH, 30)
+    assert len(out) == 3
+
+
+def test_输出顺序与输入顺序一致():
+    """G-2：调用方按 share_class_id 对齐结果，顺序漂移会静默错位。"""
+    entries = [(9, D(1)), (3, D(3)), (7, D(2))]
+    assert [o.share_class_id for o in normalize_peer_group(entries, HIGH, 1)] == [9, 3, 7]
+```
+
+```bash
+.venv/bin/pytest tests/unit/test_factor_normalize.py -q
+# 预期：ModuleNotFoundError: ...factor.normalize
+```
+
+- [ ] **Step 2: 实现 `normalize.py`**
+
+```python
+# src/fip/libs/strategy_library/factor/normalize.py
+"""Peer Group 内的 Percentile Rank 与方向转换（设计定案 D-11）。
+
+方法已定案（FS:216 / BR:1016）：Percentile Rank / Peer Group 内排名。
+「这不是 TBD」（FS:225）——未来若引入 Z-Score 或 Min-Max，属 Scoring Version 的
+Major 变更。第一阶段【不做异常值处理】：Percentile Rank 对极值不敏感；
+若改用 Z-Score，异常值处理会成为必需项，那是方法选择的连带后果，不可分开决策。
+"""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+from enum import StrEnum
+
+from fip.libs.strategy_library.factor.definitions import PreferenceDirection
+
+# = 迁移里的 cross_section_status_enum AS ENUM ('NORMAL', 'INSUFFICIENT_SAMPLE')
+class CrossSectionStatus(StrEnum):
+    NORMAL = "NORMAL"
+    INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
+
+
+# factor_value.normalized_value 是 NUMERIC(12, 8)
+PERCENTILE_SCALE = 8
+_PERCENTILE_QUANTUM = Decimal(1).scaleb(-PERCENTILE_SCALE)
+_COMPUTE_PRECISION = 60
+_HUNDRED = Decimal(100)
+
+
+def competition_ranks(values: Sequence[Decimal]) -> list[int]:
+    """COMPETITION_RANK（D-20，上游 03-fund-ranking §8.2 已定案）。
+
+    Rank_i = 1 + |{j : value_j > value_i}|。并列占用相同名次，随后的名次被跳过
+    （1, 2, 2, 4）。传入的 values 必须已经完成方向转换 —— 本函数一律「越大越优」。
+    """
+    return [1 + sum(1 for other in values if other > value) for value in values]
+
+
+def percentile_rank(
+    values: Sequence[Decimal], direction: PreferenceDirection
+) -> list[Decimal | None]:
+    """Peer Group 内分位。
+
+    公式与 ranking 统一为 p = (N − Rank) / (N − 1) × 100（D-11 第 1 点）——
+    文档从未说两者一致，但用两套分位公式会让「因子分位」与「排名分位」对同一只
+    基金给出不同的数，无法解释。端点为 0 / 100 的约定还让 Fund Tier 的
+    5% / 20% / 50% / 80% 阈值语义直观：「前 5%」就是 percentile >= 95。
+
+    N == 1 → None。**不是 50，也不是 100** —— 一只基金的组里「分位」没有意义，
+    给它一个数就是在编造一个不存在的比较（FS:877 / FR:341）。
+
+    LOWER_IS_BETTER 【先取负再排分位】，而不是排完再 100 − p（D-11 第 2 点）。
+    两者在有并列时结果不同：COMPETITION_RANK 下并列占用相同名次，取负使并列关系
+    在同一侧保持。由 test_LOWER_IS_BETTER_先取负再排_与排完再100减p_结果不同 钉住。
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    if n == 1:
+        return [None]
+
+    oriented = (
+        [-v for v in values]
+        if direction is PreferenceDirection.LOWER_IS_BETTER
+        else list(values)
+    )
+    ranks = competition_ranks(oriented)
+    with localcontext() as ctx:
+        ctx.prec = _COMPUTE_PRECISION
+        denominator = Decimal(n - 1)
+        return [
+            ((Decimal(n - rank) / denominator) * _HUNDRED).quantize(
+                _PERCENTILE_QUANTUM, rounding=ROUND_HALF_UP
+            )
+            for rank in ranks
+        ]
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedFactorValue:
+    """G-8：Rank / n_effective / Percentile 三者都必须落库。
+
+    只存 Rank 则历史分位不可还原；只存 Percentile 则「差多少」不可见。
+    peer_group_size 由调用方另行落库（它是快照的属性，不是本函数的输入）。
+    """
+
+    share_class_id: int
+    rank: int | None
+    n_effective: int
+    percentile: Decimal | None
+    status: CrossSectionStatus
+
+
+def normalize_peer_group(
+    entries: Sequence[tuple[int, Decimal | None]],
+    direction: PreferenceDirection,
+    min_peer_group_size: int,
+) -> list[NormalizedFactorValue]:
+    """对一个 Peer Group 内某一个因子做标准化。
+
+    entries 是 (share_class_id, 因子值或 None)。None 表示该因子对这只基金
+    UNAVAILABLE —— 它【不参与】分位计算，也【不得】被当作最差值参与排名
+    （FS:250）。把它当最差值等于宣称「数据不足 = 表现最差」。
+
+    n_effective = 可算的成员数，判定基数就是它而不是组规模（G-7 / BR:542）。
+    n_effective < min_peer_group_size 时不做任何横截面派生量，全体标
+    INSUFFICIENT_SAMPLE，但 n_effective 仍如实返回 —— 返回 17 与返回 29
+    对调用方的含义不同（FR:356）。这不是错误状态（FR:358）。
+
+    返回顺序与 entries 一致。
+    """
+    participating = [(sid, value) for sid, value in entries if value is not None]
+    n_effective = len(participating)
+
+    if n_effective < min_peer_group_size:
+        return [
+            NormalizedFactorValue(sid, None, n_effective, None,
+                                  CrossSectionStatus.INSUFFICIENT_SAMPLE)
+            for sid, _ in entries
+        ]
+
+    oriented = (
+        [-value for _, value in participating]
+        if direction is PreferenceDirection.LOWER_IS_BETTER
+        else [value for _, value in participating]
+    )
+    ranks = competition_ranks(oriented)
+    percentiles = percentile_rank([value for _, value in participating], direction)
+    resolved = {
+        sid: (rank, percentile)
+        for (sid, _), rank, percentile in zip(
+            participating, ranks, percentiles, strict=True
+        )
+    }
+    return [
+        NormalizedFactorValue(
+            sid,
+            resolved[sid][0] if sid in resolved else None,
+            n_effective,
+            resolved[sid][1] if sid in resolved else None,
+            CrossSectionStatus.NORMAL,
+        )
+        for sid, _ in entries
+    ]
+```
+
+```bash
+.venv/bin/pytest tests/unit/test_factor_normalize.py -q   # 预期 11 passed
+```
+
+- [ ] **Step 3: G-7「三处同一配置源」的适应度测试（先证伪）**
+
+`MIN_PEER_GROUP_SIZE = 30` 被三个地方消费：标准化（本任务）、排名与 Tier（Task 15）。
+只要有第二处写死 `30`，三者就会在阈值调整时分叉，而分叉不会报错 ——
+只会让「排名说样本足够、分层说样本不足」。
+
+```python
+# tests/fitness/test_single_config_source.py
+"""G-7：MIN_PEER_GROUP_SIZE 的三个消费方必须来自同一配置源。
+
+做法是禁止裸字面量：配置路径只允许出现在一个常量定义处，阈值本身不得在
+src 里以裸 30 的形式与 peer group / sample 之类的名字同现。
+"""
+
+import ast
+import pathlib
+
+SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "fip"
+CONFIG_PATH = "peer_group.min_peer_group_size"
+
+
+def test_配置路径字符串只出现在唯一的常量定义处():
+    hits = [
+        p for p in SRC.rglob("*.py")
+        if CONFIG_PATH in p.read_text(encoding="utf-8")
+    ]
+    assert [p.name for p in hits] == ["build.py"], (
+        f"{CONFIG_PATH} 出现在多个文件：{[str(p) for p in hits]}；"
+        "应统一从 peer_group.build.MIN_PEER_GROUP_SIZE_CONFIG_PATH 取"
+    )
+
+
+def test_没有任何模块把_30_写死成最小样本量():
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not (isinstance(node.value, ast.Constant) and node.value.value == 30):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if any("PEER" in n.upper() or "SAMPLE" in n.upper() for n in names):
+                offenders.append((path.name, names))
+    assert not offenders, f"最小样本量被写死：{offenders}"
+```
+
+```bash
+.venv/bin/pytest tests/fitness/test_single_config_source.py -q
+# 先证伪：在 normalize.py 顶部临时加一行
+#     MIN_PEER_GROUP_SIZE = 30
+# 跑一次确认 test_没有任何模块把_30_写死成最小样本量 FAILED，再删掉。
+```
+
+在 `peer_group/build.py` 末尾追加常量：
+
+```python
+# src/fip/libs/strategy_library/peer_group/build.py（追加）
+# MIN_PEER_GROUP_SIZE 的唯一配置路径。标准化（factor/normalize）、排名与
+# Tier（Task 15）三处都从这里取路径，再由装配层去 ConfigSet 读值 ——
+# G-7 要求三处同一配置源，而「同一个字符串常量」是它唯一可机器校验的形式。
+MIN_PEER_GROUP_SIZE_CONFIG_PATH = "peer_group.min_peer_group_size"
+```
+
+```bash
+.venv/bin/pytest tests/fitness -q
+.venv/bin/ruff check src tests && make typecheck
+git add -A && git commit -m "feat(factor): Peer Group 内 Percentile Rank 与方向转换
+
+p = (N − Rank) / (N − 1) × 100，与 ranking 统一；N == 1 → None（不是 50 / 100）。
+LOWER_IS_BETTER 先取负再排 —— 有并列时与『排完再 100 − p』结果不同，
+由一条对照测试把两条路径的差异做出来当作裁定的判据（D-11）。
+UNAVAILABLE 不参与分位、不当最差值；判定基数是 n_effective 不是组规模（G-7）；
+Rank / n_effective / Percentile 三者都进返回值（G-8）。"
+```
+
+---
+
+### Task 13: 因子有效性检验（IC / ICIR）
+
+> **边界（D-1）**：本任务只做「能让 Score 合法产出」的最小检验 —— IC、ICIR、
+> 以及按 `validation_policy` 阈值判定 `VALID` / `INVALID`。**不做**分层单调性、
+> 因子间相关性剔除（`相关系数 > 0.8 视为冗余`）、Rolling 因子全家族 —— 那些仍属 M2。
+
+**Files:**
+
+- Create: `src/fip/libs/strategy_library/factor/effectiveness.py`
+- Create: `src/fip/services/factor_service/effectiveness_writer.py`
+- Create: `config/policy/validation/v1.yaml`
+- Test: `tests/unit/test_factor_effectiveness.py`
+- Test: `tests/unit/test_validation_config.py`
+- Test: `tests/integration/test_factor_effectiveness_writer.py`
+
+**Interfaces:**
+
+*Consumes*：
+
+```python
+from fip.libs.quant_engine.correlation import spearman   # Task 3：spearman(xs, ys) -> Decimal
+from fip.libs.quant_engine.stats import mean, stdev      # Task 3
+from fip.libs.strategy_library.factor.normalize import NormalizedFactorValue   # Task 12
+from fip.services.data_service.models.factor import FactorEffectiveness        # Task 7（迁移 0016）
+```
+
+*Produces*：
+
+```python
+# fip.libs.strategy_library.factor.effectiveness
+class EffectivenessVerdict(StrEnum):
+    VALID = "VALID"; INVALID = "INVALID"; INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+class ValidationSegment(StrEnum):
+    FULL_HISTORY = "FULL_HISTORY"; RECENT_3Y = "RECENT_3Y"
+class EffectivenessReason(StrEnum):
+    PASSED = "PASSED"; IC_MEAN_BELOW_THRESHOLD = "IC_MEAN_BELOW_THRESHOLD"
+    ICIR_BELOW_THRESHOLD = "ICIR_BELOW_THRESHOLD"; ZERO_IC_DISPERSION = "ZERO_IC_DISPERSION"
+    TOO_FEW_CROSS_SECTIONS = "TOO_FEW_CROSS_SECTIONS"
+
+@dataclass(frozen=True, slots=True)
+class CrossSection:
+    effective_at: dt.date
+    percentiles: tuple[Decimal, ...]
+    forward_returns: tuple[Decimal, ...]
+
+@dataclass(frozen=True, slots=True)
+class EffectivenessThresholds:
+    ic_mean_min: Decimal; icir_abs_min: Decimal
+    min_cross_sections: int; min_names_per_cross_section: int; ic_std_ddof: int
+
+@dataclass(frozen=True, slots=True)
+class EffectivenessResult:
+    factor_id: str; segment: ValidationSegment
+    ic_series: tuple[Decimal, ...]
+    ic_mean: Decimal | None; ic_std: Decimal | None; icir: Decimal | None
+    n_cross_sections: int; verdict: EffectivenessVerdict; reason: EffectivenessReason
+
+def cross_section_ic(section: CrossSection, min_names: int) -> Decimal | None
+def evaluate_segment(factor_id, segment, sections, thresholds) -> EffectivenessResult
+def combine_segments(results: Sequence[EffectivenessResult]) -> EffectivenessVerdict
+
+# fip.services.factor_service.effectiveness_writer
+class EffectivenessWriter:
+    def __init__(self, session: Session) -> None
+    def write(self, profile: str, peer_group_key: str, factor_version_id: int,
+              results: Sequence[EffectivenessResult],
+              validation_from: dt.date, validation_to: dt.date) -> int
+```
+
+---
+
+- [ ] **Step 1: 失败测试 —— IC / ICIR 的手算值与 G-3 的零离散度分支**
+
+```python
+# tests/unit/test_factor_effectiveness.py
+"""IC / ICIR。期望值全部手算。
+
+IC   = 同一时点横截面上「因子值分位」与「后续收益」的 Spearman 相关
+ICIR = IC 序列的均值 / 标准差
+"""
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+
+from fip.libs.strategy_library.factor.effectiveness import (
+    CrossSection,
+    EffectivenessReason,
+    EffectivenessThresholds,
+    EffectivenessVerdict,
+    ValidationSegment,
+    combine_segments,
+    cross_section_ic,
+    evaluate_segment,
+)
+
+D = Decimal
+TH = EffectivenessThresholds(
+    ic_mean_min=D("0.02"), icir_abs_min=D("0.3"),
+    min_cross_sections=3, min_names_per_cross_section=5, ic_std_ddof=1,
+)
+
+
+def _section(day, percentiles, forwards):
+    return CrossSection(dt.date(2024, day, 1), tuple(map(D, percentiles)),
+                        tuple(map(D, forwards)))
+
+
+def test_完全同序的横截面_IC_等于1():
+    """Spearman 在两列名次完全一致时恒为 1。"""
+    s = _section(1, ["100", "75", "50", "25", "0"],
+                 ["0.05", "0.03", "0.01", "-0.01", "-0.03"])
+    assert cross_section_ic(s, 5) == D(1)
+
+
+def test_完全反序的横截面_IC_等于负1():
+    s = _section(1, ["100", "75", "50", "25", "0"],
+                 ["-0.03", "-0.01", "0.01", "0.03", "0.05"])
+    assert cross_section_ic(s, 5) == D(-1)
+
+
+def test_已知错位的横截面_IC_等于0点8():
+    """ρ = 1 − 6Σd² / (n(n²−1))。名次差 d = [−1, 1, −1, 1, 0]，Σd² = 4，
+    n = 5 → 1 − 24/120 = 0.8。"""
+    s = _section(1, ["0", "25", "50", "75", "100"],
+                 ["0.02", "0.01", "0.04", "0.03", "0.05"])
+    assert cross_section_ic(s, 5) == D("0.8")
+
+
+def test_横截面名数不足时该时点不产出_IC():
+    """样本不足的横截面不能贡献一个『看起来正常』的相关系数。
+    跳过它而不是把它记成 0 —— 记 0 会把 IC 均值拉向 0（G-3 同一原则）。"""
+    s = _section(1, ["100", "0"], ["0.05", "-0.01"])
+    assert cross_section_ic(s, 5) is None
+
+
+def test_ICIR_是_IC_序列的均值除以标准差():
+    """IC 序列 = [0.1, 0.2, 0.3]：μ = 0.2，Σ(x−μ)² = 0.02，
+    var(ddof=1) = 0.01，σ = 0.1 → ICIR = 0.2 / 0.1 = 2。"""
+    sections = [
+        _section(1, ["100", "75", "50", "25", "0"], ["0.05", "0.03", "0.01", "-0.01", "-0.03"]),
+    ]
+    result = evaluate_segment(
+        "F-RAP-001", ValidationSegment.FULL_HISTORY, sections, TH,
+        _ic_override=[D("0.1"), D("0.2"), D("0.3")],
+    )
+    assert result.ic_mean == D("0.2")
+    assert result.ic_std == D("0.1")
+    assert result.icir == D(2)
+    assert result.verdict is EffectivenessVerdict.VALID
+    assert result.reason is EffectivenessReason.PASSED
+
+
+def test_IC_均值低于阈值判_INVALID():
+    result = evaluate_segment(
+        "F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+        _ic_override=[D("0.01"), D("0.02"), D("0.005")],
+    )
+    assert result.verdict is EffectivenessVerdict.INVALID
+    assert result.reason is EffectivenessReason.IC_MEAN_BELOW_THRESHOLD
+
+
+def test_ICIR_低于阈值判_INVALID():
+    """IC = [0.1, −0.06, 0.02]：μ = 0.02，符合 IC 阈值；
+    Σ(x−μ)² = 0.0064 + 0.0064 + 0 = 0.0128，var = 0.0064，σ = 0.08，
+    ICIR = 0.02/0.08 = 0.25 < 0.3 → INVALID。"""
+    result = evaluate_segment(
+        "F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+        _ic_override=[D("0.1"), D("-0.06"), D("0.02")],
+    )
+    assert result.ic_mean == D("0.02")
+    assert result.icir == D("0.25")
+    assert result.verdict is EffectivenessVerdict.INVALID
+    assert result.reason is EffectivenessReason.ICIR_BELOW_THRESHOLD
+
+
+def test_IC_序列零离散度时_ICIR_为_None_不是_inf():
+    """G-3 在检验层的体现：σ = 0 时 ICIR 无定义。绝不填 inf、不填极大值。
+    判定取【失败关闭】的方向 —— 未通过检验的因子权重为 0，且在归因中留痕。"""
+    result = evaluate_segment(
+        "F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+        _ic_override=[D("0.1"), D("0.1"), D("0.1")],
+    )
+    assert result.icir is None
+    assert result.verdict is EffectivenessVerdict.INVALID
+    assert result.reason is EffectivenessReason.ZERO_IC_DISPERSION
+
+
+def test_横截面数不足时是_INSUFFICIENT_EVIDENCE_不是_INVALID():
+    """『检验尚未产出』与『检验做了没通过』是两件事：前者让 Score 落
+    VALIDATION_PENDING（FS:342），后者让该因子权重为 0（FS:344）。
+    合并两者会让『还没检验』伪装成『检验过、不行』。"""
+    result = evaluate_segment(
+        "F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+        _ic_override=[D("0.5"), D("0.5")],
+    )
+    assert result.verdict is EffectivenessVerdict.INSUFFICIENT_EVIDENCE
+    assert result.reason is EffectivenessReason.TOO_FEW_CROSS_SECTIONS
+
+
+def test_双段均须通过才算_VALID():
+    """BR:345：检验区间 = 全历史滚动 + 最近 3 年，双段均须通过。"""
+    good = evaluate_segment("F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+                            _ic_override=[D("0.1"), D("0.2"), D("0.3")])
+    bad = evaluate_segment("F-RAP-001", ValidationSegment.RECENT_3Y, [], TH,
+                           _ic_override=[D("0.01"), D("0.02"), D("0.005")])
+    assert combine_segments([good, good]) is EffectivenessVerdict.VALID
+    assert combine_segments([good, bad]) is EffectivenessVerdict.INVALID
+
+
+def test_任一段证据不足则整体证据不足():
+    good = evaluate_segment("F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+                            _ic_override=[D("0.1"), D("0.2"), D("0.3")])
+    thin = evaluate_segment("F-RAP-001", ValidationSegment.RECENT_3Y, [], TH,
+                            _ic_override=[D("0.5"), D("0.5")])
+    assert combine_segments([good, thin]) is EffectivenessVerdict.INSUFFICIENT_EVIDENCE
+
+
+def test_只给一段时不得视为双段通过():
+    good = evaluate_segment("F-RAP-001", ValidationSegment.FULL_HISTORY, [], TH,
+                            _ic_override=[D("0.1"), D("0.2"), D("0.3")])
+    with pytest.raises(ValueError, match="两段"):
+        combine_segments([good])
+```
+
+```bash
+.venv/bin/pytest tests/unit/test_factor_effectiveness.py -q
+# 预期：ModuleNotFoundError: ...factor.effectiveness
+```
+
+- [ ] **Step 2: 实现 `effectiveness.py`**
+
+```python
+# src/fip/libs/strategy_library/factor/effectiveness.py
+"""因子有效性检验的最小集（设计定案 D-1）。
+
+为什么它在 Plan-2 而不是 M2：FS:346「factor_effectiveness 的存在性是 Score 产出
+的【前置条件，不是可选的补充信息】」，且 FS:327-346 明确堵死了「先按等权上线、
+等检验出来再调」这条捷径 ——「与未经检验就拍权重完全等价，差别只是拍的值恰好
+是等权」。没有本模块，M1.4 的 Score / Tier 验收标准自己通不过。
+
+本模块【不做】：分层单调性、因子间相关性剔除（相关系数 > 0.8 视为冗余）、
+Rolling 因子全家族。那些仍属 M2（D-1 明列的边界）。
+"""
+
+import datetime as dt
+from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import Decimal, localcontext
+from enum import StrEnum
+
+from fip.libs.quant_engine.correlation import spearman
+from fip.libs.quant_engine.stats import mean, stdev
+
+_COMPUTE_PRECISION = 60
+
+
+class EffectivenessVerdict(StrEnum):
+    VALID = "VALID"
+    INVALID = "INVALID"
+    # 「检验尚未产出」——与 INVALID 严格区分：前者让 Score 落 VALIDATION_PENDING
+    # （FS:342），后者让该因子权重为 0 并在归因中留痕（FS:344）。
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+
+class ValidationSegment(StrEnum):
+    FULL_HISTORY = "FULL_HISTORY"
+    RECENT_3Y = "RECENT_3Y"
+
+
+class EffectivenessReason(StrEnum):
+    PASSED = "PASSED"
+    IC_MEAN_BELOW_THRESHOLD = "IC_MEAN_BELOW_THRESHOLD"
+    ICIR_BELOW_THRESHOLD = "ICIR_BELOW_THRESHOLD"
+    ZERO_IC_DISPERSION = "ZERO_IC_DISPERSION"
+    TOO_FEW_CROSS_SECTIONS = "TOO_FEW_CROSS_SECTIONS"
+
+
+@dataclass(frozen=True, slots=True)
+class CrossSection:
+    """一个时点的横截面。
+
+    percentiles 与 forward_returns 【按同一顺序对齐同一批基金】。两列都必须
+    来自同一个 Peer Group —— 跨组混合会把不同收益分布的基金放在一条相关系数里。
+    """
+
+    effective_at: dt.date
+    percentiles: tuple[Decimal, ...]
+    forward_returns: tuple[Decimal, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EffectivenessThresholds:
+    ic_mean_min: Decimal
+    icir_abs_min: Decimal
+    min_cross_sections: int
+    min_names_per_cross_section: int
+    ic_std_ddof: int
+
+
+@dataclass(frozen=True, slots=True)
+class EffectivenessResult:
+    factor_id: str
+    segment: ValidationSegment
+    ic_series: tuple[Decimal, ...]
+    ic_mean: Decimal | None
+    ic_std: Decimal | None
+    icir: Decimal | None
+    n_cross_sections: int
+    verdict: EffectivenessVerdict
+    reason: EffectivenessReason
+
+
+def cross_section_ic(section: CrossSection, min_names: int) -> Decimal | None:
+    """一个时点的 IC = Spearman(因子分位, 后续收益)。
+
+    名数不足 min_names 时返回 None 而不是 0：把样本不足的时点记成 IC = 0
+    会把整条序列的均值拖向 0，而那个 0 不是观测，是填充（G-3）。
+    """
+    if len(section.percentiles) != len(section.forward_returns):
+        raise ValueError(
+            f"{section.effective_at} 的分位与后续收益长度不一致："
+            f"{len(section.percentiles)} vs {len(section.forward_returns)}"
+        )
+    if len(section.percentiles) < min_names:
+        return None
+    return spearman(section.percentiles, section.forward_returns)
+
+
+def evaluate_segment(
+    factor_id: str,
+    segment: ValidationSegment,
+    sections: Sequence[CrossSection],
+    thresholds: EffectivenessThresholds,
+    _ic_override: Sequence[Decimal] | None = None,
+) -> EffectivenessResult:
+    """对一个检验区间求 IC 序列并判定。
+
+    _ic_override 只供单元测试直接喂 IC 序列（免去为了测判定逻辑而构造
+    几十个横截面）。生产路径一律不传。
+
+    判定（阈值来自 config/policy/validation/v1.yaml，全部 PROVISIONAL）：
+      · 横截面数 < min_cross_sections → INSUFFICIENT_EVIDENCE（检验尚未产出）
+      · σ(IC) == 0                    → ICIR 无定义 → INVALID(ZERO_IC_DISPERSION)
+        【绝不填 inf】。取失败关闭方向：未通过检验的因子权重为 0 且留痕，
+        比让一个 ICIR 算不出来的因子拿到满权重安全。
+      · IC 均值 < ic_mean_min         → INVALID
+      · |ICIR| < icir_abs_min         → INVALID
+      · 其余                          → VALID
+    """
+    if _ic_override is not None:
+        ic_series = tuple(_ic_override)
+    else:
+        ic_series = tuple(
+            ic for ic in (
+                cross_section_ic(s, thresholds.min_names_per_cross_section)
+                for s in sections
+            )
+            if ic is not None
+        )
+
+    n = len(ic_series)
+    if n < thresholds.min_cross_sections:
+        return EffectivenessResult(
+            factor_id, segment, ic_series, None, None, None, n,
+            EffectivenessVerdict.INSUFFICIENT_EVIDENCE,
+            EffectivenessReason.TOO_FEW_CROSS_SECTIONS,
+        )
+
+    with localcontext() as ctx:
+        ctx.prec = _COMPUTE_PRECISION
+        ic_mean = mean(ic_series)
+        ic_std = stdev(ic_series, ddof=thresholds.ic_std_ddof)
+        icir = None if ic_std == 0 else ic_mean / ic_std
+
+    if icir is None:
+        return EffectivenessResult(
+            factor_id, segment, ic_series, ic_mean, ic_std, None, n,
+            EffectivenessVerdict.INVALID, EffectivenessReason.ZERO_IC_DISPERSION,
+        )
+    if ic_mean < thresholds.ic_mean_min:
+        return EffectivenessResult(
+            factor_id, segment, ic_series, ic_mean, ic_std, icir, n,
+            EffectivenessVerdict.INVALID, EffectivenessReason.IC_MEAN_BELOW_THRESHOLD,
+        )
+    if abs(icir) < thresholds.icir_abs_min:
+        return EffectivenessResult(
+            factor_id, segment, ic_series, ic_mean, ic_std, icir, n,
+            EffectivenessVerdict.INVALID, EffectivenessReason.ICIR_BELOW_THRESHOLD,
+        )
+    return EffectivenessResult(
+        factor_id, segment, ic_series, ic_mean, ic_std, icir, n,
+        EffectivenessVerdict.VALID, EffectivenessReason.PASSED,
+    )
+
+
+def combine_segments(
+    results: Sequence[EffectivenessResult],
+) -> EffectivenessVerdict:
+    """双段均须通过（BR:345：全历史滚动 + 最近 3 年）。
+
+    必须恰好两段：只跑一段就宣布 VALID 等于把「双段」这个要求悄悄降级成
+    「单段」，而降级不会报错。
+    """
+    segments = {r.segment for r in results}
+    if segments != {ValidationSegment.FULL_HISTORY, ValidationSegment.RECENT_3Y}:
+        raise ValueError(
+            f"必须提供两段检验结果（FULL_HISTORY + RECENT_3Y），实得 {sorted(segments)}"
+        )
+    if any(r.verdict is EffectivenessVerdict.INSUFFICIENT_EVIDENCE for r in results):
+        return EffectivenessVerdict.INSUFFICIENT_EVIDENCE
+    if all(r.verdict is EffectivenessVerdict.VALID for r in results):
+        return EffectivenessVerdict.VALID
+    return EffectivenessVerdict.INVALID
+```
+
+```bash
+.venv/bin/pytest tests/unit/test_factor_effectiveness.py -q   # 预期 12 passed
+```
+
+- [ ] **Step 3: `config/policy/validation/v1.yaml`（新建）+ 钉死测试**
+
+```yaml
+# Validation Policy v1 —— 因子有效性检验的阈值
+# Owner: validation_policy（FS:350「本域是消费方不是定义方：阈值属
+# validation_policy，由 04-factor 产出检验数值、由该 Policy 判定 VALID/INVALID」）
+#
+# 全部为【推荐默认，非定案】——FS:348 / BR:345 原话是「业务方可改」。
+effectiveness:
+  ic_mean_min:
+    value: 0.02
+    status: PROVISIONAL
+    source: "上游 FS:348 / BR:345「IC 均值 >= 0.02」推荐默认，非定案"
+  icir_abs_min:
+    value: 0.3
+    status: PROVISIONAL
+    source: "上游 FS:348 / BR:345「|ICIR| >= 0.3」推荐默认，非定案"
+  min_cross_sections:
+    value: 12
+    status: PROVISIONAL
+    source: "Plan-2 起草补齐 —— 文档未给『IC 序列至少多长才算检验产出』；取 12 期（月频一年）"
+  min_names_per_cross_section:
+    value: 30
+    status: DECIDED
+    source: "= MIN_PEER_GROUP_SIZE（FR:340）—— 横截面统计量在小于该值时不产出"
+  ic_std_ddof:
+    value: 1
+    status: PROVISIONAL
+    source: "Plan-2 起草补齐 —— 与 volatility.ddof 保持一致"
+  forward_horizon_days:
+    value: 21
+    status: PROVISIONAL
+    source: "Plan-2 起草补齐 —— 文档未给『后续收益』的期限；取 21 个交易日（约一个月）"
+segments:
+  recent_lookback_days:
+    value: 756
+    status: PROVISIONAL
+    source: "上游 BR:345「最近 3 年」= 3 × 252 个交易日"
+  require_both:
+    value: true
+    status: PROVISIONAL
+    source: "上游 BR:345「全历史滚动 + 最近 3 年双段均须通过」"
+```
+
+```python
+# tests/unit/test_validation_config.py
+import pathlib
+from decimal import Decimal
+
+from fip.platform.config.loader import load_config_file
+from fip.platform.decision_data.context import RuntimeMode
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _cfg():
+    return load_config_file(
+        ROOT / "config" / "policy" / "validation" / "v1.yaml", RuntimeMode.BACKTEST
+    )
+
+
+def test_阈值取上游推荐默认():
+    cfg = _cfg()
+    assert Decimal(str(cfg.get("effectiveness.ic_mean_min"))) == Decimal("0.02")
+    assert Decimal(str(cfg.get("effectiveness.icir_abs_min"))) == Decimal("0.3")
+
+
+def test_阈值全部标_PROVISIONAL_并指向上游行号():
+    """G-14。上游原话是『推荐默认，非定案』『业务方可改』——
+    标 DECIDED 会让下游以为这是投研拍过板的值。"""
+    params = _cfg().parameters
+    for path in ("effectiveness.ic_mean_min", "effectiveness.icir_abs_min",
+                 "effectiveness.min_cross_sections", "segments.require_both"):
+        assert params[path].status.value == "PROVISIONAL", path
+        assert params[path].source, path
+
+
+def test_横截面最小名数与_MIN_PEER_GROUP_SIZE_一致():
+    """两处若分叉，会出现『排名说样本不足、IC 说样本够』。"""
+    evaluation = load_config_file(
+        ROOT / "config" / "policy" / "evaluation" / "v1.yaml", RuntimeMode.BACKTEST
+    )
+    assert _cfg().get("effectiveness.min_names_per_cross_section") == evaluation.get(
+        "peer_group.min_peer_group_size"
+    )
+```
+
+```bash
+.venv/bin/pytest tests/unit/test_validation_config.py -q   # 先跑：文件不存在 → FAILED；建好后 3 passed
+```
+
+- [ ] **Step 4: 落库（`factor.factor_effectiveness`）**
+
+先写失败测试：
+
+```python
+# tests/integration/test_factor_effectiveness_writer.py
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+
+from fip.libs.strategy_library.factor.effectiveness import (
+    EffectivenessReason, EffectivenessResult, EffectivenessVerdict, ValidationSegment,
+)
+from fip.services.data_service.models.factor import FactorEffectiveness
+from fip.services.factor_service.effectiveness_writer import EffectivenessWriter
+
+pytestmark = pytest.mark.integration
+
+D = Decimal
+
+
+def _result(segment, verdict, reason):
+    return EffectivenessResult(
+        factor_id="F-RAP-001", segment=segment,
+        ic_series=(D("0.1"), D("0.2"), D("0.3")),
+        ic_mean=D("0.2"), ic_std=D("0.1"), icir=D(2),
+        n_cross_sections=3, verdict=verdict, reason=reason,
+    )
+
+
+def test_逐段落库且带检验区间(db_session, factor_version_fixture):
+    written = EffectivenessWriter(db_session).write(
+        profile="DEFAULT", peer_group_key="AKSHARE_FUND_TYPE|股票型|CNY",
+        factor_version_id=factor_version_fixture.id,
+        results=[
+            _result(ValidationSegment.FULL_HISTORY, EffectivenessVerdict.VALID,
+                    EffectivenessReason.PASSED),
+            _result(ValidationSegment.RECENT_3Y, EffectivenessVerdict.VALID,
+                    EffectivenessReason.PASSED),
+        ],
+        validation_from=dt.date(2019, 1, 1), validation_to=dt.date(2026, 9, 1),
+    )
+    assert written == 2
+    rows = db_session.query(FactorEffectiveness).all()
+    assert {r.segment for r in rows} == {"FULL_HISTORY", "RECENT_3Y"}
+    assert {r.validation_from for r in rows} == {dt.date(2019, 1, 1)}
+    assert rows[0].ic_mean == D("0.20000000") and rows[0].icir == D("2.00000000")
+
+
+def test_ICIR_不可算时落_NULL_不落_0(db_session, factor_version_fixture):
+    """G-3：UNAVAILABLE 不得被任何填充值替代。0 与 NULL 在这里含义相反 ——
+    0 表示『算出来是 0』，NULL 表示『算不出来』。"""
+    EffectivenessWriter(db_session).write(
+        profile="DEFAULT", peer_group_key="AKSHARE_FUND_TYPE|股票型|CNY",
+        factor_version_id=factor_version_fixture.id,
+        results=[
+            EffectivenessResult("F-RAP-001", ValidationSegment.FULL_HISTORY,
+                                (D("0.1"),) * 3, D("0.1"), D(0), None, 3,
+                                EffectivenessVerdict.INVALID,
+                                EffectivenessReason.ZERO_IC_DISPERSION),
+            _result(ValidationSegment.RECENT_3Y, EffectivenessVerdict.VALID,
+                    EffectivenessReason.PASSED),
+        ],
+        validation_from=dt.date(2019, 1, 1), validation_to=dt.date(2026, 9, 1),
+    )
+    row = db_session.query(FactorEffectiveness).filter_by(
+        segment="FULL_HISTORY"
+    ).one()
+    assert row.icir is None
+    assert row.verdict == "INVALID" and row.reason == "ZERO_IC_DISPERSION"
+
+
+def test_Peer_Group_是检验结果身份的一部分(db_session, factor_version_fixture):
+    """同一因子在股票型组里有效、在债券型组里无效是完全正常的结果。
+    不带 peer_group_key，两个结果会互相覆盖或产生一条无法解释的合并值。"""
+    writer = EffectivenessWriter(db_session)
+    for key in ("AKSHARE_FUND_TYPE|股票型|CNY", "AKSHARE_FUND_TYPE|债券型|CNY"):
+        writer.write(
+            profile="DEFAULT", peer_group_key=key,
+            factor_version_id=factor_version_fixture.id,
+            results=[
+                _result(ValidationSegment.FULL_HISTORY, EffectivenessVerdict.VALID,
+                        EffectivenessReason.PASSED),
+                _result(ValidationSegment.RECENT_3Y, EffectivenessVerdict.VALID,
+                        EffectivenessReason.PASSED),
+            ],
+            validation_from=dt.date(2019, 1, 1), validation_to=dt.date(2026, 9, 1),
+        )
+    assert db_session.query(FactorEffectiveness).count() == 4
+```
+
+```bash
+.venv/bin/pytest tests/integration/test_factor_effectiveness_writer.py -q -m integration
+# 预期：ModuleNotFoundError: ...factor_service.effectiveness_writer
+```
+
+实现：
+
+```python
+# src/fip/services/factor_service/effectiveness_writer.py
+"""factor.factor_effectiveness 的写入。
+
+SB-1 / G-13：factor schema 的写入权唯一属于 factor_service。
+
+⚠️ 本模块要求 factor_effectiveness 至少有这些列（由 Task 7 的迁移 0016 建）：
+    id, factor_version_id (FK → factor.factor_version, RESTRICT),
+    factor_id, evaluation_profile, peer_group_key, segment,
+    validation_from, validation_to,
+    ic_mean NUMERIC(12,8) NULL, ic_std NUMERIC(12,8) NULL,
+    icir NUMERIC(12,8) NULL, n_cross_sections INT,
+    verdict VARCHAR + CHECK(VALID/INVALID/INSUFFICIENT_EVIDENCE),
+    reason VARCHAR, computed_at TIMESTAMPTZ
+其中 peer_group_key 与 segment 是【本 Plan 对 D-16 字段清单的扩展】——
+D-16 给的是 (profile, factor_id, valid/invalid, IC, ICIR, 检验区间)，
+不含这两列。理由见本草案文末矛盾 ⑤。
+"""
+
+import datetime as dt
+from collections.abc import Sequence
+from decimal import ROUND_HALF_UP, Decimal
+
+from sqlalchemy.orm import Session
+
+from fip.libs.strategy_library.factor.effectiveness import EffectivenessResult
+from fip.services.data_service.models.factor import FactorEffectiveness
+
+_SCALE = Decimal("1e-8")
+
+
+def _q(value: Decimal | None) -> Decimal | None:
+    """出口量化。None 原样传出 —— NULL 与 0 在这里含义相反（G-3）。"""
+    return None if value is None else value.quantize(_SCALE, rounding=ROUND_HALF_UP)
+
+
+class EffectivenessWriter:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def write(
+        self,
+        profile: str,
+        peer_group_key: str,
+        factor_version_id: int,
+        results: Sequence[EffectivenessResult],
+        validation_from: dt.date,
+        validation_to: dt.date,
+    ) -> int:
+        rows = [
+            FactorEffectiveness(
+                factor_version_id=factor_version_id,
+                factor_id=r.factor_id,
+                evaluation_profile=profile,
+                peer_group_key=peer_group_key,
+                segment=r.segment.value,
+                validation_from=validation_from,
+                validation_to=validation_to,
+                ic_mean=_q(r.ic_mean),
+                ic_std=_q(r.ic_std),
+                icir=_q(r.icir),
+                n_cross_sections=r.n_cross_sections,
+                verdict=r.verdict.value,
+                reason=r.reason.value,
+                computed_at=dt.datetime.now(dt.UTC),
+            )
+            for r in results
+        ]
+        self._session.add_all(rows)
+        self._session.flush()
+        return len(rows)
+```
+
+```bash
+.venv/bin/pytest tests/integration/test_factor_effectiveness_writer.py -q -m integration
+# 预期 3 passed
+```
+
+- [ ] **Step 5: 全量回归并提交**
+
+```bash
+.venv/bin/ruff check src tests
+make typecheck
+.venv/bin/pytest tests/unit tests/fitness -q
+.venv/bin/pytest tests/integration -q -m integration
+git add -A && git commit -m "feat(factor): 因子有效性检验最小集（IC / ICIR）
+
+IC = 同一时点横截面上因子分位与后续收益的 Spearman；ICIR = IC 序列均值/标准差。
+σ(IC) = 0 时 ICIR 落 NULL 而不是 inf，判定取失败关闭方向（G-3）。
+『检验尚未产出』(INSUFFICIENT_EVIDENCE) 与『检验没通过』(INVALID) 严格区分 ——
+前者让 Score 落 VALIDATION_PENDING，后者让该因子权重为 0 并在归因中留痕。
+阈值全部标 PROVISIONAL：上游原话是『推荐默认，非定案』『业务方可改』。
+不做分层单调性与相关性剔除（仍属 M2，D-1 的边界）。"
+```
+
+---
+
+## 起草期间发现的矛盾与遗漏
+
+> 以下每一条都会在实现期造成返工或静默错误，**需要计划作者先裁决**。
+> 编号在上文的代码注释中被引用。
+
+### ① `FactorInput.mar` 是标量，装不下 `RISK_FREE` 模式的 MAR 序列 —— **阻塞级**
+
+接口契约写的是 `mar: Decimal | None  # None 表示 mar_policy 未配置`，
+而 `FE:483-498` 与任务描述都明确 `RISK_FREE` 模式下 **MAR 在窗口内是序列**。
+一个标量字段有三种「装下去」的办法（取均值 / 取首值 / 取末值），三种都是在
+伪造一个从未被决策过的标尺 —— 这与 Plan-1 在 `market.fund_nav.adjusted_nav`
+标量列上花三轮才想明白的教训完全同型（标量副本装不下二元函数）。
+
+本草案的处置：`resolve_mar` 如实产出序列，`mar_for_factor_input` 在 `RISK_FREE`
+下返回 `(None, MAR_SERIES_NOT_SUPPORTED)`，因子 `UNAVAILABLE`。这是安全的，
+但意味着 **`RISK_FREE` 模式在 M1 实际不可用**。
+
+需要裁决：(a) 给 `FactorInput` 增加 `mar_series: tuple[tuple[date, Decimal], ...] | None`
+字段（改契约），还是 (b) 在计划里明写「M1 只支持 `ZERO` / `FIXED`」并把
+`RISK_FREE` 的实现推到 M2。本草案按 (b) 写，但把 (a) 需要的解析能力留在了
+`MarResolution.series` 里。
+
+### ② D-10 的 WARNING 第二触发条件让 `FactorStatus.VALID` 在 M1 不可达
+
+D-10：「输入序列的 `availability_quality` 链路中含 `INFERRED`」→ `WARNING`。
+G-15 与 Plan-1 交接：AKShare 链路 **100% 是 `INFERRED`**（上游给不出披露时刻）。
+两条相乘 = M1 的每一个因子、每一只基金、每一个时点都是 `WARNING`，`VALID`
+一次也不会出现。
+
+后果不是错误，但会传导：`FE:194-199` 要求「`WARNING` 参与，但标记须随评价结果
+传递」，于是**全部** Score 都会带 WARNING 标记；下游若把 WARNING 当异常处理，
+M1 会表现为「什么都不正常」。与 D-19 里「M1 的常态是 `PARTIAL`」需要被显式
+断言是同一类问题。
+
+建议：要么把「链路含 INFERRED」降级为一个独立的 `quality_flag` 字段（不占用
+`FactorStatus`），要么在计划里明写「M1 因子的常态是 WARNING」并要求测试断言它
+（本草案按后者写了 `test_INFERRED_链路让_VALID_不可达`）。
+
+### ③ D-10 与 D-9 / `unavailable_reason` 八类枚举对「分母为 0」的归类相反
+
+- D-10 表格：`INVALID` ←「计算过程产生数学上无意义的结果（**分母为 0**、负方差、NaN）」
+- D-9 与 `10-api/03` §4.3.5：`ZERO_MAX_DRAWDOWN` / `ZERO_VOLATILITY` /
+  `ZERO_DOWNSIDE_VOLATILITY` 都是 **`unavailable_reason`**，且 `ZERO_MAX_DRAWDOWN`
+  被明确标注为「**好消息型**不可用」。
+
+差别是实质性的：`INVALID` 会传导到 `evaluation_status = FAILED` 并**须告警**
+（`FE:391`、`FE:659`），而 `UNAVAILABLE` 是「正常业务情形，不需要修复」。
+按 D-10 实现，一只从未回撤的基金会触发告警。
+
+本草案按 **UNAVAILABLE** 实现，并在 `status.py` 的枚举 docstring 里记了理由。
+需要计划作者确认，并相应修订 D-10 的表格。
+
+### ④ MAR 第三模式的名字：任务描述用 `FIXED`，上游用 `CUSTOM`
+
+`FE:454-460` 逐字抄录的字段表写的是 `mar_policy | ZERO / RISK_FREE / **CUSTOM**`，
+`mar_value` 与 `mar_quotation_basis`「仅 `CUSTOM` 模式必填」。任务描述（以及本草案）
+用的是 `FIXED`。两者指同一件事，但它会落进 `evaluation_policy` 配置与
+`factor_value.evaluation_policy_version` 的可复现链路里 —— 改名要带一次数据迁移。
+建议在计划里钉死一个，本草案暂取 `FIXED`。
+
+另：上游还要求 `CUSTOM` 模式必填 `mar_quotation_basis`（年化口径）。本草案的
+`resolve_mar` 只要求 `fixed_value`，**没有**实现 `mar_quotation_basis` —— 这是
+一个如实登记的缺口，需要决定是补上还是明确推到 M2。
+
+### ⑤ `factor_effectiveness` 的粒度：D-16 的字段清单缺 Peer Group 维度 —— **影响 Task 7 建表**
+
+D-16 给的是 `(profile, factor_id, valid/invalid, IC, ICIR, 检验区间)`。
+但 IC 是**横截面**统计量，而本平台的横截面就是 Peer Group（标准化、排名、分位、
+分层四者必须用同一个 Peer Group，`FR:574` C-2）。同一个因子在股票型组里有效、
+在债券型组里无效是完全正常的结果；不带 `peer_group_key`，两个结果只能互相覆盖，
+或者被迫跨组池化 —— 而跨组池化会把不同收益分布的基金放进同一条相关系数里。
+
+本草案按「`factor_effectiveness` 含 `peer_group_key` 与 `segment` 两列」实现。
+**这需要 Task 7 在迁移 0016 里建出这两列**，而 Task 7 的实现者只看到 D-16 的清单，
+不会知道。建议把这两列写进 Task 7 的需求。
+
+顺带：D-16 说「`factor_effectiveness`（由 D-1 拉入）」，但计划的任务表里
+Task 7 的标题是「`factor` schema **五张表**」，而 D-16 只列了四张
+（`factor_definition` / `factor_version` / `factor_run` / `factor_effectiveness`）
+外加 `factor_value` —— 数得上五张，但没有一处把五张表逐一点名，建议在 Task 7 里列全。
+
+### ⑥ `peer_group_snapshot` 缺「所用分类版本」的落点 —— **影响 Task 8 建表**
+
+`FR-PEER-001` Output 与 `01-system-architecture:839` 都要求 B1 = 「组成员 +
+**所用分类版本**」，而 digest §3.2.1 明确记「其余字段（组规模、所用分类版本、
+`evaluation_profile`、`min_sample_size` 引用…）**文档未给字段清单**」。
+本草案的 `PeerGroupSnapshotWriter` 写 `classification_history_ids`
+（`ARRAY(BigInteger)` 或 JSONB）。需要 Task 8 建出它，否则「所用分类版本」
+无处安放，而 §10.1.1 说得很清楚：只存构建规则不存结果，历史 Peer Group 不可重建。
+
+### ⑦ `fund.fund_share_class` 没有 `base_currency` 列 —— **阻塞 Task 11，且不在任何任务的 Files 里**
+
+`FR:105` 把 Currency 定为 Peer Group 的强制划分维度，`FR:116` 要求它与 R_f 解析键
+的 `currency` **取自同一字段 `fund_share_class.base_currency`**。Plan-1 落地的
+`FundShareClass` 只有 7 列，没有这一列，全仓 `grep base_currency` 在 `src/` 下
+零命中（`RiskFreeRate.currency` 是另一张表的另一列）。
+
+这意味着 Task 11 必须包含一次 schema 变更（本草案写成迁移 0018），而计划的
+File Structure 只列了 `0016（factor schema）`、`0017（evaluation schema）`。
+另外 AKShare 的 `fund_name_em` **不提供币种**，所以它只能由一条【声明的推导规则】
+填入（本草案：`PROVIDER_SCOPE_DECLARED` + 独立的 `base_currency_source` 列）。
+需要裁决：这一列归 Task 11、还是提前到 Task 5 / Task 6 的灌数任务。
+
+### ⑧ Threshold Resolver 在 File Structure 里没有落点
+
+计划的 `libs/strategy_library/` 目录树列了 `factor/`、`peer_group/`、`score/`、
+`ranking/`、`universe/`，**没有** threshold 或 policy 目录，而 Task 10 的产物
+（MAR 三模式的纯逻辑）正属于策略领域逻辑。本草案落成
+`libs/strategy_library/threshold/mar.py` + `services/factor_service/thresholds.py`
+（前者纯、后者碰库）。需要在 File Structure 里补上。
+
+### ⑨ D-9 的公式表只给了 9 条公式，`F-RET-002` Rolling Return 的聚合式缺失
+
+D-9 的代码块列了 `r_t` / 年化收益率 / Volatility / Downside Vol / Max Drawdown /
+Sharpe / Sortino / Calmar / Win Rate / Rolling Sharpe 稳定性 —— 唯独没有
+Rolling Return。「滚动窗口的年化收益率」是一个**序列**，落成一个因子值需要一次
+聚合（均值 / 中位数 / 末值 / 加权），四种选择的数值差异可观。
+本草案补齐为 **均值**（PROVISIONAL，登记在 `metric/v1.yaml` 的
+`factor.rolling_return_aggregation`）。需要确认。
+
+同类的两个未给值：`rolling.window_days` / `step_days` 的**单位**（自然日还是
+净值点数）——本草案取净值点数并改名为 `*_points`；以及 MAR 的**日频折算口径**
+（简单除以 252 还是几何折算）——本草案取 `SIMPLE_DIVISION`。
+
+### ⑩ 契约的 `percentile_rank` 无法单独承担 G-7 / G-8
+
+契约签名是 `percentile_rank(values, direction) -> list[Decimal | None]`：
+没有 `n_effective`、没有 Rank、没有 `min_peer_group_size`。而 G-7 要求按
+`n_effective` 判 `INSUFFICIENT_SAMPLE`，G-8 要求 Rank / n_effective / Percentile
+三者都落库。本草案把 `percentile_rank` 保留为**纯内核**（严格照契约），
+另加 `normalize_peer_group` 承担排除 UNAVAILABLE、算 `n_effective`、判阈值、
+产出三元组。若计划作者希望契约里就体现这一层，需要把 `normalize_peer_group`
+提到接口契约节。
+
+### ⑪ 计划的包路径与仓库现状不一致 —— 会在 Task 9 第一行 import 就炸
+
+计划 File Structure 与 D-3 写的是 `src/fip/libs/quant_engine` /
+`src/fip/libs/strategy_library`，仓库里是 `src/fip/quant_engine` /
+`src/fip/strategy_library`（Plan-1 建的空包），并且
+`tests/unit/test_package_layout.py::test_all_layer_packages_importable`
+与 `tests/fitness/test_architecture.py`（`_py_files("strategy_library")`、
+`GUARDED_ROOTS`）都按现状写死。Task 4「strategy_library 骨架」必须把搬迁与这两个
+测试的同步列为显式步骤，否则 Task 9 的实现者会在两条路径之间自行选一条。
+
+### ⑫ 现有 `config/policy/evaluation/v1.yaml` 里的 `mar.default: 0.0` 直接违反 G-6
+
+这不是遗漏而是**已经存在的违规**：`FE:474` 逐字写着「`ZERO` 是第一版推荐取值，
+不是不填时的兜底」，而一个叫 `mar.default` 的配置项语义就是兜底。Task 10 Step 2
+删除它。登记在此是因为它在 Plan-1 就已入库，任何「照着现有配置写」的实现者
+都会把它读进来。
+
+### ⑬ 两条更小的登记
+
+- **`risk_free_rate_ref` 的四个必备字段不含 `curve_code`**（digest §9.2.1）。
+  但 Plan-1 的 `RiskFreeRate` 主键第一列就是 `curve_code`，中债同一天有三条曲线，
+  实测信用债 10Y 比国债高约 30bp。缺了它，溯源无法回答「这个 Sharpe 用的是哪条
+  曲线」。本草案补为第五个字段。
+- **`ParsedYieldPoint` 不带 `currency`**，而 `RiskFreeRate` 的主键含它。
+  Plan-1 交接只说「`curve_code` 与 `RiskFreeRate.curve_code` 只在结构上对齐，
+  未端到端跑通」，没提这个空档。本草案在适配器层补 `CURVE_CURRENCIES` 映射 ——
+  「这条曲线是什么币种」属于曲线的身份，不能让灌数编排现编。

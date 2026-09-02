@@ -7,23 +7,27 @@
 
 ## 本稿钉定的上游接口（契约未定义，须回填进主计划的【跨任务接口契约】）
 
-Task 14–18 消费的下列名字**在主计划的接口契约中不存在**。它们必须由 Task 3/4/7/8/9/11/12/13
-产出，本稿在此逐条钉死签名；执行 Task 7–13 的实现者若采用了别的名字，
+Task 14–18 消费的下列名字**在主计划的接口契约中不存在**。它们必须由 Task 7/8/9/11/12/13
+产出，本稿在此逐条钉死签名；执行那些任务的实现者若采用了别的名字，
 必须回来改这一节而不是各自发明。
 
 ```python
-# ---- Task 4 落位（D-3）：两个 L1 层包的 import 路径 ----
-#   fip.libs.quant_engine.*        （不是 fip.quant_engine —— 见本稿末尾【矛盾 1】）
-#   fip.libs.strategy_library.*    （不是 fip.strategy_library）
+# ---- 落位：按 P2-1（撤销 D-3）留在 Plan-1 的位置 ----
+#   fip.quant_engine.*        （不是 fip.libs.quant_engine）
+#   fip.strategy_library.*    （不是 fip.libs.strategy_library）
 
-# ---- Task 9 产出，Task 14 消费 ----
-# fip.libs.strategy_library.factor.status
-class FactorStatus(StrEnum): VALID; WARNING; INVALID; UNAVAILABLE      # 契约已定义
-# fip.libs.strategy_library.factor.definitions
-class PreferenceDirection(StrEnum): HIGHER_IS_BETTER; LOWER_IS_BETTER  # 契约已定义
+# ---- Task 9 产出，Task 14 消费（契约已定义类型，此处只钉 import 路径）----
+# fip.strategy_library.factor.status      : FactorStatus
+# fip.strategy_library.factor.definitions : PreferenceDirection
+#                                           FACTOR_IDS: tuple[str, ...]        ← 契约缺
+#                                           preference_direction(fid) -> PreferenceDirection  ← 契约缺
 
-# ---- Task 3 产出，Task 15/17 消费（契约已定义签名，此处仅钉 import 路径）----
-# fip.libs.quant_engine.stats.median(xs: Sequence[Decimal]) -> Decimal
+# ---- Task 3 产出，Task 15/17 消费（契约已定义签名，此处只钉 import 路径）----
+# fip.quant_engine.stats.median(xs: Sequence[Decimal]) -> Decimal
+
+# ---- Task 13 产出，Task 14 消费：检验结论的形状 —— 契约完全没有定义 ----
+#   本稿把它定义在 fip.strategy_library.score.subscore.FactorEffectiveness
+#   （见 Task 14 的 Produces）。若 Task 13 另造一个类型，两边必须统一到一个。
 
 # ---- Task 7 产出，Task 17 消费：factor schema 的 ORM 模块路径 ----
 # fip.services.factor_service.models.factor
@@ -44,22 +48,34 @@ SB-1 会在第一天就永久失真。
 `share_class_id`（本就有）、`eligibility_effective_at DATE NULL`、`eligibility_version INT NULL`，
 复合 FK `(share_class_id, eligibility_effective_at, eligibility_version)`
 → `fund.investment_eligibility(share_class_id, effective_at, version)` `ON DELETE RESTRICT`，
-外加 `CHECK (eligibility_effective_at IS NULL) = (eligibility_version IS NULL)`。
+外加 `CHECK ((eligibility_effective_at IS NULL) = (eligibility_version IS NULL))`。
 复用 `share_class_id` 这一列是有意的：它在结构上堵死「引用到别人那一版可投资性」。
+
+**Task 8 建表时必须包含的另外三组列**（G-8 / G-9 / G-4 的落库形态）：
+`fund_ranking` 上 `rank` / `n_effective` / `percentile` / `peer_group_size` /
+`ranking_status` 五列齐备；`fund_tier` 上除两列已定案的
+（`classification_status` / `n_effective`）外还须有
+`percentile` / `total_score` / `peer_sharpe_median` / `peer_max_drawdown_median`；
+`fund_score` 上须有 `data_completeness` 与 `weight_source`。
+
+**MAR 不经本组任务**：P2-4 裁定 Task 10 删除 `config/policy/evaluation/v1.yaml` 里的
+`mar.default`（它直接违反 G-6「必填无默认」）。因此本稿的 `EvaluationPolicy`
+**不含** `mar` 字段 —— MAR 由 Task 10 的 Threshold Resolver 按三模式解析后
+直接进 `FactorInput.mar`，未配置即 `None`，`F-RISK-002` / `F-RAP-002` 一律 `UNAVAILABLE`。
 
 ---
 
 ### Task 14: 五子分 + 归因 + Data Completeness
 
-> 依赖 Task 13（因子有效性检验）。本任务全部落在 `libs/strategy_library`，**纯函数**：
+> 依赖 Task 13（因子有效性检验）。本任务全部落在 `strategy_library`，**纯函数**：
 > 不碰数据库、不读配置文件、不含 `runtime_mode` 分支（SDL-1 / SDL-2）。
 > Profile 与有效性结论都由调用方注入。
 
 **Files:**
-- Create: `src/fip/libs/strategy_library/score/__init__.py`
-- Create: `src/fip/libs/strategy_library/score/attribution.py`
-- Create: `src/fip/libs/strategy_library/score/subscore.py`
-- Create: `src/fip/libs/strategy_library/score/completeness.py`
+- Create: `src/fip/strategy_library/score/__init__.py`
+- Create: `src/fip/strategy_library/score/attribution.py`
+- Create: `src/fip/strategy_library/score/subscore.py`
+- Create: `src/fip/strategy_library/score/completeness.py`
 - Test: `tests/unit/test_sub_score.py`
 - Test: `tests/unit/test_score_completeness.py`
 - Modify: `config/strategy/factor/v1.yaml`（Profile 的因子声明与子分权重）
@@ -67,8 +83,8 @@ SB-1 会在第一天就永久失真。
 **Interfaces:**
 
 - Consumes:
-  - `fip.libs.strategy_library.factor.status.FactorStatus`（Task 9）
-  - `fip.libs.strategy_library.factor.definitions.PreferenceDirection`（Task 9）
+  - `fip.strategy_library.factor.status.FactorStatus`（Task 9）
+  - `fip.strategy_library.factor.definitions.PreferenceDirection`（Task 9）
 - Produces:
   ```python
   # score/attribution.py
@@ -160,10 +176,10 @@ from decimal import Decimal
 
 import pytest
 
-from fip.libs.strategy_library.factor.definitions import PreferenceDirection
-from fip.libs.strategy_library.factor.status import FactorStatus
-from fip.libs.strategy_library.score.attribution import NormalizedFactor
-from fip.libs.strategy_library.score.subscore import (
+from fip.strategy_library.factor.definitions import PreferenceDirection
+from fip.strategy_library.factor.status import FactorStatus
+from fip.strategy_library.score.attribution import NormalizedFactor
+from fip.strategy_library.score.subscore import (
     EvaluationProfile,
     FactorEffectiveness,
     ScoreStatus,
@@ -402,7 +418,7 @@ def test_reproducible_bitwise_on_recompute():
 
 def test_profile_declaring_no_factor_is_rejected_not_defaulted():
     """空 Profile 不得静默产出 completeness = 1.0 —— 0/0 是配置错误，不是「完整」。"""
-    from fip.libs.strategy_library.score.completeness import data_completeness
+    from fip.strategy_library.score.completeness import data_completeness
 
     empty = EvaluationProfile(profile_id="EMPTY", declared_factors={},
                               sub_score_weights=M1_SUB_WEIGHTS,
@@ -426,11 +442,11 @@ from decimal import Decimal
 
 import pytest
 
-from fip.libs.strategy_library.factor.definitions import PreferenceDirection
-from fip.libs.strategy_library.factor.status import FactorStatus
-from fip.libs.strategy_library.score.attribution import NormalizedFactor
-from fip.libs.strategy_library.score.completeness import data_completeness
-from fip.libs.strategy_library.score.subscore import (
+from fip.strategy_library.factor.definitions import PreferenceDirection
+from fip.strategy_library.factor.status import FactorStatus
+from fip.strategy_library.score.attribution import NormalizedFactor
+from fip.strategy_library.score.completeness import data_completeness
+from fip.strategy_library.score.subscore import (
     EvaluationProfile,
     FactorEffectiveness,
     ScoreStatus,
@@ -537,13 +553,13 @@ def test_zero_declared_factors_raises_instead_of_returning_one():
 Run: `.venv/bin/pytest tests/unit/test_sub_score.py tests/unit/test_score_completeness.py -q`
 
 Expected: 全部 collection error —
-`ModuleNotFoundError: No module named 'fip.libs.strategy_library.score'`。
+`ModuleNotFoundError: No module named 'fip.strategy_library.score'`。
 把这段输出粘进执行报告；**没有先看到这条失败就不许往下写实现**。
 
 - [ ] **Step 3: 实现归因数据结构**
 
 ```python
-# src/fip/libs/strategy_library/score/attribution.py
+# src/fip/strategy_library/score/attribution.py
 """归因明细 —— FS §10.2 / §10.3 / §10.4。
 
 归因链：Total Score → 五子分 + 权重 → 各 Factor 的 Normalized Score × Weight
@@ -556,8 +572,8 @@ FS §10.4：被排除的因子必须记录【为什么被排除】，而不是�
 from dataclasses import dataclass
 from decimal import Decimal
 
-from fip.libs.strategy_library.factor.definitions import PreferenceDirection
-from fip.libs.strategy_library.factor.status import FactorStatus
+from fip.strategy_library.factor.definitions import PreferenceDirection
+from fip.strategy_library.factor.status import FactorStatus
 
 # 量化步长与存储精度对齐（platform/db/types.py）：
 #   权重 / 比率 → RatioNumeric = Numeric(12, 8)
@@ -620,7 +636,7 @@ class FactorAttribution:
 - [ ] **Step 4: 实现五子分与总分**
 
 ```python
-# src/fip/libs/strategy_library/score/subscore.py
+# src/fip/strategy_library/score/subscore.py
 """五子分合成 —— FS §8。
 
 合成公式（FS:256-263，一字不差）：
@@ -637,8 +653,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
-from fip.libs.strategy_library.factor.status import FactorStatus
-from fip.libs.strategy_library.score.attribution import (
+from fip.strategy_library.factor.status import FactorStatus
+from fip.strategy_library.score.attribution import (
     SCORE_QUANTUM,
     WEIGHT_QUANTUM,
     FactorAttribution,
@@ -895,7 +911,7 @@ def compute_fund_score(
     取这个顺序的理由：越靠前的状态越是「这个分数不能按字面使用」的强信号，
     下游按最强信号处置才不会误用。
     """
-    from fip.libs.strategy_library.score.completeness import data_completeness
+    from fip.strategy_library.score.completeness import data_completeness
 
     declared_ids = [fid for ids in profile.declared_factors.values() for fid in ids]
     subs = [
@@ -966,7 +982,7 @@ def compute_fund_score(
 - [ ] **Step 5: 实现 Data Completeness**
 
 ```python
-# src/fip/libs/strategy_library/score/completeness.py
+# src/fip/strategy_library/score/completeness.py
 """Data Completeness —— G-4 的输出必备字段。
 
 上游只给了口径（FS:418「可用指标数 / 应有指标数」）没给确切计算式，
@@ -983,8 +999,8 @@ def compute_fund_score(
 from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal
 
-from fip.libs.strategy_library.score.attribution import RATIO_QUANTUM
-from fip.libs.strategy_library.score.subscore import EvaluationProfile, SubScoreResult
+from fip.strategy_library.score.attribution import RATIO_QUANTUM
+from fip.strategy_library.score.subscore import EvaluationProfile, SubScoreResult
 
 
 def data_completeness(
@@ -1005,7 +1021,7 @@ def data_completeness(
 ```
 
 ```python
-# src/fip/libs/strategy_library/score/__init__.py
+# src/fip/strategy_library/score/__init__.py
 """评分层。纯函数，不含数据访问与运行模式分支（SDL-1 / SDL-2）。"""
 ```
 
@@ -1125,13 +1141,13 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 
 ### Task 15: 排名 / 分位 / Fund Tier
 
-> 依赖 Task 14。仍然全部落在 `libs/strategy_library`，纯函数。
+> 依赖 Task 14。仍然全部落在 `strategy_library`，纯函数。
 > 派生链（BR §16.1）：`Fund Score → Peer Group Ranking → Percentile → Fund Tier`，
 > 「四者是同一条派生链上的不同表示，不是四个独立概念」。
 
 **Files:**
-- Create: `src/fip/libs/strategy_library/ranking/__init__.py`
-- Create: `src/fip/libs/strategy_library/ranking/rank.py`
+- Create: `src/fip/strategy_library/ranking/__init__.py`
+- Create: `src/fip/strategy_library/ranking/rank.py`
 - Test: `tests/unit/test_ranking.py`
 - Test: `tests/unit/test_fund_tier.py`
 - Test: `tests/fitness/test_single_config_source.py`
@@ -1140,8 +1156,8 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 **Interfaces:**
 
 - Consumes:
-  - `fip.libs.strategy_library.score.subscore.ScoreStatus`（Task 14）
-  - `fip.libs.quant_engine.stats.median`（Task 3，用于组内绝对水平）
+  - `fip.strategy_library.score.subscore.ScoreStatus`（Task 14）
+  - `fip.quant_engine.stats.median`（Task 3，用于组内绝对水平）
 - Produces:
   ```python
   # ranking/rank.py
@@ -1197,7 +1213,7 @@ from decimal import Decimal
 
 import pytest
 
-from fip.libs.strategy_library.ranking.rank import (
+from fip.strategy_library.ranking.rank import (
     CrossSectionStatus,
     RankingEntry,
     TieMethod,
@@ -1384,7 +1400,7 @@ from decimal import Decimal
 
 import pytest
 
-from fip.libs.strategy_library.ranking.rank import (
+from fip.strategy_library.ranking.rank import (
     CrossSectionStatus,
     FundTier,
     PeerGroupAbsoluteLevel,
@@ -1407,7 +1423,7 @@ LEVEL = PeerGroupAbsoluteLevel(sharpe_median=Decimal("0.62"),
 
 def ranked(percentile: str | None, n_effective: int = 120,
            status: CrossSectionStatus = CrossSectionStatus.NORMAL) -> RankingResult:
-    from fip.libs.strategy_library.ranking.rank import TieMethod
+    from fip.strategy_library.ranking.rank import TieMethod
 
     return RankingResult(
         share_class_id=1, profile_id="M1-DEFAULT",
@@ -1544,12 +1560,12 @@ def test_thresholds_must_be_strictly_descending():
 Run: `.venv/bin/pytest tests/unit/test_ranking.py tests/unit/test_fund_tier.py -q`
 
 Expected: collection error —
-`ModuleNotFoundError: No module named 'fip.libs.strategy_library.ranking'`。把输出粘进报告。
+`ModuleNotFoundError: No module named 'fip.strategy_library.ranking'`。把输出粘进报告。
 
 - [ ] **Step 4: 实现排名、分位与 Tier**
 
 ```python
-# src/fip/libs/strategy_library/ranking/rank.py
+# src/fip/strategy_library/ranking/rank.py
 """Peer Group 内排名、分位与五档分层。
 
 派生链（BR §16.1）：Fund Score → Ranking → Percentile → Fund Tier。
@@ -1564,8 +1580,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
-from fip.libs.quant_engine.stats import median
-from fip.libs.strategy_library.score.attribution import SCORE_QUANTUM
+from fip.quant_engine.stats import median
+from fip.strategy_library.score.attribution import SCORE_QUANTUM
 
 
 class TieMethod(StrEnum):
@@ -1830,7 +1846,7 @@ def assign_tier(
 ```
 
 ```python
-# src/fip/libs/strategy_library/ranking/__init__.py
+# src/fip/strategy_library/ranking/__init__.py
 """排名 / 分位 / 分层。纯函数，阈值由调用方注入（BR:1075 严禁硬编码）。"""
 ```
 
@@ -1907,7 +1923,7 @@ def test_min_sample_size_config_path_appears_exactly_once():
 def test_strategy_library_contains_no_hardcoded_sample_threshold():
     """策略库是纯函数层：阈值只能【被注入】，不能自己知道。"""
     offenders = []
-    for f in (SRC / "libs" / "strategy_library").rglob("*.py"):
+    for f in (SRC / "strategy_library").rglob("*.py"):
         tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value == 30:
@@ -1951,13 +1967,13 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 
 ### Task 16: Eligibility Rules + B2 候选池快照（含 REJECTED）
 
-> 依赖 Task 15。分两层：规则求值是纯函数（`libs/strategy_library/universe`），
+> 依赖 Task 15。分两层：规则求值是纯函数（`strategy_library/universe`），
 > B2 原子写入是编排（`services/fund_service`）。C-11：service 层只做编排与持久化，
 > **不含投资策略规则** —— 条件怎么算、四种可投资性各自怎么处置，全在策略库里。
 
 **Files:**
-- Create: `src/fip/libs/strategy_library/universe/__init__.py`
-- Create: `src/fip/libs/strategy_library/universe/rules.py`
+- Create: `src/fip/strategy_library/universe/__init__.py`
+- Create: `src/fip/strategy_library/universe/rules.py`
 - Create: `src/fip/services/fund_service/universe.py`
 - Test: `tests/unit/test_eligibility_rules.py`
 - Test: `tests/integration/test_universe_snapshot.py`
@@ -1966,8 +1982,8 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 **Interfaces:**
 
 - Consumes:
-  - `fip.libs.strategy_library.score.subscore.ScoreStatus`（Task 14）
-  - `fip.libs.strategy_library.ranking.rank.FundTier`（Task 15）
+  - `fip.strategy_library.score.subscore.ScoreStatus`（Task 14）
+  - `fip.strategy_library.ranking.rank.FundTier`（Task 15）
   - `fip.services.fund_service.models.evaluation.{FundUniverseSnapshot, FundUniverseMember, SelectionConditionResult, PeerGroupSnapshot}`（Task 8）
   - `fip.services.data_service.eligibility.EligibilityStatus`（Plan-1；**只在 service 层消费**，策略库侧一律用 `str`，见 Step 4 说明）
 - Produces:
@@ -2037,8 +2053,8 @@ from decimal import Decimal
 
 import pytest
 
-from fip.libs.strategy_library.universe import rules
-from fip.libs.strategy_library.universe.rules import (
+from fip.strategy_library.universe import rules
+from fip.strategy_library.universe.rules import (
     CandidateFacts,
     Condition,
     ConditionStatus,
@@ -2212,12 +2228,12 @@ def test_missing_eligibility_row_is_rejected_and_recorded():
 
 Run: `.venv/bin/pytest tests/unit/test_eligibility_rules.py -q`
 
-Expected: `ModuleNotFoundError: No module named 'fip.libs.strategy_library.universe'`。
+Expected: `ModuleNotFoundError: No module named 'fip.strategy_library.universe'`。
 
 - [ ] **Step 3: 实现规则求值（纯函数）**
 
 ```python
-# src/fip/libs/strategy_library/universe/rules.py
+# src/fip/strategy_library/universe/rules.py
 """Eligibility Rules 求值。
 
 ⚠️ 与 `Investment Eligibility` 严格区分（03-data/02 §14 用「严格分离」四个字点名）：
@@ -2432,7 +2448,7 @@ def select(
 ```
 
 ```python
-# src/fip/libs/strategy_library/universe/__init__.py
+# src/fip/strategy_library/universe/__init__.py
 """候选池准入规则。纯函数：不读配置、不碰数据库、不 import services。"""
 ```
 
@@ -2447,7 +2463,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select as sa_select
 
-from fip.libs.strategy_library.universe.rules import (
+from fip.strategy_library.universe.rules import (
     ConditionResult,
     ConditionStatus,
     SelectionOutcome,
@@ -2693,7 +2709,7 @@ B1 与 B2 【不要求同一事务】——文档说的是「三个边界各自�
 B2 只需在自己的事务内引用一个已提交的 B1 快照 ID。
 
 本模块只做编排与持久化：入池与否、条件怎么算，全部在
-libs/strategy_library/universe/rules.py 里（C-11）。
+strategy_library/universe/rules.py 里（C-11）。
 """
 
 import datetime as dt
@@ -2702,7 +2718,7 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fip.libs.strategy_library.universe.rules import (
+from fip.strategy_library.universe.rules import (
     ConditionResult,
     SelectionOutcome,
     SelectionStatus,
@@ -2922,11 +2938,11 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 - Consumes:
   - `fip.platform.decision_data.pit.PitDataContext`、`fip.platform.decision_data.context.DecisionExecutionContext`（Plan-1）
   - `fip.platform.config.loader.load_config_file` / `ConfigSet`（Plan-1）
-  - `fip.libs.strategy_library.factor.compute.compute_factor`、`FactorInput`、`FactorResult`（Task 9）
-  - `fip.libs.strategy_library.factor.normalize.percentile_rank`（Task 12）
-  - `fip.libs.strategy_library.score.subscore.*`（Task 14）
-  - `fip.libs.strategy_library.ranking.rank.*`（Task 15）
-  - `fip.libs.strategy_library.universe.rules.*`、`fip.services.fund_service.universe.UniverseSnapshotWriter`（Task 16）
+  - `fip.strategy_library.factor.compute.compute_factor`、`FactorInput`、`FactorResult`（Task 9）
+  - `fip.strategy_library.factor.normalize.percentile_rank`（Task 12）
+  - `fip.strategy_library.score.subscore.*`（Task 14）
+  - `fip.strategy_library.ranking.rank.*`（Task 15）
+  - `fip.strategy_library.universe.rules.*`、`fip.services.fund_service.universe.UniverseSnapshotWriter`（Task 16）
   - `fip.services.data_service.eligibility.EligibilityStatus`（Plan-1，仅用于配置校验）
 - Produces:
   ```python
@@ -2936,7 +2952,6 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
       min_peer_group_size: int
       classification_level: str
       tier_thresholds: TierThresholds
-      mar: Decimal | None
       min_universe_size: int
       data_completeness_floor: Decimal
       investment_eligibility_handling: Mapping[str, EligibilityAction]
@@ -3307,8 +3322,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
-from fip.libs.strategy_library.ranking.rank import TierThresholds
-from fip.libs.strategy_library.universe.rules import EligibilityAction
+from fip.strategy_library.ranking.rank import TierThresholds
+from fip.strategy_library.universe.rules import EligibilityAction
 from fip.platform.config.loader import ConfigSet
 
 _ELIGIBILITY_STATUSES = (
@@ -3318,10 +3333,20 @@ _ELIGIBILITY_STATUSES = (
 
 @dataclass(frozen=True, slots=True)
 class EvaluationPolicy:
+    """⚠️ 这里【没有】mar 字段。
+
+    P2-4：`config/policy/evaluation/v1.yaml` 里原有的 `mar.default: 0.0`
+    直接违反 G-6（「mar_policy 必填无默认」「不得给 MAR 设兜底值」），
+    由 Task 10 删除。MAR 改由 Task 10 的 Threshold Resolver 按三模式解析，
+    未配置即 None —— 于是 F-RISK-002 / F-RAP-002 一律 UNAVAILABLE。
+    在这里加一个 `mar: Decimal | None = Decimal("0")` 之类的兜底，
+    等于把那条已经拆掉的地雷重新埋回去：「两者数值相同但含义相反，
+    设默认会让配置遗漏静默产出看起来正常的 Sortino」（FE:472-481）。
+    """
+
     min_peer_group_size: int
     classification_level: str
     tier_thresholds: TierThresholds
-    mar: Decimal | None
     min_universe_size: int
     data_completeness_floor: Decimal
     investment_eligibility_handling: Mapping[str, EligibilityAction]
@@ -3335,14 +3360,6 @@ class EvaluationPolicy:
             b=Decimal(config.get("classification.tier_percentile_thresholds.b")),
             c=Decimal(config.get("classification.tier_percentile_thresholds.c")),
         )
-        # G-6：mar_policy 必填【无默认】。配置项缺失时不得兜底为 0 ——
-        # 「两者数值相同但含义相反，设默认会让配置遗漏静默产出看起来
-        #   正常的 Sortino」（FE:472-481）。缺失就是 None，
-        # F-RISK-002 / F-RAP-002 一律 UNAVAILABLE。
-        try:
-            mar: Decimal | None = Decimal(str(config.get("mar.default")))
-        except KeyError:
-            mar = None
         handling = {
             status: EligibilityAction(
                 config.get(f"selection.investment_eligibility_handling.{status}")
@@ -3353,7 +3370,6 @@ class EvaluationPolicy:
             min_peer_group_size=int(config.get("peer_group.min_sample_size")),
             classification_level=str(config.get("peer_group.classification_level")),
             tier_thresholds=thresholds,
-            mar=mar,
             min_universe_size=int(config.get("selection.min_universe_size")),
             data_completeness_floor=Decimal(
                 config.get("selection.data_completeness_floor")
@@ -3376,7 +3392,7 @@ SB-1：本 service 是 `factor` schema 的【唯一】写入方。
 但一行都不往那些 schema 里写 —— tests/integration/test_schema_write_ownership.py
 的 before_flush 监听器对此断言。
 
-C-11：本模块只做编排与持久化。因子公式在 libs/strategy_library/factor/compute.py，
+C-11：本模块只做编排与持久化。因子公式在 strategy_library/factor/compute.py，
 分位公式在 factor/normalize.py，阈值判定在 factor/effectiveness.py。
 """
 
@@ -3386,13 +3402,13 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fip.libs.strategy_library.factor.compute import compute_factor
-from fip.libs.strategy_library.factor.definitions import (
+from fip.strategy_library.factor.compute import compute_factor
+from fip.strategy_library.factor.definitions import (
     FACTOR_IDS,
     preference_direction,
 )
-from fip.libs.strategy_library.factor.normalize import percentile_rank
-from fip.libs.strategy_library.factor.status import FactorStatus
+from fip.strategy_library.factor.normalize import percentile_rank
+from fip.strategy_library.factor.status import FactorStatus
 from fip.platform.config.evaluation_policy import EvaluationPolicy
 from fip.platform.decision_data.context import DecisionExecutionContext
 from fip.platform.decision_data.pit import PitDataContext
@@ -3529,14 +3545,14 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from fip.libs.quant_engine.stats import median
-from fip.libs.strategy_library.ranking.rank import (
+from fip.quant_engine.stats import median
+from fip.strategy_library.ranking.rank import (
     RankingEntry,
     assign_tier,
     peer_group_absolute_level,
     rank_within_peer_group,
 )
-from fip.libs.strategy_library.score.subscore import (
+from fip.strategy_library.score.subscore import (
     EvaluationProfile,
     compute_fund_score,
 )
@@ -4243,3 +4259,149 @@ Claude-Session: https://claude.ai/code/session_01SZBJBiDWT8FHcx7NhkgcTD"
 ```
 
 ---
+
+## 起草 Task 14–18 时发现的矛盾与遗漏
+
+按 Plan-1 的做法如实登记。**前四条需要在执行 Task 14 之前裁定**，
+其余是本稿已经自行裁定、但应回填进设计定案或接口契约的项。
+
+### C-1【严重 · 阻塞 Task 16】`derive_eligibility` 的 `HOLD_ONLY` / `EXIT_ONLY` 与上游语义颠倒
+
+上游 §2.13 三处**完全一致**（`05-fund-selection.md:217-223` = `02-business-requirements.md:1232-1238`
+= `03-data/02-data-domain-model.md:400-406`）：
+
+| 状态 | 含义 | 可建仓 | 可加仓 | 可持有 | 可减仓 |
+|---|---|:---:|:---:|:---:|:---:|
+| `HOLD_ONLY` | **暂停申购** | ✗ | ✗ | ✓ | ✓ |
+| `NOT_TRADABLE` | 已清盘 / **暂停赎回** | ✗ | ✗ | — | ✗ |
+
+而 Plan-1 的 `src/fip/services/data_service/eligibility.py:56-61` 是：
+
+```python
+    if subscription_open and not redemption_open:
+        return EligibilityStatus.HOLD_ONLY      # 暂停【赎回】→ 上游说这是 NOT_TRADABLE
+    if not subscription_open and redemption_open:
+        return EligibilityStatus.EXIT_ONLY      # 暂停【申购】→ 上游说这是 HOLD_ONLY
+```
+
+两个分支相对上游语义**互换了**。该文件自己的注释
+（`HOLD_ONLY = 可持有、可加仓，不可减仓`）也与上游的「可加仓 ✗」直接冲突。
+
+**为什么这在 Plan-2 才变成严重问题**：Plan-1 里这个函数的产出没有消费方，错了也不显形。
+Task 16 一旦按 §9.3 的处理表消费它，后果立刻是实质性的：
+
+- 暂停申购的基金（常见、良性、暂停期结束就恢复）被判 `EXIT_ONLY` → **不入池**；
+- 暂停赎回的基金（真正不可交易的那一类）被判 `HOLD_ONLY` → **入池并标注约束**。
+
+即：该排除的进了池，不该排除的被赶了出去，而全部条件结果照常落库、
+没有任何一条测试会红。
+
+**需要的裁定**：修正 `derive_eligibility`（属 Plan-1 交接性质的修复，
+建议并入 Task 1），还是认定上游那张表在本项目语境下需要改写。
+两者选其一，但**不能带着这个不一致进 Task 16** ——
+本稿 Task 16 的处理表是照上游写的。
+
+### C-2【须裁定】子分层权重：上游既禁止拍板，又没有给值，而 Tier 依赖总分
+
+`FS:301-304` 只把**因子层**权重定案为 `EQUAL_WITHIN_VALID`，**子分层**推给
+「由 Profile 定义」；`§8.5` 只定了个别因子在个别画像下的相对高低
+（费率 / MDD / Alpha / TE），**四项在 M1 全都不可算**；
+而 `BR:278` 明确禁止「现在拍一个 25% / 25% / 25% / 25%」，`FS:299` 要求「不得事先拍板权重」。
+
+于是：没有子分权重 → 没有总分 → 没有 Tier → M1.4 的验收标准通不过。
+**这正是 D-1 用来把因子有效性检验拉进 Plan-2 的同一条论证链，只是发生在上一层，
+而设计定案没有处理它。**
+
+本稿的处置：`sub_score_weights` 五项各 `0.2`，标 **PROVISIONAL**，
+`source` 写明「上游禁止拍板但未给值」，于是 LIVE 模式下每次取用都会发出
+`ProvisionalParameterUsed`。但这应当是设计定案里的一条正式裁定（建议编号 D-22），
+不该由 Task 14 的实现者顺手决定 —— 它与因子层的 `EQUAL_WITHIN_VALID` **性质不同**：
+后者已定案，前者是占位。
+
+### C-3【须裁定】`data_completeness` 的分母与 D-8 的「10 个因子」冲突
+
+- D-8 把 REL 全类**扣出** M1 因子清单，得到 10 个；任务总览里 Task 9 也叫「10 个因子的纯函数」。
+- 但 spec §6.2 与 M1.4 完成判据要求「Relative Performance Score 正确呈现为 `UNAVAILABLE`
+  **且 `Data Completeness` 反映之**」，理由是「基于 4 个子分的 85 分与基于 5 个子分的
+  85 分必须可区分」。
+
+若 Profile 声明的因子数 = 可算的 10 个，则 `data_completeness ≡ 1.0`，
+**上面那句「必须可区分」就被静默抹掉了** —— M1 用来跑通 `UNAVAILABLE` 机制的
+唯一场景随之消失。
+
+本稿的处置：区分**声明**与**可算** —— Profile 声明 13 个（10 可算 + 3 个 REL），
+分母取 13，M1 的 `data_completeness` 恒为 `10/13 = 0.76923077`。
+三个 REL ID 取 D-8 自己点名的、从现存文档中泄露出的真实 ID
+（`F-REL-002` Alpha / `F-REL-003` Beta / `F-REL-004` IR）；
+Tracking Error 与 Benchmark 超额收益**不声明**，因为它们的真实 ID 未泄露，
+凭空编号会在拿到正式文档时与真 ID 冲突。
+
+**需要回填的地方**：接口契约里 `FACTOR_IDS`（Task 9）若定义成恰好 10 个，
+Task 14 的分母会静默变回 10。「声明 13 / 可算 10」这个区分必须写进契约，
+否则它活不过两个任务。
+
+### C-4【须裁定】`score_status` 的五个取值没有优先级，且两个层级被混用
+
+D-19 定下五值，但三份上游文档都没说**同时成立时取哪个**。M1 的常态里这不是假设性问题：
+REL 子分 `UNAVAILABLE`（→ 基金层 `PARTIAL`）与某个子分有效因子数 < 2
+（→ `INSUFFICIENT_FACTORS`）会同时发生。
+
+另外 `FS:344` 说的是「某**子分**标 `INSUFFICIENT_FACTORS`」，而 D-19 把它列为
+**`score_status`**（基金层）的取值 —— 两个层级被混进同一个枚举。
+
+本稿的处置：同一枚举用于两层（取值含义一致），基金层优先级钉为
+`VALIDATION_PENDING > UNAVAILABLE > INSUFFICIENT_FACTORS > PARTIAL > COMPLETED`，
+理由是「越靠前的状态越是『这个分数不能按字面使用』的强信号」。
+这是**补齐**，应回填设计定案。
+
+### C-5 `N = 1` 的形态与 `fund_ranking` 的联动 CHECK 不相容
+
+- `FR §7.3`：`N = 1` → `Percentile = UNAVAILABLE`（此时 `Rank = 1` 是存在的）。
+- `04-database-design.md:722-728` 的联动 CHECK 只允许两种形态：
+  `(NORMAL ∧ rank NOT NULL ∧ percentile NOT NULL)` 或
+  `(INSUFFICIENT_SAMPLE ∧ rank IS NULL ∧ percentile IS NULL)`。
+
+**没有第三种形态能容纳「有名次但无分位」。** 本稿把 `N = 1` 归入
+`INSUFFICIENT_SAMPLE`（生产配置下 `1 < 30` 恒成立，语义无损），并用一条测试钉住。
+若将来 `MIN_PEER_GROUP_SIZE` 被调到 1，这条冲突会立刻显形。
+
+### C-6 接口契约的缺口（本稿已钉定，须回填）
+
+契约自称唯一权威，但 Task 14–18 需要的这些名字它一个都没有：
+
+| 缺失 | 谁产出 → 谁消费 | 本稿的处置 |
+|---|---|---|
+| `FactorEffectiveness` 的形状 | Task 13 → 14 | 定义在 `score/subscore.py` |
+| `FACTOR_IDS` / `preference_direction(fid)` | Task 9 → 17 | 按此签名调用 |
+| `EvaluationProfile` 的形状与**由谁装载** | 配置 → 14/17 | 类型在 Task 14；**`config/strategy/factor/v1.yaml` 在 18 个任务里没有归属**（File Structure 写着「新建」），建议归 Task 9 |
+| `factor` / `evaluation` 两组 ORM 类名与模块路径 | Task 7/8 → 15/16/17 | 见本稿开头「本稿钉定的上游接口」 |
+| Task 15/16 的产出类型（`RankingResult` / `TierResult` / `SelectionOutcome` 等） | 15/16 → 17/18 | 本稿定义 |
+
+### C-7 QE-1 / SDL-1 的适应度断言字符串在 P2-1 之后已失效
+
+D-3 表里 QE-1 写「不得 import **`fip.libs.strategy_library`**」，
+P2-1 撤销了 `libs/` 落位却没有同步这一行 —— 照抄该字符串写出的检查**永远不会触发**
+（真实路径是 `fip.strategy_library`）。这与 D-4 指责 SB-1「静默缺席」是同一种病，
+只是换成了「检查存在但永远为真」。
+
+同一张表里 SDL-1 的「不得 import `fip.services.*.repositories`」这一半，
+在现有 `tests/fitness/test_architecture.py` 里**也没有实现** ——
+那条测试查的是 `IO_LIBS`（`sqlalchemy` / `psycopg` / `requests` …）这组**顶层包名**，
+根本不检查 `fip.services.*` 前缀。Task 4 落实 SDL-1 时必须把这一半补上。
+
+### C-8 三处文档未裁决项，本稿自行裁定（须回填）
+
+| # | 文档状态 | 本稿裁定 |
+|---|---|---|
+| BLOCK-9 | 「组内 Sharpe 中位数 / MDD 中位数」落 `fund_tier` 还是 `peer_group_snapshot`，**文档未裁决**，设计定案无对应条目 | 落 `fund_tier`，每行自带。落 `peer_group_snapshot` 需要多一次 join 才能满足 G-9，而「少 join 一次就违规」的约束活不长 |
+| TBD-DBD-3 | `fund_score_attribution` 的存储策略（完整明细表 / JSONB / 仅存当前）**未定案** | 完整明细表（`03-erd §9.3`：进入 `WHERE` / `GROUP BY` 的字段必须结构化，归因分析需要按 `factor_id` 聚合） |
+| —— | `fund_score` / `fund_ranking` / `fund_tier` 的唯一约束**是否含 `profile_id`**，Task 8 的建表要点里没有提 | **必须含**。G-10 要求按 Profile 拆分子排名；不含 `profile_id` 的唯一键会在 M2 加第二个 Profile 的那一天变成主键冲突，而 M1 全程不会显形 |
+
+### C-9 A-2 判据的期望值依赖 C-3 的裁定
+
+Task 18 的判据 A-2 期望 `data_completeness = 0.76923077`（10/13）。
+若 C-3 被裁定为「分母只算可算因子」，该期望值应改为 `1.0` ——
+但那样一来 A-2 就退化成一条恒真的判据，M1.4 的完成判据
+「`Data Completeness` 反映之」也随之失去被验证的对象。
+**这条依赖关系是有意写出来的**：A-2 的期望值是 C-3 裁定结果的直接函数，
+改一个必须改另一个。
