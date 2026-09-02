@@ -215,7 +215,7 @@ ignore_missing_imports = true
 .venv/bin/pip install \
   "sqlalchemy==2.0.36" "alembic==1.14.0" "psycopg[binary]==3.2.3" \
   "pydantic==2.10.3" "pydantic-settings==2.6.1" "pyyaml==6.0.2" \
-  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare==1.15.30" \
+  "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" "akshare==1.18.94" \
   "pytest==8.3.4" "pytest-cov==6.0.0" "ruff==0.8.4" "mypy==1.13.0"
 .venv/bin/pip install -e .
 .venv/bin/pip freeze --exclude-editable > requirements.lock
@@ -369,17 +369,27 @@ fip.platform 嵌套在 fip 下以避免遮蔽标准库 platform 模块。"
 
 - [ ] **Step 1：安装并启动 PostgreSQL 17，建库**
 
+> **已由 controller 预置，本步退化为验证。** Homebrew 在 macOS 13 Ventura 上已无任何
+> PostgreSQL 预编译包（`@14`~`@17` 全无 bottle），从源码编译又撞上 Command Line Tools
+> 过旧，因此改用 Postgres.app（预编译，无需编译工具链与 sudo）。
+
 ```bash
-brew install postgresql@17
-brew services start postgresql@17
-export PATH="/usr/local/opt/postgresql@17/bin:$PATH"
-echo 'export PATH="/usr/local/opt/postgresql@17/bin:$PATH"' >> ~/.zshrc
-createdb fip_dev
-createdb fip_test
+export PATH="$HOME/Applications/Postgres.app/Contents/Versions/17/bin:$PATH"
+pg_isready -p 5432
 psql -d fip_dev -c "SELECT version();"
+psql -lqt | cut -d'|' -f1 | grep fip_
 ```
 
-Expected: 输出 PostgreSQL 17.x 版本串。
+Expected: `accepting connections`；版本串为 PostgreSQL 17.11 (Postgres.app)；
+`fip_dev` 与 `fip_test` 均已存在。
+
+若 `pg_isready` 失败（例如机器重启过），重新启动：
+
+```bash
+"$HOME/Applications/Postgres.app/Contents/Versions/17/bin/pg_ctl" \
+  -D "$HOME/Library/Application Support/Postgres/var-17" \
+  -l /tmp/fip_pg.log -o "-p 5432" start
+```
 
 - [ ] **Step 2：写 `src/fip/platform/db/base.py`**
 
@@ -623,7 +633,9 @@ git commit -m "feat(db): 建立 8 个 schema、availability_quality 枚举与 Al
   - `fip.platform.db.mixins.TimeSourceMixin`（列：`available_at`、`availability_quality`、`published_at`、`provider_available_at`、`ingested_at`、`created_at`）
   - `fip.platform.db.mixins.VersionedMixin`（继承上者，加 `effective_at`、`version`）
   - `fip.platform.db.mixins.IntervalMixin`（继承 `TimeSourceMixin`，加 `valid_from`、`valid_to`）
-  - `fip.platform.db.mixins.temporal_check_constraints(table: str) -> tuple[CheckConstraint, CheckConstraint]`
+  - `fip.platform.db.mixins.time_order_sql(anchor: str = "effective_at") -> str`
+  - `fip.platform.db.mixins.temporal_check_constraints(table: str, anchor: str = "effective_at") -> tuple[CheckConstraint, CheckConstraint]`
+    —— **区间型表必须传 `anchor="valid_from"`**，否则生成的 SQL 引用不存在的 `effective_at` 列
   - `fip.platform.db.mixins.interval_check(table: str) -> CheckConstraint`
   - `fip.platform.db.mixins.QUALITY_SOURCE_SQL: str`、`TIME_ORDER_SQL: str`（供迁移脚本复用）
 
@@ -857,7 +869,11 @@ Revises: 0001
 import sqlalchemy as sa
 from alembic import op
 
-from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
+from fip.platform.db.mixins import (
+    QUALITY_SOURCE_SQL,
+    TIME_ORDER_SQL,
+    availability_quality_enum,
+)
 
 revision = "0002"
 down_revision = "0001"
@@ -871,12 +887,7 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("effective_at", sa.Date, nullable=False),
         sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column(
-            "availability_quality",
-            sa.Enum("EXACT", "DERIVED", "INFERRED",
-                    name="availability_quality_enum", create_type=False),
-            nullable=False,
-        ),
+        sa.Column("availability_quality", availability_quality_enum, nullable=False),
         sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("provider_available_at", sa.DateTime(timezone=True), nullable=True),
@@ -1848,7 +1859,7 @@ PROVISIONAL 参数时告警并记入清单，但不阻断 —— 不阻断保证
 
 **Files:**
 - Create: `src/fip/platform/jobs/models.py`, `src/fip/platform/jobs/submitter.py`
-- Create: `db/migrations/versions/0003_calculation_job.py`
+- Create: `db/migrations/versions/0005_calculation_job.py`
 - Test: `tests/unit/test_job_idempotency_key.py`, `tests/integration/test_job_submitter.py`
 
 **Interfaces:**
@@ -2055,19 +2066,23 @@ class JobSubmitter:
         return ExecutionStatus(job.status) in _RETRYABLE
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0003_calculation_job.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0005_calculation_job.py`**
 
 ```python
 """calculation_job 表与 execution_status 枚举
 
-Revision ID: 0003
-Revises: 0002
+Revision ID: 0005
+Revises: 0004
 """
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
-revision = "0003"
-down_revision = "0002"
+# 注意：必须用 postgresql.ENUM 而非 sa.Enum —— 通用的 sa.Enum 会【静默忽略】
+# create_type=False，导致 SQLAlchemy 重复 CREATE TYPE 而报 DuplicateObject。
+
+revision = "0005"
+down_revision = "0004"
 branch_labels = None
 depends_on = None
 
@@ -2086,8 +2101,10 @@ def upgrade() -> None:
         sa.Column("decision_id", sa.String(64), nullable=True),
         sa.Column(
             "status",
-            sa.Enum("RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED",
-                    name="execution_status_enum", create_type=False),
+            postgresql.ENUM(
+                "RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED",
+                name="execution_status_enum", create_type=False,
+            ),
             nullable=False,
         ),
         sa.Column("progress", sa.Integer, nullable=False, server_default="0"),
@@ -2559,7 +2576,7 @@ def dataset(db_session):
         provider_id=provider.id,
         dataset_code="fund_open_fund_info_em.单位净值走势",
         adapter_version="1",
-        library_version="1.15.30",
+        library_version="1.18.94",
     )
     db_session.add(ds)
     db_session.flush()
@@ -2573,7 +2590,7 @@ def test_one_payload_can_be_parsed_multiple_times(db_session, dataset):
         request_params={"symbol": "000001"},
         payload=b"PAR1-fake-parquet",
         row_count=3,
-        library_version="1.15.30",
+        library_version="1.18.94",
         published_at=None,
         provider_available_at=None,
         ingested_at=dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC),
@@ -2592,12 +2609,12 @@ def test_payload_records_library_version(db_session, dataset):
     """AKShare 版本必须随每行 payload 记录，否则无法定位错映射的来源。"""
     payload = RawPayload(
         dataset_id=dataset.id, request_params={}, payload=b"x", row_count=0,
-        library_version="1.15.30",
+        library_version="1.18.94",
         ingested_at=dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC),
     )
     db_session.add(payload)
     db_session.flush()
-    assert payload.library_version == "1.15.30"
+    assert payload.library_version == "1.18.94"
 ```
 
 - [ ] **Step 9：运行全部测试确认通过**
@@ -2752,7 +2769,7 @@ DATASETS: dict[str, DatasetSpec] = {
         code="fund_distribution",
         callable_name="fund_open_fund_info_em",
         fixed_params={"indicator": "分红送配详情"},
-        required_columns=frozenset({"年份", "权益登记日", "除息日", "每份分红"}),
+        required_columns=frozenset({"年份", "权益登记日", "除息日", "每10份分红"}),
     ),
     "fund_split": DatasetSpec(
         code="fund_split",
@@ -2958,7 +2975,7 @@ published_at 与 provider_available_at 恒为 None —— AKShare 给不出披�
 **Files:**
 - Create: `src/fip/services/data_service/models/fund.py`
 - Create: `src/fip/services/data_service/grouping.py`
-- Create: `db/migrations/versions/0005_fund_core.py`
+- Create: `db/migrations/versions/0007_fund_core.py`
 - Test: `tests/unit/test_share_class_grouping.py`, `tests/integration/test_fund_core.py`
 
 **Interfaces:**
@@ -3196,10 +3213,10 @@ class ProviderFundIdentity(Base):
 - [ ] **Step 6：生成并核对迁移**
 
 ```bash
-.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 核心表" --rev-id 0005
+.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 核心表" --rev-id 0007
 ```
 
-打开 `db/migrations/versions/0005_*.py` 逐行核对：只应包含 `fund.fund`、`fund.fund_share_class`、`fund.provider_fund_identity` 三张表的创建。删除任何对既有表的误判性变更。
+打开 `db/migrations/versions/0007_*.py` 逐行核对：只应包含 `fund.fund`、`fund.fund_share_class`、`fund.provider_fund_identity` 三张表的创建。删除任何对既有表的误判性变更。
 
 ```bash
 .venv/bin/alembic -x db=dev upgrade head
@@ -3314,7 +3331,7 @@ fund，不强行合并 —— 错误合并会让两只不相干的基金共用�
 
 **Files:**
 - Create: `src/fip/services/data_service/models/market.py`
-- Create: `db/migrations/versions/0006_fund_nav_partitioned.py`
+- Create: `db/migrations/versions/0008_fund_nav_partitioned.py`
 - Create: `src/fip/services/data_service/adapters/akshare/parse.py`
 - Test: `tests/unit/test_nav_parsing.py`, `tests/integration/test_fund_nav.py`
 
@@ -3461,7 +3478,7 @@ def parse_nav_frame(payload: bytes) -> list[ParsedNav]:
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, ForeignKey
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -3482,6 +3499,9 @@ class FundNav(Base, VersionedMixin):
     __tablename__ = "fund_nav"
     __table_args__ = (
         *temporal_check_constraints("fund_nav"),
+        # 值域约束必须【同时】声明在 ORM 与迁移中。只写进迁移会让
+        # Base.metadata 不知道它，后续 autogenerate 便会生成一条 DROP。
+        CheckConstraint("unit_nav > 0", name="ck_fund_nav_positive"),
         {"schema": "market", "postgresql_partition_by": "RANGE (effective_at)"},
     )
 
@@ -3498,22 +3518,22 @@ class FundNav(Base, VersionedMixin):
 
 > `adjusted_nav` 暂为可空 —— Task 14 实现算法、Task 15 回填。可空是有意的：复权值算不出时必须留空而非填 0（C-6）。
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0006_fund_nav_partitioned.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0008_fund_nav_partitioned.py`**
 
 分区表无法用 autogenerate 正确生成，手写：
 
 ```python
 """market.fund_nav 分区表
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0008
+Revises: 0007
 """
 from alembic import op
 
 from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
 
-revision = "0006"
-down_revision = "0005"
+revision = "0008"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
@@ -3674,7 +3694,7 @@ PK (share_class_id, effective_at, version) 同时充当唯一约束、分区键
 **Files:**
 - Modify: `src/fip/services/data_service/models/market.py`（追加 `FundDistribution`）
 - Modify: `src/fip/services/data_service/adapters/akshare/parse.py`（追加两个解析函数）
-- Create: `db/migrations/versions/0007_fund_distribution.py`
+- Create: `db/migrations/versions/0010_fund_distribution.py`
 - Test: `tests/unit/test_distribution_parsing.py`, `tests/integration/test_fund_distribution.py`
 
 **Interfaces:**
@@ -3714,18 +3734,38 @@ def test_dividend_uses_ex_date_not_record_date():
         "年份": ["2020"],
         "权益登记日": ["2020-06-10"],
         "除息日": ["2020-06-11"],
-        "每份分红": ["0.1000"],
+        "每10份分红": ["每10份派现金1.0000元"],
     }))
     rows = parse_distribution_frame(payload)
     assert rows[0].effective_at == dt.date(2020, 6, 11)
-    assert rows[0].dividend_per_unit == Decimal("0.1000")
+    assert rows[0].dividend_per_unit == Decimal("0.1")   # 1.0000 / 10
     assert rows[0].split_ratio == Decimal(1)
+
+
+def test_dividend_is_divided_by_the_stated_base():
+    """⚠️ 最关键的一条：列名里的基数必须被除掉。
+
+    漏掉除以 10，每笔分红放大 10 倍，复权净值系统性高估且不报错。
+    """
+    payload = _payload(pd.DataFrame({
+        "年份": ["2021"], "权益登记日": ["2021-12-31"], "除息日": ["2021-12-31"],
+        "每10份分红": ["每10份派现金0.4500元"],
+    }))
+    assert parse_distribution_frame(payload)[0].dividend_per_unit == Decimal("0.045")
+
+
+def test_unparseable_dividend_text_is_dropped_not_guessed():
+    payload = _payload(pd.DataFrame({
+        "年份": ["2021"], "权益登记日": ["2021-12-31"], "除息日": ["2021-12-31"],
+        "每10份分红": ["暂无数据"],
+    }))
+    assert parse_distribution_frame(payload) == []
 
 
 def test_dividend_amount_is_decimal():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": ["2020-06-11"], "每份分红": ["0.1000"],
+        "除息日": ["2020-06-11"], "每10份分红": ["每10份派现金1.0000元"],
     }))
     assert isinstance(parse_distribution_frame(payload)[0].dividend_per_unit, Decimal)
 
@@ -3733,7 +3773,7 @@ def test_dividend_amount_is_decimal():
 def test_negative_dividend_is_rejected():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": ["2020-06-11"], "每份分红": ["-0.1"],
+        "除息日": ["2020-06-11"], "每10份分红": ["每10份派现金-0.1元"],
     }))
     with pytest.raises(ValueError, match="分红"):
         parse_distribution_frame(payload)
@@ -3742,7 +3782,7 @@ def test_negative_dividend_is_rejected():
 def test_rows_without_ex_date_are_dropped():
     payload = _payload(pd.DataFrame({
         "年份": ["2020"], "权益登记日": ["2020-06-10"],
-        "除息日": [None], "每份分红": ["0.1"],
+        "除息日": [None], "每10份分红": ["每10份派现金1.0000元"],
     }))
     assert parse_distribution_frame(payload) == []
 
@@ -3797,6 +3837,32 @@ def _to_date(raw: object) -> dt.date | None:
     return pd.to_datetime(text).date()
 
 
+_DIVIDEND_RE = re.compile(r"每\s*(?P<base>\d+)\s*份[^0-9]*(?P<amount>\d+(?:\.\d+)?)")
+
+
+def _parse_dividend_per_unit(raw: object) -> Decimal | None:
+    """把「每10份分红」列解析为【每一份】的分红金额。
+
+    ⚠️ 实测（AKShare 1.18.94）：该列不是数字，而是字符串，形如
+    `每10份派现金0.4500元`。必须同时提取【基数 10】与【金额 0.4500】并相除。
+
+    若直接把 0.4500 当作每份分红，每一笔分红会放大 10 倍，复权净值系统性高估，
+    而且【不会有任何报错】—— 这正是最危险的一类缺陷。
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    match = _DIVIDEND_RE.search(text)
+    if match is None:
+        return None
+    base = Decimal(match.group("base"))
+    if base <= 0:
+        return None
+    return Decimal(match.group("amount")) / base
+
+
 def parse_distribution_frame(payload: bytes) -> list[ParsedDistribution]:
     """分红送配详情 → 除息事件。
 
@@ -3806,7 +3872,7 @@ def parse_distribution_frame(payload: bytes) -> list[ParsedDistribution]:
     rows: list[ParsedDistribution] = []
     for _, record in frame.iterrows():
         day = _to_date(record.get("除息日"))
-        amount = _to_decimal(record.get("每份分红"))
+        amount = _parse_dividend_per_unit(record.get("每10份分红"))
         if day is None or amount is None:
             continue
         if amount < 0:
@@ -3864,6 +3930,9 @@ class FundDistribution(Base, VersionedMixin):
     __tablename__ = "fund_distribution"
     __table_args__ = (
         *temporal_check_constraints("fund_distribution"),
+        # 同 fund_nav：值域约束必须与迁移保持一致，否则 autogenerate 会想删掉它们。
+        CheckConstraint("dividend_per_unit >= 0", name="ck_fund_distribution_dividend"),
+        CheckConstraint("split_ratio > 0", name="ck_fund_distribution_split"),
         {"schema": "market"},
     )
 
@@ -3878,20 +3947,20 @@ class FundDistribution(Base, VersionedMixin):
     raw_payload_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0007_fund_distribution.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0010_fund_distribution.py`**
 
 ```python
 """market.fund_distribution
 
-Revision ID: 0007
-Revises: 0006
+Revision ID: 0010
+Revises: 0009
 """
 from alembic import op
 
 from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
 
-revision = "0007"
-down_revision = "0006"
+revision = "0010"
+down_revision = "0009"
 branch_labels = None
 depends_on = None
 
@@ -3997,7 +4066,7 @@ def test_zero_split_ratio_is_rejected_by_the_database(db_session, share_class):
 .venv/bin/pytest tests/unit/test_distribution_parsing.py tests/integration/test_fund_distribution.py -v
 ```
 
-Expected: 7 passed + 3 passed
+Expected: 9 passed + 3 passed
 
 - [ ] **Step 8：提交**
 
@@ -4053,7 +4122,7 @@ adjusted_nav_t = unit_nav_t × shares_t
 ```python
 # tests/unit/test_adjusted_nav.py
 import datetime as dt
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -4192,13 +4261,20 @@ def test_duplicate_event_dates_are_rejected():
 
 
 def test_long_series_stays_exact():
-    """1000 期连续分红，验证 Decimal 精度不退化为浮点漂移。"""
+    """1000 期连续分红，验证 Decimal 精度不退化为浮点漂移。
+
+    ⚠️ 期望值必须在【与实现相同的精度上下文】内计算。compute_adjusted_nav
+    内部用 localcontext(prec=60)，而模块外默认是 prec=28 —— 若在默认上下文
+    里算 D("1.01") ** 999，两者必然不等，这条测试会恒失败。
+    """
     navs = [NavObservation(dt.date(2020, 1, 1) + dt.timedelta(days=i), D("1.0"))
             for i in range(1000)]
     events = [DistributionEvent(navs[i].effective_at, D("0.01"), D("1"))
               for i in range(1, 1000)]
     points = compute_adjusted_nav(navs, events)
-    expected = D("1.01") ** 999
+    with localcontext() as ctx:
+        ctx.prec = 60
+        expected = D("1.01") ** 999
     assert points[-1].cumulative_shares == expected
 ```
 
@@ -4708,7 +4784,7 @@ Plan-1 的核心交付：给定任意历史 decision_at，取回当时可见的�
 **Files:**
 - Modify: `src/fip/services/data_service/models/market.py`（追加 `RiskFreeRate`）
 - Modify: `src/fip/services/data_service/adapters/akshare/parse.py`（追加 `parse_yield_curve_frame`）
-- Create: `db/migrations/versions/0008_risk_free_rate.py`
+- Create: `db/migrations/versions/0011_risk_free_rate.py`
 - Test: `tests/unit/test_yield_curve_parsing.py`, `tests/integration/test_risk_free_rate.py`
 
 **Interfaces:**
@@ -4862,24 +4938,24 @@ class RiskFreeRate(Base, VersionedMixin):
 在 `models/market.py` 顶部的 import 中补上 `String` 与 `RatioNumeric`：
 
 ```python
-from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, String
 from fip.platform.db.types import NavNumeric, RatioNumeric
 ```
 
-- [ ] **Step 5：写迁移 `db/migrations/versions/0008_risk_free_rate.py`**
+- [ ] **Step 5：写迁移 `db/migrations/versions/0011_risk_free_rate.py`**
 
 ```python
 """market.risk_free_rate
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0011
+Revises: 0010
 """
 from alembic import op
 
 from fip.platform.db.mixins import QUALITY_SOURCE_SQL, TIME_ORDER_SQL
 
-revision = "0008"
-down_revision = "0007"
+revision = "0011"
+down_revision = "0010"
 branch_labels = None
 depends_on = None
 
@@ -4997,7 +5073,7 @@ git commit -m "feat(market): risk_free_rate 曲线
 **Files:**
 - Modify: `src/fip/services/data_service/models/fund.py`（追加 5 个 ORM）
 - Create: `src/fip/services/data_service/eligibility.py`
-- Create: `db/migrations/versions/0009_fund_dimensions.py`
+- Create: `db/migrations/versions/0012_fund_dimensions.py`
 - Test: `tests/unit/test_eligibility_derivation.py`, `tests/integration/test_fund_dimensions.py`
 
 **Interfaces:**
@@ -5158,7 +5234,7 @@ class FundManagerAssignment(Base, IntervalMixin):
 
     __tablename__ = "fund_manager_assignment"
     __table_args__ = (
-        *temporal_check_constraints("fund_manager_assignment"),
+        *temporal_check_constraints("fund_manager_assignment", anchor="valid_from"),
         interval_check("fund_manager_assignment"),
         {"schema": "fund"},
     )
@@ -5177,7 +5253,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 
     __tablename__ = "fund_classification_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_classification_history"),
+        *temporal_check_constraints("fund_classification_history", anchor="valid_from"),
         interval_check("fund_classification_history"),
         {"schema": "fund"},
     )
@@ -5193,7 +5269,7 @@ class FundClassificationHistory(Base, IntervalMixin):
 class FundStatusHistory(Base, IntervalMixin):
     __tablename__ = "fund_status_history"
     __table_args__ = (
-        *temporal_check_constraints("fund_status_history"),
+        *temporal_check_constraints("fund_status_history", anchor="valid_from"),
         interval_check("fund_status_history"),
         {"schema": "fund"},
     )
@@ -5212,7 +5288,7 @@ class FundFee(Base, IntervalMixin):
 
     __tablename__ = "fund_fee"
     __table_args__ = (
-        *temporal_check_constraints("fund_fee"),
+        *temporal_check_constraints("fund_fee", anchor="valid_from"),
         interval_check("fund_fee"),
         {"schema": "fund"},
     )
@@ -5230,7 +5306,7 @@ class InvestmentEligibility(Base, IntervalMixin):
 
     __tablename__ = "investment_eligibility"
     __table_args__ = (
-        *temporal_check_constraints("investment_eligibility"),
+        *temporal_check_constraints("investment_eligibility", anchor="valid_from"),
         interval_check("investment_eligibility"),
         {"schema": "fund"},
     )
@@ -5258,7 +5334,7 @@ from fip.platform.db.types import RatioNumeric
 - [ ] **Step 5：生成并核对迁移**
 
 ```bash
-.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 维度与历史表" --rev-id 0009
+.venv/bin/alembic -x db=dev revision --autogenerate -m "fund 维度与历史表" --rev-id 0012
 ```
 
 打开生成文件逐行核对：应只包含 7 张新表的 `create_table`。**特别检查每张区间型表都带上了三个 CHECK 约束**（`ck_*_quality_source`、`ck_*_time_order`、`ck_*_interval`）；autogenerate 有时会漏掉 Mixin 提供的约束，缺失则手工补上。然后：
@@ -5406,7 +5482,7 @@ Investment Eligibility 是客观事实归 data-service，Eligibility Rules 是
   - `QualityLevel`（`StrEnum`：`VALID`、`WARNING`、`INVALID`）
   - `BlockingScope`（`StrEnum`：`FUND`、`METRIC`、`GLOBAL`）
   - `QualityFinding`（frozen dataclass：`scope`、`level`、`subject: str`、`reason: str`）
-  - `QualityVerdict`（frozen dataclass：`findings: tuple[QualityFinding, ...]`；属性 `is_globally_blocked: bool`、`blocked_fund_ids: frozenset[int]`、`blocked_metrics: frozenset[str]`）
+  - `QualityVerdict`（frozen dataclass：`findings: tuple[QualityFinding, ...]`；属性 `is_globally_blocked: bool`、`blocked_share_class_ids: frozenset[int]`、`blocked_metrics: frozenset[str]`）
   - `evaluate_batch_quality(expected_ids, arrived_ids, unavailable_adjusted_nav_ids, coverage_threshold: Decimal) -> QualityVerdict`
 
 > **M1 的范围界定**：质量判定结果**不落 `data_quality_result` 表**（该表属 M2，spec §6.3）。M1 的判定结果体现为 Job 的 `status=BLOCKED` 与 `error_code`，以及返回给调用方的 `QualityVerdict`。这避免为一个尚未被查询的表提前建模。
@@ -5440,7 +5516,7 @@ def test_single_missing_fund_blocks_only_that_fund():
     """一只基金缺数据不该阻断整个市场。"""
     verdict = _verdict(list(range(1, 101)), list(range(2, 101)))
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})
     assert all(f.scope is BlockingScope.FUND for f in verdict.findings)
 
 
@@ -5461,7 +5537,7 @@ def test_unavailable_adjusted_nav_is_metric_level():
     """复权净值算不出 → 只影响依赖它的指标，基金本身仍在池内。"""
     verdict = _verdict([1, 2], [1, 2], unavailable=[2])
     assert verdict.is_globally_blocked is False
-    assert verdict.blocked_fund_ids == frozenset()
+    assert verdict.blocked_share_class_ids == frozenset()
     assert "adjusted_nav" in verdict.blocked_metrics
     assert any(f.scope is BlockingScope.METRIC for f in verdict.findings)
 
@@ -5532,7 +5608,7 @@ class QualityVerdict:
         )
 
     @property
-    def blocked_fund_ids(self) -> frozenset[int]:
+    def blocked_share_class_ids(self) -> frozenset[int]:
         return frozenset(
             int(f.subject)
             for f in self.findings
@@ -5639,7 +5715,7 @@ def test_fund_level_issue_does_not_block_the_job(db_session):
     _apply(job, verdict)
     db_session.flush()
     assert job.status == ExecutionStatus.COMPLETED.value
-    assert verdict.blocked_fund_ids == frozenset({1})
+    assert verdict.blocked_share_class_ids == frozenset({1})
 ```
 
 - [ ] **Step 5：运行测试确认通过**
@@ -5717,7 +5793,7 @@ NAV_FRAME = pd.DataFrame({
 
 DIVIDEND_FRAME = pd.DataFrame({
     "年份": ["2020"], "权益登记日": ["2020-01-02"],
-    "除息日": ["2020-01-03"], "每份分红": ["0.1000"],
+    "除息日": ["2020-01-03"], "每10份分红": ["每10份派现金1.0000元"],
 })
 
 SPLIT_FRAME = pd.DataFrame({"年份": [], "拆分折算日": [], "拆分折算比例": []})
@@ -5830,7 +5906,9 @@ Expected: FAIL —— `ModuleNotFoundError: ...data_service.ingest`
 
 ```python
 import datetime as dt
+import hashlib
 import io
+from decimal import Decimal
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -5956,7 +6034,11 @@ class IngestService:
             ).scalar_one_or_none()
             if fund is None:
                 fund = Fund(
-                    fund_code=f"P-{grouping.product_name}",
+                    # fund_code 是 String(32)，中文基金全称会超长。
+                    # 用 product_name 的稳定短哈希派生；可读性由 product_name 承担。
+                    fund_code="P-" + hashlib.sha1(
+                        grouping.product_name.encode("utf-8")
+                    ).hexdigest()[:16],
                     product_name=grouping.product_name,
                     grouping_status=grouping.status.value,
                 )
@@ -6037,7 +6119,7 @@ class IngestService:
         merged: dict[dt.date, list] = {}
         for parsed, ingested_at, payload_id in events:
             slot = merged.setdefault(
-                parsed.effective_at, [Decimal_zero(), Decimal_one(), ingested_at, payload_id]
+                parsed.effective_at, [Decimal(0), Decimal(1), ingested_at, payload_id]
             )
             slot[0] += parsed.dividend_per_unit
             slot[1] *= parsed.split_ratio
@@ -6062,17 +6144,6 @@ class IngestService:
     def rebuild_adjusted_nav(self, share_class_id: int, decision_at: dt.date) -> int:
         return backfill_adjusted_nav(self._session, share_class_id, decision_at)
 
-
-def Decimal_zero():
-    from decimal import Decimal
-
-    return Decimal(0)
-
-
-def Decimal_one():
-    from decimal import Decimal
-
-    return Decimal(1)
 ```
 
 > **同日事件的合并规则**：同一天可能同时出现在分红表与拆分表中。分红相加、拆分比例相乘，合并为一行 —— 与 `compute_adjusted_nav` 的「同日先除息后拆分」口径一致。
