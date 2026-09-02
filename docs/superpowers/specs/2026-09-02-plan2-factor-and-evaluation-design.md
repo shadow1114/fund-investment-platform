@@ -416,3 +416,126 @@ INSUFFICIENT_FACTORS 某子分内有效因子数低于阈值（FS:344）
    多 Profile 推到 M2（spec §6.1 已声明）。故 G-10 在 M1 是**空洞成立**的——
    必须写测试锁住它，否则 M2 加第二个 Profile 时会静默出错。
 4. **因子有效性检验只做最小集**（IC / ICIR），不做分层单调性与相关性剔除。
+
+---
+
+## 8. 计划起草期的修正（pre-flight 扫描发现）
+
+起草 Task 1–6 的过程中发现本文档与计划骨架的 10 处问题，逐条裁定如下。
+**其中 P2-1 撤销了 D-3、P2-2 修正了一条前提错误的既有测试。**
+
+### P2-1【撤销 D-3】`quant_engine` / `strategy_library` 留在 Plan-1 的落位
+
+D-3 裁定这两个包落在 `src/fip/libs/`。**撤销。**
+
+事实：Plan-1 **已经建好** `src/fip/quant_engine/` 与 `src/fip/strategy_library/`（空包），
+且三处测试硬编码了这两个路径（`tests/unit/test_package_layout.py`、
+`tests/fitness/test_architecture.py` 的 `_py_files(...)` 与 `GUARDED_ROOTS`）。
+搬迁是纯粹的 churn，还要改三处测试。
+
+spec §2.1 的目录树表达的是**分层关系**，不是文件系统路径——这一点 D-3 自己就写了，
+却又反过来要求搬迁。**保持 `src/fip/quant_engine`、`src/fip/strategy_library`。**
+
+### P2-2【严重】Peer Group 的落位会让 G-5 全程空洞
+
+C-4 适应度测试 `test_peer_group_module_does_not_depend_on_scoring_or_universe` 扫描的是
+`src/fip/services/fund_service/peer_group`，禁的前缀是
+`fip.services.fund_service.{scoring,ranking,universe}`。而按分层，Peer Group 与 score /
+ranking / universe **全都属 Strategy Library**。
+
+更严重的是旁边那条「可见不静默」的守卫测试
+（`test_peer_group_guard_is_visible_not_silent`）写着「该模块要到 **Plan-3（M1.5）**
+才会创建」——**这个前提是错的**：spec §0.3 明定 M1.2 Peer Group 属 **Plan-2**，
+M1.5（组合与决策）才是 Plan-3。Plan-1 留下了一条前提错误的守卫。
+
+照原布局做下去的后果：Task 11 建完 Peer Group 之后，C-4 仍扫一个空目录恒真、
+守卫仍 skip——**G-5 在整个 Plan-2 静默缺席**。这与 D-4 指责 SB-1「静默缺席」是同一种病。
+
+**裁定**：Peer Group 逻辑落 `src/fip/strategy_library/peer_group/`；
+**Task 11 必须同时改写这两条测试**（把扫描根指向真实位置、把守卫的 Plan-3 前提改正），
+并且**先证伪**——在 Peer Group 建好后故意让它 import 评分模块，确认 C-4 会红。
+不改这两条测试的 Task 11 视为未完成。
+
+### P2-3 迁移编号顺延 + Plan-1 交接项四的归属
+
+Task 5 是 `fund_classification_history` 的第一个写入方（实测 0 行），
+正是 Plan-1 交接项四「趁表还空着」的时机，故它占用 **0016**。
+**Task 7 顺延为 0017，Task 8 顺延为 0018。**
+
+交接项四点名的另外三件事（`fund_manager_assignment` 的 `EXCLUDE USING gist` +
+两个索引、`fund_fee` / `fund_status_history` 的开放区间唯一索引）在 18 个任务里
+**一个都没有归属**。**裁定：并入 Task 1**（Plan-1 交接任务），与 H-1/H-2 一起做完。
+
+### P2-4 现存配置直接违反 G-6
+
+`config/policy/evaluation/v1.yaml` 里躺着 `mar.default: 0.0 (PROVISIONAL)`，
+而 G-6 与 D-8 明写「`mar_policy` 必填无默认」「不得给 MAR 设兜底值」。
+**裁定：Task 10 负责删除它**，并在 Task 10 的验收里显式断言「未配置 `mar_policy` 时
+`F-RISK-002` / `F-RAP-002` 为 `UNAVAILABLE`」。
+
+### P2-5 接口契约补四组缺失定义
+
+契约自称唯一权威却漏了四组跨任务名字，一律补入：
+
+1. **Code Version 计算入口**——SDL-3 要求「该包的版本参与 Code Version 计算」，
+   而全仓 `code_version` 只是 `DecisionExecutionContext` 上一个 `str`，CLI 填字面量
+   `"cli"`，**没有任何计算机制存在**。新增
+   `fip.platform.versioning.compute_code_version()` 与 `CODE_VERSION_ROOTS`（Task 4）。
+2. **分类编码常量与派生函数**——`CLASSIFICATION_SCHEME`、`UNCLASSIFIED_CODE`、
+   `level_1(code)`、`is_groupable(code)`，住在 `strategy_library/peer_group/`
+   （放 data_service 会让 Task 11 反向依赖）。**因此 Task 5 依赖 Task 4**，
+   任务总览的「—」改为「4」。
+3. **Task 2 的产出类型**——`NavSeries(points, chain_quality)` 与 `weakest_quality()`。
+4. **quant_engine 的异常类型**——`compute_factor` 要把「观测不足 / 数学无定义」
+   映射为 `UNAVAILABLE` / `INVALID`，契约里没有任何异常名。
+
+### P2-6【采纳偏离】`chain_quality` 允许 `None` 以表达空序列
+
+空 NavSeries 没有链路也就没有 quality，填任何默认值都违反 G-3。
+**裁定**：`NavSeries.chain_quality: str | None`，并用 `__post_init__` 双向锁死
+「空序列 ⟺ None」；`FactorInput.chain_quality` 保持 `str`
+（无观测的因子输入根本不会被构造）。
+
+### P2-7【补齐 D-5/D-6】分类的粒度落差与冲突归并规则
+
+`fund_classification_history.fund_id` 指向 `fund.fund`（产品级），而 AKShare 的
+`基金类型` 是**一行一个基金代码**（份额类别级）。实测 27718 行 / 15350 个产品主干中，
+**有 4 个产品的份额类别给出不同的 `基金类型`**：
+
+```
+兴全盈禧多元配置三个月持有混合(FOF)   A=FOF-稳健型  C=FOF-均衡型
+恒生ETF华夏                        指数型-海外股票 / 指数型-股票
+中信建投民享稳健养老…发起式(FOF)      A=FOF-稳健型  Y=（空）
+```
+
+**归并规则（补齐）**：
+
+| 情形 | 处置 |
+|---|---|
+| 恰好一个非空取值 | 取它（一个份额类别没给类型 ≠ 这只基金没有类型） |
+| 全空 | `UNCLASSIFIED` |
+| **两个及以上不同的非空取值** | **不写、如实上报**——照搬 `IdentityReassignment` 的先例，绝不静默挑一个 |
+
+### P2-8 D-7 的分组规模假设到 Task 6 才可验证
+
+D-7 假设「L1 分组约 30~100 只」。实测 L2 分布是重尾的（混合型-偏股 5693、
+指数型-股票 5589），按 `--limit` 取列表前 N 行之后 L1 分组落在哪里**完全未知**。
+**裁定**：Task 6 必须把真实的 L1 分组规模抄进任务报告，
+且**不得为了凑够 `MIN_PEER_GROUP_SIZE = 30` 而调整任何东西**——
+达不到就如实产出 `INSUFFICIENT_SAMPLE`，那正是该机制存在的意义。
+
+### P2-9 `test_pit_repository_exposes_only_the_time_bounded_query` 会挡路
+
+它用**集合相等**断言 `NavPitRepository` 的公开方法只有 `adjusted_nav_series`
+（这条写得好，锁住了 PIT-A3）。但 Plan-2 要为 `risk_free_rate` 与
+`fund_classification_history` 写第二、第三个 PIT 读取口——**正是 H-1 预警的场景**。
+**裁定**：Task 10 / Task 11 必须显式修改这条断言，并在报告里说明新增的方法为何
+仍然满足 PIT-A3（无时点参数、无 `get_latest`）。
+
+### P2-10 autogenerate 闸门自动化
+
+G-16 把「收工时 autogenerate 报告零操作」列为可验收项，但它至今**完全是手工的、
+CI 不跑**。按 Plan-1 交接项六.1「只由阅读/推理保证的性质等于没有保护」，
+这条目前没有保护。**裁定：Task 1 用 `alembic.autogenerate.compare_metadata`
+把它写成集成测试**（约 15 行），与黄金快照互补——快照管 CHECK 表达式，
+它管表/列/索引/唯一键。
