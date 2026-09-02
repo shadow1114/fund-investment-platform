@@ -499,3 +499,38 @@ def test_materialized_column_matches_recomputed_across_a_multi_event_chain(
     stored = _column(db_session, share_class)
     for point in points:
         assert point.adjusted_nav == stored[(point.effective_at, point.version)]
+
+
+def test_exact_half_ulp_rounds_half_up_like_postgres(db_session, share_class):
+    """恰好落在半个 ulp 上的值必须按 half-away-from-zero 舍入。
+
+    出口量化用 ROUND_HALF_UP 而【不是】Python Decimal 默认的 ROUND_HALF_EVEN，
+    因为物化列由 PostgreSQL 的 numeric 舍入，而 PG 是 half-away-from-zero
+    （实测 1.000000005 → 1.00000001）。若这里用 HALF_EVEN，恰好落在半个 ulp
+    上的值会与列里的值差 1 个 ulp，那条一致性对照就会分叉，并且会把这个纯
+    舍入差异【误报成某条路径有 bug】。
+
+    这条测试存在的理由：其余夹具（4/3、8/3 之类）的乘积永远落不到
+    x.xxxxxxxx5 上，所以把 ROUND_HALF_UP 换成 ROUND_HALF_EVEN 时全部测试
+    照样通过 —— 那个选择此前没有任何断言守着。而这个边界是真实可达的：
+    一次 3:2 拆分配上 8 位单位净值就能构造出来。
+
+      1.00000003 × 1.5 = 1.500000045
+      HALF_UP（= PG）→ 1.50000005      HALF_EVEN → 1.50000004
+    """
+    _add_nav(db_session, share_class, dt.date(2020, 1, 2), "1.00000003")
+    _add_dist(db_session, share_class, dt.date(2020, 1, 3), "0",
+              available_at=_utc(2020, 1, 4), split="1.5")
+    _add_nav(db_session, share_class, dt.date(2020, 1, 3), "1.00000003")
+    db_session.flush()
+
+    backfill_adjusted_nav(db_session, share_class.id, dt.date(2026, 8, 31))
+
+    points = _series(db_session, share_class, dt.date(2026, 8, 31),
+                     dt.date(2020, 1, 1), dt.date(2020, 12, 31))
+    # 1.00000003 × 1.5 = 1.500000045，第 9 位恰是 5，且第 8 位是偶数 4 ——
+    # 这正是 HALF_UP 与 HALF_EVEN 会给出不同答案的那个点。
+    assert points[1].adjusted_nav == Decimal("1.50000005")
+    # 与 PG 舍入出来的物化列一致：这才是「一致性网」真正要守的东西。
+    stored = _column(db_session, share_class)
+    assert points[1].adjusted_nav == stored[(dt.date(2020, 1, 3), 1)]
