@@ -484,3 +484,130 @@ def test_check_constraints_match_the_committed_snapshot(db_session):
                 for k in changed[:5]
             )
         )
+
+
+# --------------------------------------------------------------------------
+# 迁移 0016：三张区间表补齐的数据库不变式（Plan-1 交接项四 / 裁定 P2-3）
+# --------------------------------------------------------------------------
+# 这三条测的不是 CHECK，而是 EXCLUDE USING gist 与两个部分唯一索引 ——
+# 黄金快照只查 contype='c'，看不见它们；autogenerate 闸门只比 ORM 声明与
+# 库结构是否一致，不检验语义是否正确。语义只能靠下面这种【行为】测试钉住。
+
+_INV_VALID_FROM = dt.date(2020, 1, 1)
+_INV_MID = dt.date(2020, 6, 1)
+_INV_END = dt.date(2020, 9, 1)
+_INV_AVAILABLE_AT = dt.datetime(2019, 12, 20, 9, 0, tzinfo=dt.UTC)
+_INV_INGESTED_AT = dt.datetime(2019, 12, 20, 10, 0, tzinfo=dt.UTC)
+
+
+def _interval_times() -> dict:
+    """INFERRED 路径：两个来源皆 NULL，clause 5 真空满足（C-12：不伪造时间戳）。"""
+    return dict(
+        available_at=_INV_AVAILABLE_AT,
+        availability_quality="INFERRED",
+        published_at=None,
+        provider_available_at=None,
+        ingested_at=_INV_INGESTED_AT,
+    )
+
+
+def _make_fund_and_share_class(session, code: str):
+    from fip.services.data_service.models.fund import Fund, FundShareClass
+
+    fund = Fund(fund_code=code, product_name=f"P-{code}", grouping_status="CONFIRMED")
+    session.add(fund)
+    session.flush()
+    sc = FundShareClass(fund_id=fund.id, share_class_code="A", display_name=f"{code}A")
+    session.add(sc)
+    session.flush()
+    return fund, sc
+
+
+def test_same_manager_cannot_hold_overlapping_assignments(db_session):
+    """共管允许（不同 manager 同期同基金），同一经理区间重叠不允许。
+
+    排他键必须【同时含 manager_id】：退化成「仅 fund_id + daterange」会直接
+    拒绝合法的共管数据。边界写成 '[)' 才能让首尾相接的任职交接通过 ——
+    写成默认的 '[]' 时下面第 3 步会红。
+    """
+    from fip.services.data_service.models.fund import FundManager, FundManagerAssignment
+
+    fund, _ = _make_fund_and_share_class(db_session, "P-FMA")
+    m1 = FundManager(manager_code="M-1", manager_name="张三")
+    m2 = FundManager(manager_code="M-2", manager_name="李四")
+    db_session.add_all([m1, m2])
+    db_session.flush()
+
+    # 1) 同一基金、同一区间、两位不同经理 —— 共管，必须成功
+    db_session.add(FundManagerAssignment(
+        fund_id=fund.id, manager_id=m1.id,
+        valid_from=_INV_VALID_FROM, valid_to=_INV_MID, **_interval_times()))
+    db_session.add(FundManagerAssignment(
+        fund_id=fund.id, manager_id=m2.id,
+        valid_from=_INV_VALID_FROM, valid_to=_INV_MID, **_interval_times()))
+    db_session.flush()
+
+    # 2) 同一经理、首尾相接（前段 valid_to == 后段 valid_from）—— 必须成功
+    db_session.add(FundManagerAssignment(
+        fund_id=fund.id, manager_id=m1.id,
+        valid_from=_INV_MID, valid_to=_INV_END, **_interval_times()))
+    db_session.flush()
+
+    # 3) 同一经理、同一基金、区间真重叠 —— 必须被数据库拒收
+    db_session.add(FundManagerAssignment(
+        fund_id=fund.id, manager_id=m1.id,
+        valid_from=dt.date(2020, 3, 1), valid_to=dt.date(2020, 4, 1),
+        **_interval_times()))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_fund_fee_allows_one_open_interval_per_fee_type(db_session):
+    """每种 fee_type 各一条开放区间是合法的；同一 fee_type 两条则不合法。
+
+    唯一性键必须是 (share_class_id, fee_type)：只用 share_class_id 会把
+    「管理费 + 托管费同时开放」判成违规，那是正常数据。
+    """
+    from decimal import Decimal
+
+    from fip.services.data_service.models.fund import FundFee
+
+    _, sc = _make_fund_and_share_class(db_session, "P-FEE")
+
+    db_session.add(FundFee(
+        share_class_id=sc.id, fee_type="MANAGEMENT", rate=Decimal("0.015"),
+        valid_from=_INV_VALID_FROM, valid_to=None, **_interval_times()))
+    db_session.add(FundFee(
+        share_class_id=sc.id, fee_type="CUSTODY", rate=Decimal("0.0025"),
+        valid_from=_INV_VALID_FROM, valid_to=None, **_interval_times()))
+    db_session.flush()
+
+    db_session.add(FundFee(
+        share_class_id=sc.id, fee_type="MANAGEMENT", rate=Decimal("0.012"),
+        valid_from=_INV_MID, valid_to=None, **_interval_times()))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_fund_status_history_allows_only_one_open_interval(db_session):
+    """同一份额类别至多一条 valid_to IS NULL —— 「当前状态」只能有一个。"""
+    from fip.services.data_service.models.fund import FundStatusHistory
+
+    _, sc = _make_fund_and_share_class(db_session, "P-FSH")
+
+    db_session.add(FundStatusHistory(
+        share_class_id=sc.id, lifecycle_status="NORMAL",
+        subscription_open=True, redemption_open=True,
+        valid_from=_INV_VALID_FROM, valid_to=_INV_MID, **_interval_times()))
+    db_session.add(FundStatusHistory(
+        share_class_id=sc.id, lifecycle_status="SUSPENDED_SUBSCRIPTION",
+        subscription_open=False, redemption_open=True,
+        valid_from=_INV_MID, valid_to=None, **_interval_times()))
+    db_session.flush()
+
+    db_session.add(FundStatusHistory(
+        share_class_id=sc.id, lifecycle_status="NORMAL",
+        subscription_open=True, redemption_open=True,
+        valid_from=_INV_END, valid_to=None, **_interval_times()))
+    with pytest.raises(IntegrityError):
+        db_session.flush()

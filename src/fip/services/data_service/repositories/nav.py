@@ -75,7 +75,7 @@ def _quantize_nav(value: Decimal) -> Decimal:
 class SqlNavPitRepository:
     """PIT NAV 访问的 SQL 实现。
 
-    decision_at 在【构造期】注入，方法签名中不出现时点参数 —— 调用方
+    可见性上界在【构造期】注入，方法签名中不出现时点参数 —— 调用方
     无法省略它，也无法绕过它取到未来数据（PIT-A2 / PIT-A3）。
 
     版本解析：对每个 effective_at，在 available_at ≤ decision_at 的行中
@@ -83,9 +83,16 @@ class SqlNavPitRepository:
     的「取 available_at ≤ decision_at 中的最新版本」。
     """
 
-    def __init__(self, session: Session, decision_at: dt.date) -> None:
+    def __init__(self, session: Session, visible_until: dt.datetime) -> None:
+        """visible_until 由 PitDataContext.visible_until 注入。
+
+        本类【不再】自己把 decision_at 翻译成时间戳上界：那条规则的唯一
+        归属是 fip.platform.decision_data.pit.resolve_visible_until（H-1）。
+        构造期注入上界与注入 decision_at 在 PIT-A2 上是等价的 —— 时点仍然
+        不出现在任何方法签名里，调用方仍然无法省略它、无法绕过它取未来数据。
+        """
         self._session = session
-        self._decision_at = decision_at
+        self._visible_until = visible_until
 
     def adjusted_nav_series(
         self,
@@ -110,13 +117,9 @@ class SqlNavPitRepository:
         精度契约：返回的 adjusted_nav 一律量化到 NavNumeric 的标度
         （NUMERIC(18, 8)），与物化列同一口径 —— 见 _quantize_nav。
         """
-        # decision_at 是业务日期；可见性判定取该日终了时刻。
-        visible_until = dt.datetime.combine(
-            self._decision_at, dt.time.max, tzinfo=dt.UTC
-        )
         params = {
             "share_class_id": share_class_id,
-            "visible_until": visible_until,
+            "visible_until": self._visible_until,
             "date_to": date_to,
         }
         nav_rows = self._session.execute(_NAV_SQL, params).mappings().all()
