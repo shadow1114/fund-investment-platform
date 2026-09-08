@@ -76,7 +76,11 @@ def _resolve_current(
 
 
 def backfill_adjusted_nav(
-    session: Session, share_class_id: int, decision_at: dt.date
+    session: Session,
+    share_class_id: int,
+    decision_at: dt.date,
+    *,
+    strict: bool = False,
 ) -> int:
     """按 decision_at 可见的净值与事件计算复权净值并回填。
 
@@ -133,6 +137,7 @@ def backfill_adjusted_nav(
     )
 
     writes: dict[tuple[dt.date, int], Decimal] = {}
+    first_failure: AdjustedNavUnavailable | None = None
     # 已经作为「当前版本」出现过的 key；出现过即失去盖章资格（首个盖章）。
     stamped: set[tuple[dt.date, int]] = set()
     for checkpoint in checkpoints:
@@ -165,14 +170,21 @@ def backfill_adjusted_nav(
                     for effective_at, row in current_events.items()
                 ],
             )
-        except AdjustedNavUnavailable:
+        except AdjustedNavUnavailable as exc:
             # 逐 checkpoint 容错：只放弃本 checkpoint 的候选行，其余照常。
+            if first_failure is None:
+                first_failure = exc
             continue
 
         for point in points:
             key = (point.effective_at, current_navs[point.effective_at]["version"])
             if key in candidates:
                 writes[key] = point.adjusted_nav
+
+    # 运维直接回填时保留逐 checkpoint 容错；批处理入口使用 strict=True，
+    # 任何断链都让该 subject 的 savepoint 整体回滚并报告 UNAVAILABLE。
+    if strict and first_failure is not None:
+        raise first_failure
 
     for (effective_at, version), adjusted_nav in writes.items():
         session.execute(

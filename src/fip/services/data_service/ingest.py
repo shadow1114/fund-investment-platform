@@ -1,6 +1,7 @@
 import datetime as dt
 import hashlib
 import io
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -16,15 +17,26 @@ from fip.services.data_service.adapters.akshare.parse import (
     parse_nav_frame,
     parse_split_frame,
 )
+from fip.services.data_service.batch import (
+    BatchIngestResult,
+    BatchItemResult,
+    BatchItemStatus,
+    FundIngestSubject,
+)
 from fip.services.data_service.grouping import split_share_class_name
 from fip.services.data_service.models.fund import (
     Fund,
     FundShareClass,
     ProviderFundIdentity,
 )
-from fip.services.data_service.models.governance import DataProvider, DataProviderDataset
+from fip.services.data_service.models.governance import (
+    DataProvider,
+    DataProviderDataset,
+    DataSourcePriority,
+)
 from fip.services.data_service.models.market import FundDistribution, FundNav
 from fip.services.data_service.models.raw import CanonicalRaw, RawPayload
+from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
 from fip.services.data_service.normalization.backfill import backfill_adjusted_nav
 
 
@@ -74,7 +86,11 @@ class _MergedEvent:
     dividend: Decimal
     split_ratio: Decimal
     ingested_at: dt.datetime
+    available_at: dt.datetime
     payload_id: int
+
+
+_INGEST_DATASET_CODES = ("fund_nav", "fund_distribution", "fund_split")
 
 
 class IngestService:
@@ -88,11 +104,66 @@ class IngestService:
     """
 
     def __init__(
-        self, session: Session, adapter: SourceAdapter, disclosure_lag_days: int
+        self,
+        session: Session,
+        adapter: SourceAdapter,
+        disclosure_lag_days: int | Mapping[str, int] | None,
     ) -> None:
         self._session = session
         self._adapter = adapter
-        self._lag = dt.timedelta(days=disclosure_lag_days)
+        if disclosure_lag_days is None:
+            self._lags: dict[str, dt.timedelta] = {}
+        elif isinstance(disclosure_lag_days, int):
+            self._lags = {
+                code: dt.timedelta(days=disclosure_lag_days)
+                for code in _INGEST_DATASET_CODES
+            }
+        else:
+            self._lags = {
+                code: dt.timedelta(days=days)
+                for code, days in disclosure_lag_days.items()
+            }
+
+    @classmethod
+    def from_policy(
+        cls,
+        session: Session,
+        adapter: SourceAdapter,
+        *,
+        rule_version: str,
+        field_name: str = "available_at",
+    ) -> "IngestService":
+        lags: dict[str, int] = {}
+        for dataset_code in _INGEST_DATASET_CODES:
+            dataset = session.execute(
+                select(DataProviderDataset)
+                .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
+                .where(
+                    DataProvider.provider_code == adapter.provider_code,
+                    DataProviderDataset.dataset_code == dataset_code,
+                )
+            ).scalar_one_or_none()
+            if dataset is None:
+                raise ValueError(
+                    f"dataset {adapter.provider_code}/{dataset_code} is not registered"
+                )
+            rule = session.execute(
+                select(DataSourcePriority).where(
+                    DataSourcePriority.dataset_id == dataset.id,
+                    DataSourcePriority.field_name == field_name,
+                    DataSourcePriority.rule_version == rule_version,
+                )
+            ).scalar_one_or_none()
+            if rule is None or rule.disclosure_lag_days is None:
+                raise ValueError(
+                    "disclosure lag policy is missing for "
+                    f"dataset_id={dataset.id}, field={field_name}, "
+                    f"version={rule_version}"
+                )
+            if rule.disclosure_lag_days < 0:
+                raise ValueError("disclosure lag policy cannot be negative")
+            lags[dataset_code] = rule.disclosure_lag_days
+        return cls(session, adapter, lags)
 
     # ---------- 基础设施 ----------
 
@@ -152,11 +223,27 @@ class IngestService:
         self._session.flush()
         return payload
 
-    def _times(self, effective_at: dt.date, ingested_at: dt.datetime) -> dict[str, object]:
-        available_at, quality = declared_lag_availability(effective_at, self._lag)
+    def _availability(
+        self, dataset_code: str, effective_at: dt.date
+    ) -> tuple[dt.datetime, str]:
+        lag = self._lags.get(dataset_code)
+        if lag is None:
+            raise ValueError(
+                f"disclosure lag policy was not loaded for {dataset_code}"
+            )
+        available_at, quality = declared_lag_availability(effective_at, lag)
+        return available_at, quality.value
+
+    def _times(
+        self,
+        dataset_code: str,
+        effective_at: dt.date,
+        ingested_at: dt.datetime,
+    ) -> dict[str, object]:
+        available_at, quality = self._availability(dataset_code, effective_at)
         return {
             "available_at": available_at,
-            "availability_quality": quality.value,
+            "availability_quality": quality,
             "published_at": None,           # AKShare 给不出，如实留空（C-12）
             "provider_available_at": None,  # 同上
             "ingested_at": ingested_at,
@@ -359,14 +446,14 @@ class IngestService:
                 unit_nav=parsed.unit_nav,
                 adjusted_nav=None,  # 由 rebuild_adjusted_nav 回填
                 raw_payload_id=payload.id,
-                **self._times(parsed.effective_at, record.ingested_at),
+                **self._times("fund_nav", parsed.effective_at, record.ingested_at),
             ))
             inserted += 1
         self._session.flush()
         return inserted
 
     def ingest_distributions(self, share_class_id: int, provider_fund_id: str) -> int:
-        events: list[tuple[ParsedDistribution, dt.datetime, int]] = []
+        events: list[tuple[str, ParsedDistribution, dt.datetime, int]] = []
         for dataset, parser in (
             ("fund_distribution", parse_distribution_frame),
             ("fund_split", parse_split_frame),
@@ -374,16 +461,22 @@ class IngestService:
             record = self._adapter.fetch(dataset, symbol=provider_fund_id)
             payload = self._store_raw(record)
             for parsed in parser(record.payload):
-                events.append((parsed, record.ingested_at, payload.id))
+                events.append((dataset, parsed, record.ingested_at, payload.id))
 
         merged: dict[dt.date, _MergedEvent] = {}
-        for parsed, ingested_at, payload_id in events:
+        for dataset, parsed, ingested_at, payload_id in events:
+            available_at, _quality = self._availability(dataset, parsed.effective_at)
             slot = merged.setdefault(
                 parsed.effective_at,
-                _MergedEvent(Decimal(0), Decimal(1), ingested_at, payload_id),
+                _MergedEvent(
+                    Decimal(0), Decimal(1), ingested_at, available_at, payload_id
+                ),
             )
             slot.dividend += parsed.dividend_per_unit
             slot.split_ratio *= parsed.split_ratio
+            slot.ingested_at = max(slot.ingested_at, ingested_at)
+            # 合并行依赖当天的全部分红/拆分输入，只能在最晚的输入可见后可见。
+            slot.available_at = max(slot.available_at, available_at)
 
         inserted = 0
         for day, merged_event in sorted(merged.items()):
@@ -415,14 +508,61 @@ class IngestService:
                 dividend_per_unit=merged_event.dividend,
                 split_ratio=merged_event.split_ratio,
                 raw_payload_id=merged_event.payload_id,
-                **self._times(day, merged_event.ingested_at),
+                available_at=merged_event.available_at,
+                availability_quality="INFERRED",
+                published_at=None,
+                provider_available_at=None,
+                ingested_at=merged_event.ingested_at,
             ))
             inserted += 1
         self._session.flush()
         return inserted
 
     def rebuild_adjusted_nav(self, share_class_id: int, decision_at: dt.date) -> int:
-        return backfill_adjusted_nav(self._session, share_class_id, decision_at)
+        return backfill_adjusted_nav(
+            self._session, share_class_id, decision_at, strict=True
+        )
+
+    def ingest_nav_batch(
+        self, subjects: Sequence[FundIngestSubject]
+    ) -> BatchIngestResult:
+        """逐份额类别隔离预期领域失败，未知系统异常继续上抛。"""
+        results: list[BatchItemResult] = []
+        for subject in subjects:
+            try:
+                with self._session.begin_nested():
+                    self.ingest_nav(
+                        subject.share_class_id, subject.provider_fund_id
+                    )
+                    self.ingest_distributions(
+                        subject.share_class_id, subject.provider_fund_id
+                    )
+                    self.rebuild_adjusted_nav(
+                        subject.share_class_id, dt.date.today()
+                    )
+            except AdjustedNavUnavailable as exc:
+                results.append(
+                    BatchItemResult(
+                        subject.share_class_id,
+                        BatchItemStatus.UNAVAILABLE,
+                        str(exc),
+                    )
+                )
+            except ValueError as exc:
+                results.append(
+                    BatchItemResult(
+                        subject.share_class_id,
+                        BatchItemStatus.INVALID,
+                        str(exc),
+                    )
+                )
+            else:
+                results.append(
+                    BatchItemResult(
+                        subject.share_class_id, BatchItemStatus.SUCCESS, None
+                    )
+                )
+        return BatchIngestResult(items=tuple(results))
 
 
 # 同日事件的合并规则：同一天可能同时出现在分红表与拆分表中。分红相加、

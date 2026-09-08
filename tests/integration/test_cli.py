@@ -24,11 +24,21 @@ from fip.platform import cli
 from fip.platform.cli import _resolve
 from fip.services.data_service.adapters.akshare import client as akshare_client
 from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
+from fip.services.data_service.batch import (
+    BatchIngestResult,
+    BatchItemResult,
+    BatchItemStatus,
+)
 from fip.services.data_service.ingest import IngestService
 from fip.services.data_service.models.fund import (
     Fund,
     FundShareClass,
     ProviderFundIdentity,
+)
+from fip.services.data_service.models.governance import (
+    DataProvider,
+    DataProviderDataset,
+    DataSourcePriority,
 )
 from fip.services.data_service.models.market import FundNav
 
@@ -342,11 +352,8 @@ def test_ingest_funds_really_commits_the_successful_part(
 
 
 # --- 生产装配路径的披露时滞 ---------------------------------------------
-# fix round 4 item 4：把 cli.DISCLOSURE_LAG_DAYS 从 1 改成 7，全套测试依然
-# 全绿 —— 8 处测试各自注入 disclosure_lag_days=1，没有任何测试走过
-# cli._service() 这条【生产装配】路径。于是那个常量事实上没有任何测试保护，
-# 而它决定了全库每一行净值的 available_at，也就决定了每一个 decision_at 上
-# 什么可见、什么不可见。
+# 这条路径必须真正从 governance.data_source_priority 读取规则；
+# 测试不直接向 IngestService 注入时滞，以免绕过生产装配。
 
 NAV_FRAME = pd.DataFrame({"净值日期": ["2020-01-02"], "单位净值": [1.2345]})
 
@@ -370,25 +377,108 @@ class _OfflineAdapter(AkShareSourceAdapter):
 
 
 def test_production_assembly_pins_the_disclosure_lag(db_session, ingested, monkeypatch):
-    """钉住【生产装配路径】的披露时滞：净值可见时刻 = 净值日 + 1 天。
-
-    刻意不走 IngestService(..., disclosure_lag_days=1)，而是走
-    cli._service(session) —— 常量 cli.DISCLOSURE_LAG_DAYS 就装配在那里。
-    断言里的 1 天是【写死的字面量】而不是 cli.DISCLOSURE_LAG_DAYS：若写成
-    后者，把常量改成 7 时本测试会跟着一起变，等于什么也没钉住。
-
-    只替换适配器（AkShareSourceAdapter 需要联网），装配链路的其余部分原样
-    保留。改动那个常量必须让本测试失败。
-    """
+    """生产装配从版本化规则读取披露时滞，不使用代码常量。"""
     monkeypatch.setattr(akshare_client, "AkShareSourceAdapter", _OfflineAdapter)
 
+    setup = IngestService(db_session, _OfflineAdapter(), disclosure_lag_days=1)
+    dataset = setup.ensure_dataset("fund_nav")
+    rule = db_session.query(DataSourcePriority).filter_by(
+        dataset_id=dataset.id,
+        field_name="available_at",
+        rule_version=cli.DATA_SOURCE_RULE_VERSION,
+    ).one()
+    rule.disclosure_lag_days = 2
+    db_session.flush()
+
     share_class = _resolve(db_session, "000001")
-    assert cli._service(db_session).ingest_nav(share_class.id, "000001") == 1
+    assert cli._nav_service(db_session).ingest_nav(share_class.id, "000001") == 1
 
     row = db_session.query(FundNav).filter_by(share_class_id=share_class.id).one()
     assert row.effective_at == dt.date(2020, 1, 2)
-    assert row.available_at == dt.datetime(2020, 1, 3, tzinfo=dt.UTC)
+    assert row.available_at == dt.datetime(2020, 1, 4, tzinfo=dt.UTC)
     # C-12：AKShare 给不出这两个时刻，必须如实留空，质量恒为 INFERRED。
     assert row.published_at is None
     assert row.provider_available_at is None
     assert row.availability_quality == "INFERRED"
+
+
+def test_migration_bootstraps_all_ingest_disclosure_lag_policies(db_session):
+    rows = (
+        db_session.query(DataProviderDataset.dataset_code, DataSourcePriority)
+        .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
+        .join(DataSourcePriority, DataSourcePriority.dataset_id == DataProviderDataset.id)
+        .filter(
+            DataProvider.provider_code == "AKSHARE",
+            DataSourcePriority.field_name == "available_at",
+            DataSourcePriority.rule_version == cli.DATA_SOURCE_RULE_VERSION,
+        )
+        .all()
+    )
+
+    assert {code: rule.disclosure_lag_days for code, rule in rows} == {
+        "fund_nav": 1,
+        "fund_distribution": 1,
+        "fund_split": 1,
+    }
+
+
+def test_ingest_nav_cli_exits_nonzero_for_invalid_subject(
+    db_session, ingested, monkeypatch
+):
+    share_class = _resolve(db_session, "000001")
+
+    class InvalidService:
+        def ingest_nav_batch(self, _subjects):
+            return BatchIngestResult((
+                BatchItemResult(
+                    share_class.id, BatchItemStatus.INVALID, "invalid payload"
+                ),
+            ))
+
+    monkeypatch.setattr(cli, "_session", lambda: contextlib.nullcontext(db_session))
+    monkeypatch.setattr(cli, "_nav_service", lambda _session: InvalidService())
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.cmd_ingest_nav(argparse.Namespace(symbol="000001"))
+
+    assert excinfo.value.code != 0
+    assert "invalid payload" in str(excinfo.value)
+
+
+def test_ingest_nav_cli_does_not_read_orm_object_after_session_closes(
+    monkeypatch, capsys
+):
+    state = {"closed": False}
+
+    class ClosingSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            state["closed"] = True
+
+        def commit(self):
+            pass
+
+    class ShareClass:
+        id = 7
+
+        @property
+        def display_name(self):
+            if state["closed"]:
+                raise RuntimeError("detached instance was accessed")
+            return "测试基金A"
+
+    class SuccessService:
+        def ingest_nav_batch(self, _subjects):
+            return BatchIngestResult((
+                BatchItemResult(7, BatchItemStatus.SUCCESS, None),
+            ))
+
+    monkeypatch.setattr(cli, "_session", ClosingSession)
+    monkeypatch.setattr(cli, "_resolve", lambda _session, _symbol: ShareClass())
+    monkeypatch.setattr(cli, "_nav_service", lambda _session: SuccessService())
+
+    cli.cmd_ingest_nav(argparse.Namespace(symbol="000001"))
+
+    assert capsys.readouterr().out.strip() == "测试基金A：SUCCESS"

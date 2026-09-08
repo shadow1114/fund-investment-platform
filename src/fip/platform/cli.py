@@ -24,24 +24,7 @@ if TYPE_CHECKING:
     from fip.services.data_service.ingest import IngestService
     from fip.services.data_service.models.fund import FundShareClass
 
-# 生产装配路径上的披露时滞（天）。AKShare 给不出披露时刻，净值的 available_at
-# 由这条【声明的推导规则】算出：available_at = effective_at + 时滞，质量恒为
-# INFERRED。
-#
-# ⚠️ 如实登记（fix round 4 item 4）：这个时滞【当前只住在这行代码里】，
-# 【尚未】登记进 governance.data_source_priority ——那张表由迁移 0006 建出，
-# 但全库迁移没有任何 INSERT/bulk_insert 往它写过一行，也没有任何读取方。
-# 此前这行注释写的是「与 governance.data_source_priority 中登记的时滞一致」，
-# 那是在说谎：它让读者以为存在一套治理机制，而实际上并不存在。
-#
-# 引入第二个 provider 之前【必须】补上：多 provider 时「哪个源优先、各自的
-# 时滞是多少」必须是可查询、可版本化的数据，不能是各个模块里的常量 ——
-# 否则回测报告无法复述它当时用的是哪一套时滞。
-#
-# 本常量由 tests/integration/test_cli.py::
-# test_production_assembly_pins_the_disclosure_lag 钉住（走的是本文件的
-# _service() 生产装配路径，不是各测试自己注入的 disclosure_lag_days）。
-DISCLOSURE_LAG_DAYS = 1
+DATA_SOURCE_RULE_VERSION = "v1"
 
 
 def _session() -> Session:
@@ -53,7 +36,16 @@ def _service(session: Session) -> "IngestService":
     from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
     from fip.services.data_service.ingest import IngestService
 
-    return IngestService(session, AkShareSourceAdapter(), DISCLOSURE_LAG_DAYS)
+    return IngestService(session, AkShareSourceAdapter(), None)
+
+
+def _nav_service(session: Session) -> "IngestService":
+    from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
+    from fip.services.data_service.ingest import IngestService
+
+    return IngestService.from_policy(
+        session, AkShareSourceAdapter(), rule_version=DATA_SOURCE_RULE_VERSION
+    )
 
 
 def _resolve(session: Session, symbol: str) -> "FundShareClass":
@@ -143,27 +135,24 @@ def cmd_ingest_funds(args: argparse.Namespace) -> None:
 
 
 def cmd_ingest_nav(args: argparse.Namespace) -> None:
-    # 延迟 import：见文件顶部说明。
-    from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
+    from fip.services.data_service.batch import BatchItemStatus, FundIngestSubject
 
     with _session() as session:
         share_class = _resolve(session, args.symbol)
-        service = _service(session)
-        navs = service.ingest_nav(share_class.id, args.symbol)
-        events = service.ingest_distributions(share_class.id, args.symbol)
-        try:
-            rebuilt = service.rebuild_adjusted_nav(share_class.id, dt.date.today())
-        except AdjustedNavUnavailable as exc:
-            # 净值与事件已成功灌入，不能因复权回填失败而把它们一并丢弃——
-            # 否则在一个批处理循环里逐只基金调用本命令时，一只基金复权
-            # 不可算就会连带丢失它本已成功抓到的净值行，且异常若继续向外
-            # 传播会让整个循环中断（本任务的三处 carry-forward 之一：
-            # 逐份额类别捕获 AdjustedNavUnavailable，如实记录并继续）。
-            session.commit()
-            print(f"净值 {navs} 行、事件 {events} 行；复权回填跳过：{exc}")
-            return
+        # commit() 默认会 expire ORM 属性，离开 with 后 Session 又已关闭；
+        # 展示字段必须在提交前复制为普通值，不能在 detached instance 上再读。
+        display_name = share_class.display_name
+        result = _nav_service(session).ingest_nav_batch(
+            [FundIngestSubject(share_class.id, args.symbol)]
+        )
         session.commit()
-    print(f"净值 {navs} 行、事件 {events} 行、复权回填 {rebuilt} 行")
+    item = result.items[0]
+    print(f"{display_name}：{item.status}"
+          + (f" —— {item.error}" if item.error else ""))
+    if item.status in {BatchItemStatus.INVALID, BatchItemStatus.FAILED}:
+        raise SystemExit(
+            f"净值灌入失败（{item.status}）：{item.error or '未知错误'}"
+        )
 
 
 def cmd_pit_nav(args: argparse.Namespace) -> None:

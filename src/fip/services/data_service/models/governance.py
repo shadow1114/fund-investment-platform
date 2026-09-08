@@ -1,7 +1,15 @@
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,7 +36,14 @@ class DataProviderDataset(Base):
     """
 
     __tablename__ = "data_provider_dataset"
-    __table_args__ = {"schema": "governance"}
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id",
+            "dataset_code",
+            name="uq_data_provider_dataset_code",
+        ),
+        {"schema": "governance"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     provider_id: Mapped[int] = mapped_column(
@@ -50,7 +65,15 @@ class DataSourcePriority(Base):
     """
 
     __tablename__ = "data_source_priority"
-    __table_args__ = {"schema": "governance"}
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_id",
+            "field_name",
+            "rule_version",
+            name="uq_data_source_priority_rule",
+        ),
+        {"schema": "governance"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     dataset_id: Mapped[int] = mapped_column(

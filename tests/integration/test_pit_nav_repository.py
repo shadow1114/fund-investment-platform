@@ -422,6 +422,21 @@ def test_unavailable_checkpoint_does_not_void_the_whole_backfill(db_session, sha
     }
 
 
+def test_strict_backfill_reports_unavailable_before_writing(db_session, share_class):
+    """批处理严格模式把任一 checkpoint 断链提升为 subject 级失败。"""
+    _unavailable_scenario(db_session, share_class)
+
+    with pytest.raises(AdjustedNavUnavailable):
+        backfill_adjusted_nav(
+            db_session,
+            share_class.id,
+            dt.date(2026, 8, 31),
+            strict=True,
+        )
+
+    assert all(value is None for value in _column(db_session, share_class).values())
+
+
 def test_gap_after_date_to_does_not_void_a_computable_window(db_session, share_class):
     """请求区间【之后】的数据缺口，不得废掉区间内完全可算的历史。
 

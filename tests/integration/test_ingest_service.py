@@ -177,7 +177,15 @@ def _merge_caller(name, **params):
 @pytest.fixture()
 def merge_service(db_session) -> IngestService:
     adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=_merge_caller)
-    return IngestService(db_session, adapter, disclosure_lag_days=1)
+    return IngestService(
+        db_session,
+        adapter,
+        disclosure_lag_days={
+            "fund_nav": 1,
+            "fund_distribution": 2,
+            "fund_split": 3,
+        },
+    )
 
 
 def test_same_day_dividend_and_split_merge_into_one_row(db_session, merge_service):
@@ -199,6 +207,7 @@ def test_same_day_dividend_and_split_merge_into_one_row(db_session, merge_servic
     assert row.effective_at == dt.date(2020, 1, 3)
     assert row.dividend_per_unit == Decimal("0.1")   # 求和没吃掉拆分
     assert row.split_ratio == Decimal("2")           # 连乘没吃掉分红
+    assert row.available_at == dt.datetime(2020, 1, 6, tzinfo=dt.UTC)
 
 
 # --- 重复灌入不得产生新版本 ---------------------------------------------
