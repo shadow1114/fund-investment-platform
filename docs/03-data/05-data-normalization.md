@@ -450,16 +450,17 @@ Composite Return(t) = Σ ( w_i × Component_i Return(t) )
 |---|---|---|
 | 价格指数 | 不含成分分红 | **系统性高估全部基金的 Alpha 与超额收益** |
 | 全收益指数 | 含分红再投资 | 与复权净值同口径 ✓ |
+| 全价指数 | 债券净价变动 + 应计利息 | M1 债券 Benchmark 指定口径 |
 
-基金净值已含分红再投资，**只有与全收益指数比较才是同口径**。
+权益基金净值已含分红再投资，**只有与权益全收益指数比较才是同口径**。
 
 | # | 规则 |
 |---|---|
-| BM-1 | 每个 Benchmark 必须标注价格 / 全收益类型 |
-| BM-2 | 优先使用全收益指数 |
-| BM-3 | 若只能获得价格指数，须**显式标记**，且依赖该基准的相对指标标注可比性限制 |
+| BM-1 | 每个 Benchmark 必须标注 `PRICE` / `TOTAL_RETURN` / `FULL_PRICE` 类型 |
+| BM-2 | 权益 Benchmark 必须使用 `TOTAL_RETURN` |
+| BM-3 | 债券 M1 必须使用中债综合全价指数 `FULL_PRICE` |
 
-> **已定案 · 2026-08-27**：基准一律使用**全收益指数**（Total Return Index）。见 `TBD-resolution-2.md` Policy B。
+> **定案 · 2026-09-08**：权益 Benchmark 使用 `TOTAL_RETURN`；债券 M1 使用 `FULL_PRICE`；Hybrid 使用 60% 权益全收益 + 40% 债券全价。
 >
 > **依据 —— 价格指数会使 Alpha 被系统性高估约一个股息率**（A 股约 2%）：
 >
@@ -471,9 +472,9 @@ Composite Return(t) = Σ ( w_i × Component_i Return(t) )
 >
 > **该偏差的三个特点使它格外危险**：方向单一（永远高估）、量级与真实 Alpha 相当（主动基金真实年化超额常在 1~3%）、**在净值曲线上不可见**。
 >
-> **全收益版本不可得时不做自行合成** —— 合成需要成分权重与分红时点，误差可能大于偏差本身。此时该基金的 Alpha / IR / Tracking Error 一律 `UNAVAILABLE`。
+> **指定版本不可得时不做自行合成或类型降级**。权益全收益版本或债券全价版本不可得时，该基金的 Alpha / IR / Tracking Error 一律 `UNAVAILABLE`。
 >
-> **归一化层的动作**：`benchmark_index` 须落 `index_type` 枚举（`PRICE` / `TOTAL_RETURN`，NOT NULL），映射到 `PRICE` 类型时触发校验告警。
+> **归一化层的动作**：`benchmark_index` 须落 `index_type` 枚举（`PRICE` / `TOTAL_RETURN` / `FULL_PRICE`，NOT NULL），权益映射到 `PRICE` 类型时阻断相关 Factor。
 
 ---
 
@@ -614,7 +615,7 @@ included_in_backtest = NOT included_in_nav AND 该费用在交易时发生
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
-| **v1.4** | 2026-08-27 | **第二批定案（1 项）**。`DN-6` 基准一律**全收益指数** —— 价格指数会使 Alpha 系统性高估约一个股息率（A 股约 2%），该偏差方向单一、量级与真实 Alpha 相当、且在净值曲线上不可见；全收益版本不可得时**不做自行合成**，相关因子 `UNAVAILABLE`。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
+| **v1.4** | 2026-08-27 | **第二批定案（1 项；后由 2026-09-08 决策细化）**。`DN-6` 当时确定权益使用全收益指数；现行规则明确为权益 `TOTAL_RETURN`、债券 M1 `FULL_PRICE`，指定类型不可得时不自行合成或降级，相关因子 `UNAVAILABLE`。 | `TBD-resolution-2.md` v1.0 |
 | **v1.3** | 2026-08-27 | **`TBD-DN-7` 关闭**。新增 §9.4 与 FE-5 —— 包含关系归一化为三值枚举，**无声明必须映射 `UNKNOWN` 而非 `FALSE`**（后者会造成看不出来的重复扣费，前者是可披露的偏差）；归一化层不做推断，推断须落 `inclusion_source = 人工核定`。详见 `TBD-resolution.md` Policy ⑩ | `02-business-requirements` v2.5 §21.7.1 |
 | **v1.2** | 2026-08-27 | **`TBD-DN-3` 关闭**。①§5.3 复权方向定为**后复权（`BACKWARD`）**，新增 §5.3.1 给出双轨保存的五列结构、三条理由与「为什么不选前复权+版本化」的成本论证；②新增 §5.3.2 —— 分红记录缺失时 `adjusted_nav = UNAVAILABLE`，**禁止用 `raw_nav` 冒充**（会制造虚假暴跌且事后不可察觉）；③新增 NAV-5、NAV-6 两条规则要求；④§5.4 由「二选一待定」改为决策论证的留存记录。详见 `TBD-resolution.md` Policy ③ | `01-product-overview` v2.6 |
 | v1.1 | 2026-08-25 | **随 01-data-source v2.0 同步**。§2.1 标准化管线起点改为 **Raw Payload → Parsing/Mapping（属 Adapter）→ Canonical Raw**，明确本文档主体是 Cleaning 之后的口径统一；修正对 `01-data-source` 的失效章节引用 | `01-product-overview.md` v2.4、`01-data-source.md` v2.0 |

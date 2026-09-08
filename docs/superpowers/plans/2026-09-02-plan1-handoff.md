@@ -1,8 +1,13 @@
+
 # Plan-1 → Plan-2 交接
 
 > Plan-1（M1.0 地基 + M1.1 数据接入）已合并进 main。本文件记录**必须被 Plan-2
 > 接住的东西**。它不是完整的 deferred 清单（那份随 SDD 工作区一起废弃了），
 > 而是整分支最终评审明确要求「写进 Plan-2 开场任务、而不是留在清单里」的部分。
+>
+> **后续状态（2026-09-08）**：`../specs/2026-09-08-plan2-evaluation-pipeline-design.md`
+> 已接管本交接内容，并将版本化人工 Benchmark、REL 因子和最小 OOS 有效性检验纳入
+> Plan-2。下文保留的是 Plan-1 完成时的真实边界，不应再作为 Plan-2 的最终范围说明。
 
 ## 一、排在 Plan-2 最前面的两条
 
@@ -98,7 +103,8 @@ Plan-1 没有批处理循环所以不构成缺陷，但 **Plan-2 第一次写多
   另：它只在 `Fund` 首次创建时写入，已存在的 `Fund` 不会刷新 —— 重建数据要先清库。
 - **归组只用了名称主干**：spec §4.5 的归组键是「名称主干 + 管理人」，
   `FundManagementCompany` 建了表但从不写入，管理人维度在结构上不可用。
-- **Relative Performance Score 恒为 `UNAVAILABLE`**：Benchmark 四层建模推到 M2
+- **Plan-1 的 Relative Performance Score 恒为 `UNAVAILABLE`**：Plan-1 完成时 Benchmark
+   尚未实现；Plan-2 新设计已纳入版本化人工 Benchmark，因此该限制只描述 Plan-1 历史状态。
   （官方业绩比较基准的成分与权重需解析招募说明书文本，AKShare 不提供结构化形式）。
   这是**刻意的**：正好在 M1 把 `UNAVAILABLE` 与 `Data Completeness` 跑通 ——
   基于 4 个子分的 85 分与基于 5 个子分的 85 分必须可区分。

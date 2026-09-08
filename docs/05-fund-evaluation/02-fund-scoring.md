@@ -4,7 +4,7 @@
 > 业务需求：docs/01-product/02-business-requirements.md（v2.3）§15 Fund Scoring
 > 本域上游：docs/05-fund-evaluation/01-fund-evaluation.md（v1.0）
 >
-> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.4 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -201,11 +201,13 @@ Total Score
 | Factor | 方向 | 处理 |
 |---|---|---|
 | **Beta** | `TARGET_RANGE` | 转换为**偏离目标区间的程度**再取分位；目标区间未定义时 `UNAVAILABLE`，**不得默认按越低越好** |
-| **Tracking Error** | `STRATEGY_DEPENDENT` | 按画像分治：Passive Equity 为 `LOWER_IS_BETTER`；Active Equity 中性、配合 IR 判读；Bond 不适用；Hybrid 待定 |
+| **Tracking Error** | `STRATEGY_DEPENDENT` | Passive Equity 越低越好；Bond 越低越好且年化 1.5% 为硬上限；Active/Hybrid 分别由 TE × IR、TE × Sharpe 复合算子处理 |
 
 （`04-factor/05-factor-normalization` §6.2、`02-business-requirements` §5.2.1）
 
-`<TBD-FS-2: 各 Evaluation Profile 的 Beta 目标区间取值（= 上游 TBD-P1-22）>`
+Beta 目标区间已定案：Active Equity `[0.85,1.15]`、Passive Equity `[0.98,1.02]`、
+Bond 与 Hybrid `[0.90,1.10]`。Bond Beta 是相对中债综合全价指数的回归 Beta；股票 Beta 与
+Duration Tilt 后续作为独立 Factor 引入。
 
 ---
 
@@ -286,7 +288,7 @@ Total Score              =  Σ  Sub-Score_k × Weight_k          （k = 五个�
 >
 > **展示层可乘 100 呈现为百分比**，但那是渲染，不是存储与传输的约定。
 
-### 8.4 权重取值待因子有效性检验后确定
+### 8.4 权重发布顺序
 
 > **这是上游已定的正确定序**（`02-business-requirements` §5.2.1）：
 
@@ -296,33 +298,23 @@ Total Score              =  Σ  Sub-Score_k × Weight_k          （k = 五个�
 再定权重
 ```
 
-**不得事先拍板权重**。本节定义的是权重的**结构与约束**，不是取值。
+权重已由 2026-09-08 投研确认，但仍须在 OOS 有效性检验通过后才允许发布正式 Score。
+定案权重不构成绕过检验的理由。
 
 ```
-Factor Weight     = EQUAL_WITHIN_VALID     ← 第一版方案，已定案 2026-08-27
-Sub-Score Weight  = 由 Profile 定义         ← 见 §8.5 已定案的相对高低
+Factor Weight     = PROFILE_FIXED          ← 见 §8.5
+Missing Handling = EXCLUDE_AND_RENORMALIZE
 ```
 
-#### 8.4.1 第一版：有效因子内等权（已定案）
-
-> **定案 · 2026-08-27**：`TBD-FS-4`（= 上游 `TBD-P1-23`）关闭。见 `02-business-requirements` §5.2.1.1、`TBD-resolution.md` Policy ⑥。
-
-```
-某子分的候选因子经有效性检验后：
-    Sharpe        valid
-    Sortino       valid
-    Max Drawdown  valid
-    Calmar        invalid
-
-→ 各 valid 因子权重 = 1 / (valid 因子数) = 33.33%
-→ Calmar 权重 = 0，且【在归因中留痕】
-```
+#### 8.4.1 第一版：Profile 固定权重（已定案）
 
 | # | 规则 |
 |---|---|
-| 1 | 权重之和为 1，**在有效因子内**归一 |
-| 2 | `invalid` 因子权重恰为 **0**，但**必须出现在归因链中**并标注失效原因（§10.4）—— 否则无法回答「为什么这只基金的 Calmar 没影响分数」 |
-| 3 | **权重来源须落库为 `EQUAL_WITHIN_VALID`**，与第二版的 `OPTIMIZED` 区分 |
+| 1 | 每个 Profile 的发布权重之和为 1 |
+| 2 | 未通过有效性检验的指标权重为 0，但必须在归因链留痕 |
+| 3 | 个别指标 `UNAVAILABLE` 时对其余有效指标按原比例重归一 |
+| 4 | 有效加权指标少于 2 或 `Data Completeness < 0.8` 时总分 `UNAVAILABLE` |
+| 5 | 权重来源落库为 `PROFILE_FIXED_V1` |
 
 #### 8.4.2 检验未产出时 Score 不可投产 ⚠️
 
@@ -343,23 +335,45 @@ Sub-Score Weight  = 由 Profile 定义         ← 见 §8.5 已定案的相对�
 | 某子分内全部因子 `invalid` | 该子分 `UNAVAILABLE`，总分按剩余子分处理 |
 | 有效因子数低于阈值 | 该子分标 `INSUFFICIENT_FACTORS`（§9.3） |
 
-> **「有效因子内等权」与「未经检验就等权」在数值上可能完全相同** —— 区分两者的唯一凭据是**检验结果是否存在**。因此 `factor_effectiveness` 的存在性是 Score 产出的前置条件，不是可选的补充信息。
+> `factor_effectiveness` 的存在性是 Score 产出的前置条件，不是可选的补充信息。
+> 固定权重只定义通过检验后的聚合方式，不赋予未经检验的指标评分资格。
 
 > **推荐默认 · 2026-08-27**：见 `04-factor/07-factor-validation` §10 与 `TBD-resolution-2.md` §4.4 —— IC ≥ 0.02、|ICIR| ≥ 0.3。
 >
 > **本域是消费方不是定义方**：阈值属 `validation_policy`，由 `04-factor` 产出检验数值、由该 Policy 判定 `VALID` / `INVALID`，本域只按判定结果分配权重（§8.4.1）。
 
-### 8.5 权重差异化已定案的部分
+### 8.5 Profile 固定权重（已定案 · 2026-09-08）
 
-> 虽然具体数值待定，但**相对高低已在 `02-business-requirements` §5.2.1 定案**，本域不得改动：
+| 指标 | Active Equity | Passive Equity | Bond | Hybrid |
+|---|---:|---:|---:|---:|
+| Alpha | 0.30 | 0 | 0 | 0.20 |
+| Information Ratio | 0.30 | 0 | 0 | 0.15 |
+| Tracking Error | 0.05 | 0.40 | 0.10 | 0.15 |
+| Beta | 0.10 | 0.30 | 0.35 | 0.15 |
+| Maximum Drawdown | 0.15 | 0.05 | 0.35 | 0.25 |
+| Expense Ratio | 0.10 | 0.25 | 0.20 | 0.10 |
+| R² | DISPLAY | DISPLAY | DISPLAY | DISPLAY |
 
-| Factor | 已定案的权重要求 |
-|---|---|
-| **费率** | Passive Equity 下为**高权重**项 |
-| **Maximum Drawdown** | Bond 下为**最高权重** |
-| **Alpha / IR** | Active Equity 下为**核心**项 |
-| **Tracking Error** | Passive Equity 下为**核心**项 |
-| **Alpha** | Passive Equity 下**不进评分**（权重为 0） |
+每列精确等于 1。Expense Ratio 是 PIT Fund Data，归入 Risk-Adjusted 子分但不注册为
+Factor；R² 仅展示。五子分作为归因分组继续保留，v1 总分直接按上表指标权重汇总；权重为 0
+或未列出的指标不进入总分，但仍可展示、筛选和用于研究。
+
+### 8.6 Tracking Error 复合算子
+
+Active Equity 与 Hybrid 的 TE 不使用独立 `normalized_value` 参与加权。评分层按下列规则产出
+`interaction_value ∈ [0,100]`，并以它替代 TE 加权输入：
+
+| Profile | 条件 | 复合量与方向 |
+|---|---|---|
+| Active Equity | `IR > 0.5` | `sqrt(TE × IR)`，Peer Group 内越高越好 |
+| Active Equity | `IR <= 0` | `sqrt(TE)`，Peer Group 内越低越好 |
+| Active Equity | `0 < IR <= 0.5` | 中性值 50，不奖励也不惩罚主动偏离 |
+| Hybrid | `Sharpe > 1.0` | `sqrt(TE × Sharpe)`，Peer Group 内越高越好 |
+| Hybrid | `Sharpe <= 1.0` | `sqrt(TE)`，Peer Group 内越低越好 |
+
+Passive Equity 直接使用 TE 的反向分位；Bond 同样越低越好，但年化 TE 超过 1.5% 时其 TE
+评分直接为 0。复合结果只占用 TE 的配置权重，IR/Sharpe 仍按原配置权重参与，且不得再叠加
+独立 TE 贡献。
 
 ---
 
@@ -437,7 +451,7 @@ Total Score
     ↓  拆解
 五个 Sub-Score + 各自权重
     ↓  拆解
-各 Factor 的 Normalized Score × Weight = Weighted Contribution
+各 Factor 的 normalized_value × Weight = Weighted Contribution
     ↓  拆解
 Factor Raw Value + Direction + Peer Group 内分位
 ```
@@ -448,10 +462,10 @@ Factor Raw Value + Direction + Peer Group 内分位
 |---|---|
 | `factor_id` + `window` | 哪个因子、哪个窗口 |
 | **`raw_value`** | 原始值（带量纲），用于人工核对 |
-| **`normalized_score`** | 标准化后的分数 |
+| **`normalized_value`** | 单因子标准化值，范围 `[0,100]`；TE 复合项改用 `interaction_value` |
 | **`direction`** | 该因子在本 Profile 下的方向 |
 | **`weight`** | 权重 |
-| **`weighted_contribution`** | `normalized_score × weight` |
+| **`weighted_contribution`** | `normalized_value × weight`；TE 复合项为 `interaction_value × weight` |
 
 > **`raw_value` 不可省略** —— 只有标准化值时用户看不懂"0.83 分"从何而来（`04-factor/08-factor-output` §2.3）。
 
@@ -659,7 +673,7 @@ Score Status      = PARTIAL
 
 - **五子分命名固定**，且任一得分都必须能拆解到具体因子的贡献
 - **`Factor Value = 0` 与 `UNAVAILABLE` 必须区分** —— 按 0 分参与评分等于宣称"数据不足 = 表现最差"
-- **权重取值待因子有效性检验后确定** —— 先有验证数据再定权重，不事先拍板
+- **权重已按 Profile 固定并版本化** —— 有效性检验决定指标是否有资格使用，不自动改权重
 - **`Fund Score` 是相对量** —— 80 分意思是"在这个组内排前 20%"，跨组不可比，必须与组内绝对水平同屏展示
 
 两处与提示词建议不同的地方：
@@ -681,11 +695,13 @@ Score Status      = PARTIAL
 | D-6 | Normalization 采用 Percentile Rank（**已定案，非 TBD**） | 可解释性——分位可用自然语言表述 |
 | D-7 | 缺失处理采用 `EXCLUDE_AND_RENORMALIZE`（**已定案**） | `02-business-requirements` §15.5 |
 | D-8 | **权重重分配有下限** —— 可用指标过少时子分 `UNAVAILABLE` | 否则单指标承担全部权重，子分退化 |
-| D-9 | 权重取值待因子有效性检验后确定 | `02-business-requirements` §5.2.1 的正确定序 |
+| D-9 | 第一版采用 `PROFILE_FIXED_V1`，OOS 有效性检验是发布前置 | 2026-09-08 投研确认 |
 | D-10 | 归因必须保留 `raw_value` | 只有标准化值时用户看不懂 |
 | D-11 | **被排除的因子也要留痕** | 否则无法解释权重为何与配置不符 |
 | D-12 | `Scoring Policy` 与 `Evaluation Policy` 独立版本化 | 两类变更的治理粒度不同 |
 | D-13 | 全部子分 `UNAVAILABLE` 时总分 `UNAVAILABLE`，**不输出 0** | 同 D-7 的理由 |
+| D-14 | 单因子标准化字段为 `normalized_value ∈ [0,100]` | 避免与加权合成后的 Score 命名混淆 |
+| D-15 | Active/Hybrid 的 TE 复合贡献替代独立 TE 贡献 | 保留主动偏离意图，同时避免 TE 重复计权 |
 
 ---
 
@@ -712,9 +728,9 @@ Score Status      = PARTIAL
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
 | ~~FS-1~~ | ~~费率归入哪个子分~~ —— **已定案**：费率归入 **Risk-Adjusted 子分**，不独立成项 | — | ✅ 2026-08-27 |
-| FS-2 | 各 Profile 的 Beta 目标区间（= 上游 `TBD-P1-22`） | Beta 无法标准化 | 投研 |
+| ~~FS-2~~ | ~~各 Profile 的 Beta 目标区间~~ —— **已定案**：Active `[0.85,1.15]`、Passive `[0.98,1.02]`、Bond/Hybrid `[0.90,1.10]` | — | ✅ 2026-09-08 |
 | ~~FS-3~~ | ~~权重归一化约定（Σ=1 或 Σ=100）~~ —— **已定案**：权重归一化约定 **Σ = 1**（小数），不用 Σ = 100 | — | ✅ 2026-08-27 |
-| ~~FS-4~~ | ~~各 Profile 内部的具体权重分配~~ —— **已定案**：第一版有效因子内等权（§8.4.1），检验未产出前 Score 不投产（§8.4.2）；剩余为检验阈值（`OPEN-11`） | — | ✅ 已定案 2026-08-27 |
+| ~~FS-4~~ | ~~各 Profile 内部的具体权重分配~~ —— **已定案**：第一版采用 `PROFILE_FIXED_V1`（§8.4.1、§8.5），检验未产出前 Score 不投产（§8.4.2） | — | ✅ 已定案 2026-09-08 |
 | ~~FS-5~~ | ~~子分内可用指标数的下限阈值~~ —— **已定案**：子分内有效指标数 < 2 时该子分 `UNAVAILABLE`，不做权重重分配 | — | ✅ 2026-08-27 |
 | ~~FS-6~~ | ~~基金转型后历史评分的展示与不可比标注~~ —— **已定案**：基金转型后历史评分【继续展示但标注不可比】，转型日之后重新起算 Rolling 序列 | — | ✅ 2026-08-27 |
 
@@ -736,6 +752,8 @@ Score Status      = PARTIAL
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.4** | 2026-09-08 | 固定 Beta Profile 区间，定义 Active/Hybrid TE 复合算子及 `interaction_value`，统一单因子 `normalized_value ∈ [0,100]` | Plan-2 设计 v1.1 |
+| **v1.3** | 2026-09-08 | 以四类 Profile 固定指标权重替代有效因子等权；Benchmark 纳入 Plan-2；R² 仅展示，费率作为 Fund Data 参与评分；仍强制 OOS 检验前置 | Plan-2 设计 v1.0 |
 | **v1.2** | 2026-08-27 | **第二批定案（4 项）**。`FS-1` 费率归入 **Risk-Adjusted 子分**（五子分命名由上游固定，独立成项等于改上游结构）；`FS-3` 权重 **`Σ = 1`**（与 API 的百分比用小数一致，同一响应内不能有两种量纲）；`FS-5` 有效指标数 **< 2 时子分 `UNAVAILABLE`** 且不重分配 —— 单指标构成的「子分」等于被重命名的该指标，重分配的结果正是这一情形；`FS-6` 转型后历史评分**继续展示但标注不可比**，Rolling 序列**重新起算**。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.1** | 2026-08-27 | **`TBD-FS-4` 关闭**。§8.4 新增两个小节 —— §8.4.1 第一版**有效因子内等权**（`invalid` 因子权重为 0 但须在归因中留痕，权重来源落库为 `EQUAL_WITHIN_VALID`）；§8.4.2 **检验未产出时 Score 不可投产**（`score_status = VALIDATION_PENDING`）—— 「先按等权上线等检验出来再调」与「未经检验就拍权重」完全等价。详见 `TBD-resolution.md` Policy ⑥ | `02-business-requirements` v2.7 §5.2.1.1 |
 | v1.0 | 2026-08-26 | 初始版本。明确**标准化与方向转换归 `04-factor`、本域只做聚合**；五子分结构与六个必答问题；**方向沿用上游四取值而非提示词的 `TARGET_IS_BETTER`**，并说明合并会丢失 `TARGET_RANGE` 与 `STRATEGY_DEPENDENT` 的区分；**指出 Normalization Method 与 Missing Factor Policy 上游已定案、非 TBD**；两层权重结构与"权重取值待因子有效性检验后确定"的定序；**§9.3 权重重分配的下限**（否则单指标承担全部权重使子分退化）；归因六项含 `raw_value`，且**被排除的因子也须留痕**；`Scoring Policy` 与 `Evaluation Policy` 独立版本化 | `01-product-overview.md` v2.5、`02-business-requirements.md` v2.3、`01-fund-evaluation.md` v1.0 |

@@ -441,7 +441,7 @@ MAR 是评价配置 → 随 Evaluation Policy 不同
 
 ### 8.4 `FACTOR_EFFECTIVENESS` 是新增实体（v1.1）
 
-> **由 Policy ⑥ 引入**（`02-business-requirements` §5.2.1.1、`04-factor/07-factor-validation` §10.3.1、`TBD-resolution.md` Policy ⑥）：因子权重由有效性检验结果产出，检验结果因此必须是可查询、可版本化的一等实体。
+> **由 Policy ⑥ 引入，后按 2026-09-08 决策收敛**：有效性检验只决定指标的评分资格，不生成权重；检验结果仍必须是可查询、可版本化的一等实体。
 
 | 属性 | 说明 |
 |---|---|

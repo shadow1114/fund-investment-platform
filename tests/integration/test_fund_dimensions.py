@@ -7,6 +7,7 @@ from fip.services.data_service.eligibility import EligibilityStatus, LifecycleSt
 from fip.services.data_service.grouping import GroupingStatus
 from fip.services.data_service.models.fund import (
     Fund,
+    FundClassificationHistory,
     FundManager,
     FundManagerAssignment,
     FundShareClass,
@@ -51,6 +52,26 @@ def test_manager_assignment_supports_co_management(db_session, share_class):
     db_session.flush()
     assert db_session.query(FundManagerAssignment).filter_by(
         fund_id=share_class.fund_id).count() == 2
+
+
+def test_only_one_open_classification_per_scheme(db_session, share_class):
+    for code in ("ACTIVE_EQUITY", "HYBRID"):
+        db_session.add(
+            FundClassificationHistory(
+                fund_id=share_class.fund_id,
+                classification_scheme="FIP_INTERNAL_L2",
+                classification_code=code,
+                valid_from=dt.date(2020, 1, 1),
+                valid_to=None,
+                **_times(dt.datetime(2020, 1, 2, tzinfo=dt.UTC)),
+            )
+        )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_share_class_has_base_currency(db_session, share_class):
+    assert share_class.base_currency == "CNY"
 
 
 def test_interval_with_end_before_start_is_rejected(db_session, share_class):

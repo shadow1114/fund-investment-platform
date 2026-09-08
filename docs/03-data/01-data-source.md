@@ -380,17 +380,17 @@ flowchart TD
 
 `<TBD-DS-8: 官方基准文本的解析规则与人工介入流程待投研与数据确认>`
 
-### 5.5 价格指数与全收益指数
+### 5.5 Benchmark 指数类型
 
 > 每个 Benchmark Index 必须标注类型（上游 §4.2 ①-B、`05-data-normalization` §8.4）。
 
-基金净值含分红再投资，**只有与全收益指数比较才是同口径**。若只能获得价格指数，须显式标记，依赖该基准的相对指标标注可比性限制。
+权益基金净值含分红再投资，**只有与权益全收益指数比较才是同口径**。若只能获得权益价格指数，相关相对指标不可投产。
 
-> **已定案 · 2026-08-27**：基准一律使用**全收益指数**。见 `TBD-resolution-2.md` Policy B 与 `05-data-normalization` §9（`DN-6`）。
+> **定案 · 2026-09-08**：权益 Benchmark 使用 `TOTAL_RETURN`；债券 M1 使用中债综合全价指数 `FULL_PRICE`；Hybrid 保留 60% 权益全收益 + 40% 债券全价两个 Component。全价指数不是全收益指数，不得混用类型。
 >
-> **本域的动作**：`benchmark_index` Dataset 须包含 **`index_type`** 属性（`PRICE` / `TOTAL_RETURN`，**NOT NULL**），并在 Provider 接入时逐基准登记其可得的类型。
+> **本域的动作**：`benchmark_index` Dataset 须包含 **`index_type`** 属性（至少支持 `PRICE` / `TOTAL_RETURN` / `FULL_PRICE`，**NOT NULL**），并在 Provider 接入时逐基准登记其类型。
 >
-> **可得性核实属 `② 数据侧`** —— 哪些基准有官方全收益版本、哪些没有，须逐个向 Provider 确认。**但「用哪种」已不是待定项**：有全收益就用，没有则相关因子 `UNAVAILABLE`，不降级用价格指数。
+> **可得性核实属 `② 数据侧`** —— 权益全收益版本或指定债券全价版本不可得时，相关因子 `UNAVAILABLE`，不得临时替换类型或指数。
 
 ---
 
@@ -1111,7 +1111,7 @@ stateDiagram-v2
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
-| **v2.4** | 2026-08-27 | **第二批定案（3 项）**。`DS-3` 多源比对容差 —— 净值 1e-6、**费率绝对 0**（费率是离散公告值，不同即有一方错误），超差走仲裁不取平均；`DS-6` 基准一律**全收益指数**（Policy B），`benchmark_index` 补 `index_type` NOT NULL，无全收益时相关因子 `UNAVAILABLE` 而非降级用价格指数；`DS-11` `raw_payload` 在线保留 **2 年后归档而非删除**（2 年覆盖典型 Adapter 迭代周期）。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
+| **v2.4** | 2026-08-27 | **第二批定案（3 项；Benchmark 类型部分已被 2026-09-08 决策细化）**。`DS-3` 多源比对容差 —— 净值 1e-6、费率绝对 0；`DS-6` 当时确定权益使用全收益指数，现行规则进一步明确为权益 `TOTAL_RETURN`、债券 M1 `FULL_PRICE`；`DS-11` `raw_payload` 在线保留 2 年后归档。 | `TBD-resolution-2.md` v1.0 |
 | **v2.3** | 2026-08-27 | **`TBD-DS-10` 与 `TBD-DS-12` 一并关闭**。<br/>**`DS-12`**：新增 §3.1.5.5 —— `R_f` 按 `(计价币种, 评价周期对应期限)` 解析，CNY 用中国国债收益率曲线，明确排除存款利率 / LPR / Shibor；三级 fallback 并落 `rate_source_quality`（`EXACT` / `INTERPOLATED` / `UNAVAILABLE`），第 3 级不降级使用别的币种曲线；报价口径换算不得默认。<br/>**`DS-10`**。§11 整节重写 —— ①四个时间字段全部保留并落库（`effective_at` / `published_at` / `provider_available_at` / `ingested_at`），不再三选一；②`available_at = max(源头可得时刻, 平台可用时刻)`，源头侧按 `provider_available_at → published_at → ingested_at` 三级优先级解析，并落库 `availability_quality`（`EXACT` / `DERIVED` / `INFERRED`）；③新增 AV-4 与 §11.6 时序断言；④`retrieved_at` 全文改名为 `ingested_at`，对齐上游 v2.6 命名。详见 `TBD-resolution.md` Policy ④ | `01-product-overview.md` v2.6 §14 TBD-17 |
 | **v2.2** | 2026-08-25 | **补全 `Risk-free Rate` 数据模型**（上游 v2.5 §5.5）。§3.1.5 扩写为四个子节：**§3.1.5.1 数据模型**——`currency` / `tenor` / `quotation_basis` 必须是显式属性，主键 `(currency, tenor, effective_at, version)`，**不得隐含在"平台默认利率"单一序列中**；**§3.1.5.2 PIT 约束**——两个易错点（利率滞后发布使 `effective_at ≠ available_at`；利率会被修订，须走 `version` 不得原地覆盖）；**§3.1.5.3 频率对齐**——转换规则须显式声明并版本化，**口径统一的责任在数据层**，Factor 层消费的应已是 252 交易日口径；**§3.1.5.4 与 MAR 的边界**——MAR 不属本域。DS-12 扩充为含币种、期限与报价口径。<br/>**同时修正一处沿用自初版的事实错误**：`F-REL-004` Information Ratio 的公式为 `(R_p − R_b) / TE`，**并不依赖 `R_f`**，此前多处将其列为无风险利率消费方；`R_f` 的直接消费方是 `F-RAP-001` Sharpe、`F-REL-002` Alpha、`F-REL-003` Beta，`F-RAP-002` Sortino 仅在 `MAR = R_f` 时间接依赖 | `01-product-overview.md` v2.5 §5.5 |
 | **v2.1** | 2026-08-25 | **补充 Market Reference Data 域**。新增 §3.1.5 `Risk-free Rate` Dataset——由 `04-factor/03-factor-definition` §2.1 发现：Sharpe / Sortino / Alpha / IR 四个核心 Factor 均依赖无风险利率，但此前 Dataset 清单遗漏。同步补充缺失影响表、Capability Matrix、Source-of-Truth 表与 TBD（DS-12） | `01-product-overview.md` v2.4 |

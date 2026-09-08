@@ -546,10 +546,10 @@ CREATE TYPE rate_quality_enum AS ENUM ('EXACT', 'INTERPOLATED');
 
 | 列 | 类型 | 说明 |
 |---|---|---|
-| **`raw_value`** | `NUMERIC(18,8)` | 可为 NULL（`UNAVAILABLE` 时） |
-| **`normalized_value`** | `NUMERIC(12,8)` | 同上 |
+| **`raw_value`** | `DOUBLE PRECISION` | `float64` 结果；`INVALID`/`UNAVAILABLE` 时为 NULL |
+| **`normalized_value`** | `DOUBLE PRECISION` | 范围 `[0,100]`；Active/Hybrid TE 在 Factor 层为 NULL |
 | **`status`** | `VARCHAR` + CHECK | `VALID`/`WARNING`/`INVALID`/`UNAVAILABLE` |
-| **`unavailable_reason`** | `VARCHAR` | 八类之一（`10-api/03` §4.3.5） |
+| **`reason_code`** | `VARCHAR` | `INVALID`/`UNAVAILABLE` 时必填（`10-api/03` §4.3.5） |
 | `peer_group_id` + `peer_group_version` | —— | **标准化上下文** |
 | `risk_free_rate_ref` | JSONB 或列组 | 溯源 —— **须含 `currency`、`tenor`、`version`、`rate_source_quality`**（§9.2.1） |
 | **`evaluation_policy_version`** | `VARCHAR` NULL | **见 §9.3** |
@@ -612,7 +612,7 @@ PostgreSQL 中 NULL 不参与唯一性比较
 
 ### 9.4 `factor_effectiveness`（v1.7 新增）
 
-> **由 Policy ⑥ 引入**（`11-database/03-erd` §8.4）：因子权重由有效性检验结果产出，检验结果须可查询、可版本化。
+> **由 Policy ⑥ 引入，后按 2026-09-08 决策收敛**：有效性检验只决定评分资格，不生成权重；检验结果须可查询、可版本化。
 
 | 项 | 说明 |
 |---|---|

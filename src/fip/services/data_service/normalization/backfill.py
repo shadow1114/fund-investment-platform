@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
+from fip.platform.decision_data.pit import visible_until_for
 from fip.services.data_service.normalization.adjusted_nav import (
     AdjustedNavUnavailable,
     DistributionEvent,
@@ -118,7 +119,7 @@ def backfill_adjusted_nav(
     不沿用上期（C-6）。C-6 的「全有或全无」语义保留在【写入】这一侧：所有
     checkpoint 都算完之后才统一执行 UPDATE。
     """
-    visible_until = dt.datetime.combine(decision_at, dt.time.max, tzinfo=dt.UTC)
+    visible_until = visible_until_for(decision_at)
     params = {"share_class_id": share_class_id, "visible_until": visible_until}
 
     nav_rows = session.execute(_ALL_NAV_SQL, params).mappings().all()
