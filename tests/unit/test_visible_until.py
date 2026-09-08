@@ -19,7 +19,11 @@ from fip.platform.decision_data.context import (
     RuntimeMode,
     TriggerType,
 )
-from fip.platform.decision_data.pit import PitDataContext, resolve_visible_until
+from fip.platform.decision_data.pit import (
+    PitDataContext,
+    resolve_visible_until,
+    visible_until_for,
+)
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "fip"
 RULE_HOME = SRC / "platform" / "decision_data" / "pit.py"
@@ -43,6 +47,12 @@ def test_rule_resolves_to_utc_end_of_decision_day():
     """decision_at 是业务日期，可见性判定取该日【终了】时刻，钉在 UTC。"""
     assert resolve_visible_until(dt.date(2026, 8, 31)) == dt.datetime(
         2026, 8, 31, 23, 59, 59, 999999, tzinfo=dt.UTC
+    )
+
+
+def test_plan2_public_name_resolves_to_utc_end_of_decision_day():
+    assert visible_until_for(dt.date(2026, 9, 8)) == dt.datetime.combine(
+        dt.date(2026, 9, 8), dt.time.max, tzinfo=dt.UTC
     )
 
 

@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 from fip.platform.decision_data.context import DecisionExecutionContext
 
 
-def resolve_visible_until(decision_at: dt.date) -> dt.datetime:
+def visible_until_for(decision_at: dt.date) -> dt.datetime:
     """把 decision_at（业务日期）翻译成 `available_at <= ?` 的时间戳上界。
 
     这是全平台唯一可见性规则 `available_at <= decision_at`（G-1）的**唯一**
@@ -37,13 +37,19 @@ def resolve_visible_until(decision_at: dt.date) -> dt.datetime:
     return dt.datetime.combine(decision_at, dt.time.max, tzinfo=dt.UTC)
 
 
+def resolve_visible_until(decision_at: dt.date) -> dt.datetime:
+    """兼容 Plan-1 调用方；唯一的时点翻译规则在 visible_until_for。"""
+    return visible_until_for(decision_at)
+
+
 @dataclass(frozen=True, slots=True)
 class NavPoint:
     effective_at: dt.date
-    adjusted_nav: Decimal | None
+    adjusted_nav: Decimal
     unit_nav: Decimal
     version: int
     availability_quality: str
+    chain_availability_quality: str
 
 
 @runtime_checkable
@@ -87,7 +93,7 @@ class PitDataContext:
         唯一对外出口就在这里。任何 PIT 读取实现都应当接收本属性的值，
         而不是自己再翻译一次 decision_at（H-1）。
         """
-        return resolve_visible_until(self.decision_at)
+        return visible_until_for(self.decision_at)
 
     @property
     def context(self) -> DecisionExecutionContext:

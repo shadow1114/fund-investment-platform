@@ -6,12 +6,13 @@
 """
 
 import datetime as dt
+import inspect
 import typing
 from decimal import Decimal
 
 import pytest
 
-from fip.platform.decision_data.pit import NavPitRepository, NavPoint, NavSeries
+from fip.platform.decision_data.pit import NavPitRepository, NavPoint
 from fip.platform.source.availability import AvailabilityQuality, weakest_quality
 
 
@@ -32,10 +33,14 @@ def test_nav_point_keeps_its_own_row_quality():
     assert hints["availability_quality"] is str
 
 
-def test_repository_returns_a_series_not_a_bare_list():
-    """链路 quality 无处安放是 Plan-1 的结构性缺口，返回类型必须能装下它。"""
+def test_repository_returns_nav_points():
     hints = typing.get_type_hints(NavPitRepository.adjusted_nav_series)
-    assert hints["return"] is NavSeries
+    assert hints["return"] == list[NavPoint]
+
+
+def test_repository_method_cannot_accept_a_query_time():
+    parameters = inspect.signature(NavPitRepository.adjusted_nav_series).parameters
+    assert not ({"decision_at", "as_of", "available_at"} & parameters.keys())
 
 
 def _point(day: int, quality: str) -> NavPoint:
@@ -45,24 +50,13 @@ def _point(day: int, quality: str) -> NavPoint:
         unit_nav=Decimal("1.00000000"),
         version=1,
         availability_quality=quality,
+        chain_availability_quality=quality,
     )
 
 
-def test_empty_series_has_no_chain_quality():
-    """没有任何行就没有链路 —— 不得凭空造一个 quality 值出来（G-3）。"""
-    series = NavSeries(points=(), chain_quality=None)
-    assert series.chain_quality is None
-
-
-def test_non_empty_series_must_carry_a_chain_quality():
-    """反向不变式：有点却没有链路结论，是把 quality 悄悄丢掉。"""
-    with pytest.raises(ValueError, match="chain_quality"):
-        NavSeries(points=(_point(2, "EXACT"),), chain_quality=None)
-
-
-def test_empty_series_must_not_carry_a_chain_quality():
-    with pytest.raises(ValueError, match="chain_quality"):
-        NavSeries(points=(), chain_quality="EXACT")
+def test_nav_point_carries_cumulative_chain_quality():
+    hints = typing.get_type_hints(NavPoint)
+    assert hints["chain_availability_quality"] is str
 
 
 @pytest.mark.parametrize(

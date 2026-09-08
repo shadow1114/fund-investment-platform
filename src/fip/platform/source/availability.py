@@ -1,4 +1,5 @@
 import datetime as dt
+from collections.abc import Iterable
 from enum import StrEnum
 
 
@@ -6,6 +7,29 @@ class AvailabilityQuality(StrEnum):
     EXACT = "EXACT"        # 取自供应商推送时刻
     DERIVED = "DERIVED"    # 取自公告时刻（推送时刻不可得）
     INFERRED = "INFERRED"  # 取自平台落库时刻或声明的推导规则
+
+
+_QUALITY_STRENGTH: dict[AvailabilityQuality, int] = {
+    AvailabilityQuality.EXACT: 3,
+    AvailabilityQuality.DERIVED: 2,
+    AvailabilityQuality.INFERRED: 1,
+}
+
+
+def weakest_quality(
+    qualities: Iterable[str | AvailabilityQuality],
+) -> AvailabilityQuality:
+    """返回整条计算链中最弱的可用性质量。
+
+    空链路没有质量结论，因此不用任何默认等级代替。
+    """
+    strengths = []
+    for quality in qualities:
+        parsed = AvailabilityQuality(quality)
+        strengths.append((_QUALITY_STRENGTH[parsed], parsed))
+    if not strengths:
+        raise ValueError("空链路没有 availability_quality 结论")
+    return min(strengths, key=lambda pair: pair[0])[1]
 
 
 def resolve_availability(

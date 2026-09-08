@@ -209,7 +209,9 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
     print(f"{share_class.display_name} @ decision_at={decision_at}  共 {len(points)} 条")
     for point in points[:10]:
         print(f"  {point.effective_at}  unit={point.unit_nav}  "
-              f"adj={point.adjusted_nav}  v{point.version}  {point.availability_quality}")
+              f"adj={point.adjusted_nav}  v{point.version}  "
+              f"row={point.availability_quality}  "
+              f"chain={point.chain_availability_quality}")
 
 
 def main(argv: list[str] | None = None) -> int:

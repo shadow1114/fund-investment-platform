@@ -143,6 +143,7 @@ def test_end_to_end_pit_query_returns_adjusted_series(db_session, service):
     )
     # 1.10 → 除息 0.10 后 1.00：复权后收益为 0
     assert [p.adjusted_nav for p in points] == [Decimal("1.1"), Decimal("1.1")]
+    assert points[-1].chain_availability_quality == "INFERRED"
 
 
 # --- 同日「分红 + 拆分」合并 ---------------------------------------------

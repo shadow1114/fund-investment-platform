@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from fip.platform.db.types import NavNumeric
 from fip.platform.decision_data.pit import NavPoint
+from fip.platform.source.availability import weakest_quality
 from fip.services.data_service.normalization.adjusted_nav import (
     DistributionEvent,
     NavObservation,
@@ -32,7 +33,7 @@ _NAV_SQL = text("""
 # decision_at 的行中取 version 最大者。
 _EVENT_SQL = text("""
     SELECT DISTINCT ON (effective_at)
-           effective_at, dividend_per_unit, split_ratio
+           effective_at, dividend_per_unit, split_ratio, availability_quality
     FROM market.fund_distribution
     WHERE share_class_id = :share_class_id
       AND available_at <= :visible_until
@@ -139,6 +140,20 @@ class SqlNavPitRepository:
         adjusted = {p.effective_at: _quantize_nav(p.adjusted_nav) for p in points}
         # unit_nav / version / availability_quality 仍取自净值行本身；
         # 只有 adjusted_nav 来自现算结果。切片放在最后一步。
+        qualities_by_date: dict[dt.date, list[str]] = {}
+        for row in (*nav_rows, *event_rows):
+            qualities_by_date.setdefault(row["effective_at"], []).append(
+                row["availability_quality"]
+            )
+        chain_quality_by_date: dict[dt.date, str] = {}
+        weakest_so_far: str | None = None
+        for effective_at in sorted(qualities_by_date):
+            qualities = qualities_by_date[effective_at]
+            if weakest_so_far is not None:
+                qualities = [weakest_so_far, *qualities]
+            weakest_so_far = weakest_quality(qualities).value
+            chain_quality_by_date[effective_at] = weakest_so_far
+
         return [
             NavPoint(
                 effective_at=row["effective_at"],
@@ -146,6 +161,7 @@ class SqlNavPitRepository:
                 unit_nav=row["unit_nav"],
                 version=row["version"],
                 availability_quality=row["availability_quality"],
+                chain_availability_quality=chain_quality_by_date[row["effective_at"]],
             )
             for row in nav_rows
             if date_from <= row["effective_at"] <= date_to
