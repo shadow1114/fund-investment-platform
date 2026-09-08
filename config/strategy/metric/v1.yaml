@@ -5,6 +5,36 @@ annualization:
     value: 252
     status: DECIDED
     source: "10-api/01 §12.3 annualized_return 定义为 252 交易日"
+calculation:
+  numeric_dtype:
+    value: FLOAT64
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+  output_rounding:
+    value: NONE
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认；展示精度由前端决定"
+  recompute_absolute_tolerance:
+    value: 1.0e-10
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+minimum_observations:
+  window_ratio:
+    value: 0.90
+    status: DECIDED
+    source: "2026-09-08 投研确认"
+  regression_paired:
+    value: 60
+    status: DECIDED
+    source: "2026-09-08 投研确认"
+  rolling_sharpe_window:
+    value: 252
+    status: DECIDED
+    source: "2026-09-08 投研确认"
+  rolling_sharpe_valid_points:
+    value: 12
+    status: DECIDED
+    source: "2026-09-08 投研确认"
 adjusted_nav:
   dividend_reinvestment_price:
     value: EX_DATE_NAV
@@ -14,3 +44,16 @@ adjusted_nav:
     value: DIVIDEND_THEN_SPLIT
     status: DECIDED
     source: "本 Plan Task 15 —— 同日先除息后拆分"
+m1:
+  enabled_factors:
+    value: [F-RET-001, F-RET-002, F-RISK-001, F-RISK-002, F-RISK-003, F-RAP-001, F-RAP-002, F-RAP-003, F-STAB-001, F-STAB-005, F-REL-002, F-REL-003, F-REL-004, F-REL-005, F-STAB-002]
+    status: DECIDED
+    source: "docs/superpowers/specs/2026-09-08-plan2-evaluation-pipeline-design.md §3.4"
+  scoring_factors:
+    value: [F-REL-002, F-REL-003, F-REL-004, F-REL-005, F-RISK-003]
+    status: DECIDED
+    source: "2026-09-08 投研确认；费率为 Fund Data，不在 Factor 列表"
+  display_only_factors:
+    value: [F-STAB-002]
+    status: DECIDED
+    source: "01-product/02 §13.5；2026-09-08 投研确认"
