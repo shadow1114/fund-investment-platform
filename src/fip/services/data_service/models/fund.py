@@ -64,6 +64,7 @@ class FundShareClass(Base):
     )
     share_class_code: Mapped[str] = mapped_column(String(16), nullable=False)
     display_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    base_currency: Mapped[str] = mapped_column(String(8), nullable=False, default="CNY")
     inception_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -198,7 +199,7 @@ class FundManagerAssignment(Base, IntervalMixin):
             ("fund_id", "="),
             ("manager_id", "="),
             (text("daterange(valid_from, valid_to, '[)')"), "&&"),
-            name="ex_fma_no_overlap",
+            name="ex_fma_same_manager_non_overlapping",
             using="gist",
         ),
         Index("idx_fma_manager_valid_from", "manager_id", "valid_from"),
@@ -222,6 +223,13 @@ class FundClassificationHistory(Base, IntervalMixin):
     __table_args__ = (
         *interval_temporal_check_constraints("fund_classification_history"),
         interval_check("fund_classification_history"),
+        Index(
+            "uq_fch_open_interval",
+            "fund_id",
+            "classification_scheme",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
+        ),
         {"schema": "fund"},
     )
 
