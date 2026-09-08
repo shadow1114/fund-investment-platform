@@ -2,7 +2,7 @@
 
 > **上游文档**：`docs/01-product/01-product-overview.md`（v2.6）｜本文定位：**实施层设计**，不定义任何业务概念
 > **同层依赖**：`docs/02-architecture/01~06`、`docs/10-api/01`、`docs/11-database/03~04`、`docs/01-product/04~05`
-> **文档版本**：v1.0 ｜ **日期**：2026-08-31 ｜ **阶段**：第一阶段 · 里程碑 M1
+> **文档版本**：v1.1 ｜ **日期**：2026-09-08 ｜ **阶段**：第一阶段 · 里程碑 M1
 
 ---
 
@@ -329,7 +329,7 @@ config/
 │   ├── risk_model/                 #  6 Risk Model Version
 │   ├── portfolio_rule/             #  7 Portfolio Rule Version（含约束集与风险预算）
 │   ├── rebalance_rule/             #  8 Rebalance Rule Version（M2）
-│   └── benchmark/                  #  9 Benchmark Version（M2）
+│   └── benchmark/                  #  9 Benchmark Version（M1 人工配置，M2 自动解析）
 └── policy/                         # 五项 Policy Version
     ├── evaluation/                 #  MAR、评价周期、评价准入
     ├── ranking/                    #  Percentile 约定、Tie Method
@@ -389,7 +389,7 @@ scoring:
 | Stage | M1 做 | M1 刻意不做（→ M2+） |
 |---|---|---|
 | **① Fund Data** | fund / share_class / nav（含复权）/ classification / manager / fee / eligibility 事实 / raw / risk_free_rate；基础质量闸门与三级阻断粒度 | 完整质量五维、公告类数据、多 Provider 冲裁、完整血缘 |
-| **② Factor** | 8~10 个因子（收益 / 风险 / 风险调整 / 稳定性四类）；Peer Group 内标准化；`Preference Direction` 与 `Factor Usage` 声明；Threshold Resolver（`R_f` PIT + `MAR` 版本） | 因子有效性检验（IC / ICIR / 分层单调性）、Rolling 因子全家族、`factor_effectiveness` 表 |
+| **② Factor** | 15 个因子；Peer Group 内标准化；Threshold Resolver；OOS IC / ICIR / 分层单调性 / 冗余检查；`factor_effectiveness` | 完整 Walk-forward、市场状态分段、Rolling 因子全家族 |
 | **③ Fund Score** | 五子分 + 归因明细表 + `Data Completeness` + 排名 / 分位 / `Fund Tier` | 评分变化归因、多 `Evaluation Profile` |
 | **④ Fund Universe** | `Eligibility Rules` + 快照（含 `REJECTED` 成员与逐条件结果） | 三种构成策略、容量规则、探索性筛选路径 |
 | **⑤-A Return Estimate** | Historical Mean，显式声明 Estimation Window / Horizon / Return Basis | CAGR / Rolling Mean / Benchmark-relative / Shrinkage |
@@ -402,12 +402,11 @@ scoring:
 | **⑨ Live Portfolio** | ❌ 不做 | M2 |
 | **⑩ Rebalancing** | ❌ 不做 | M2 |
 
-### 6.2 三个刻意的缺省
+### 6.2 两个刻意的缺省
 
 | 缺省 | 理由 |
 |---|---|
-| **Benchmark 四层建模推到 M2** | 真正的缺口不是指数数据（AKShare 已有），而是**官方业绩比较基准的成分与权重需要解析招募说明书文本**，AKShare 不提供结构化形式。退到优先级 4（分类默认基准映射）又正好撞上 `P1-20` 这个待定参数。 |
-| **Relative Performance Score = `UNAVAILABLE`** | 上游 §4.2 ①-B 约束 3 规定：无法确定有效 Benchmark 时，依赖 Benchmark 的全部指标标记 `UNAVAILABLE`。**这不是缺陷，而是正好在 M1 就把 `UNAVAILABLE` 与 `Data Completeness` 机制跑通** —— 基于 4 个子分的 85 分与基于 5 个子分的 85 分必须可区分。 |
+| **官方 Benchmark 文档自动解析推到 M2** | M1 使用版本化人工基金级配置与内部分类默认映射，保证 REL 因子闭环；招募说明书自动解析仍需独立的数据质量设计。 |
 | **Live Portfolio 与 Rebalancing 推到 M2** | 二者依赖外部执行系统的成交回报，而 M1 没有对接方。强行实现只能靠平台自行推算 `Actual`，直接违反上游 ⑨-S「`Actual` 来自外部回报，非平台推算」。 |
 
 ### 6.3 落表范围
@@ -490,10 +489,10 @@ M1 不做：`/portfolios/{id}/holdings`、`/rebalances/*`、`/allocations`（依
 | 子阶段 | 内容 | 完成判据 |
 |---|---|---|
 | **M1.0 地基** | 仓库骨架与三层分离；8 个 schema + 时间列标准 + Alembic；`DecisionExecutionContext` 与 `PitDataContext` 接口；`SourceAdapter` 端口；Job 表与幂等键；配置装载与 `PROVISIONAL` 校验；CI 含架构适应度测试 | 适应度测试全绿；一个空的决策上下文可贯穿创建与落库 |
-| **M1.1 数据接入** | `AkShareSourceAdapter`；`raw_payload` 留存；fund / share_class / nav / classification / manager / fee；**复权净值计算**；`risk_free_rate` 曲线；`investment_eligibility` 事实；基础质量闸门与三级阻断 | 可按任一历史 `decision_at` 取到当时可见的复权净值序列；复权算法单元测试覆盖分红/拆分/同日三场景 |
-| **M1.2 Peer Group** | `peer_group_snapshot` + `peer_group_member`；`Evaluation Policy`（含 MAR） | Peer Group 构建**不读取** Score / Universe（适应度测试断言）；快照可按时点复现 |
-| **M1.3 因子** | `factor_definition` / `version` / `run` / `value`；Threshold Resolver；8~10 个因子；Peer Group 内标准化；`Preference Direction` 与 `Factor Usage` | 同一输入重算结果在 1e-10 内一致；`UNAVAILABLE` 不被任何填充值替代 |
-| **M1.4 评价与候选池** | 五子分 + 归因 + `Data Completeness`；排名 / 分位 / Tier；`Eligibility Rules`；Universe 快照（含 `REJECTED`） | Relative Performance Score 正确呈现为 `UNAVAILABLE` 且 `Data Completeness` 反映之；B1→B2 边界原子性验证通过 |
+| **M1.1 数据接入** | `AkShareSourceAdapter`；`raw_payload` 留存；fund / share_class / nav；复权净值计算；基础模型与质量闸门 | **已完成（Plan-1）**：可按历史 `decision_at` 取到当时可见的复权净值序列 |
+| **M1.2 Peer Group + Benchmark** | 分类/费率/Rf 数据链路；版本化人工 Benchmark；`peer_group_snapshot/member`；Evaluation Policy | Peer Group 不读取 Score/Universe；Benchmark 与快照可按时点复现 |
+| **M1.3 因子** | Factor 四表；15 个因子；Threshold Resolver；标准化；最小 OOS 有效性闭环 | 重算误差不超过 1e-10；无 OOS 结论不得进入 Score |
+| **M1.4 评价与候选池** | 五子分 + 固定 Profile 权重归因 + `Data Completeness`；排名 / 分位 / Tier；`Eligibility Rules`；Universe 快照（含 `REJECTED`） | Benchmark 可用且 OOS 检验通过时产出正式 Score；B1→B2 边界原子性验证通过 |
 | **M1.5 组合与决策** | `μ` / `σ` / `Σ`（含收缩与诊断）；Construction；Optimization（EW + MinVol）；Post-Opt Risk；Proposed → Review → Approved；**快照闭包** | 快照闭包判定通过（脱离当前系统状态可完整重建）；`INFEASIBLE` 显式失败且不重试；Override 五字段缺一即拒绝放行 |
 | **M1.6 回测** | 编排循环；快照优先原则；逐期快照；逐日净值；绩效与三方对比；`bias_check`（含 `INFERRED` 占比） | 回测与实盘走同一套 SDL（全仓无 `is_backtest`）；可复现性回归通过 |
 | **M1.7 前端** | 四个页面 + 四个横切组件 + 生成式 API client + RBAC 呈现 | 契约漂移在构建期失败；`null` 场景无一处渲染为 0 或 `-` |
@@ -603,10 +602,10 @@ M1 即搭建 `06-technology-stack` §4.6 的 W2 / W5 / W7 压测夹具，测出 
 
 | # | 事项 | 需要时点 | 责任方 |
 |---|---|---|---|
-| IMP-TBD-1 | M1 的具体因子清单（8~10 个）与各自的 `Preference Direction` / `Factor Usage` | M1.3 前 | 投研 + 技术 |
-| IMP-TBD-2 | Peer Group 的划分粒度（基金分类的哪一层）与最小样本量阈值（`P1-1`） | M1.2 前 | 投研 |
-| IMP-TBD-3 | `MAR` 取值与按 `Fund Category` 的差异化（`P1-19` / 上游 TBD-19） | M1.3 前（否则 Sortino 走 `UNAVAILABLE`） | 投研 |
-| IMP-TBD-4 | `Risk-free Rate` 的币种、期限选取（上游 TBD-18） | M1.3 前 | 投研 + 数据 |
+| ~~IMP-TBD-1~~ | ~~M1 因子清单与 Usage~~ —— 已冻结 15 项 | ✅ 2026-09-08 | 投研 + 技术 |
+| ~~IMP-TBD-2~~ | ~~Peer Group 粒度与最小样本~~ —— 内部二级分类 × 币种，`n >= 30` | ✅ 2026-09-08 | 投研 |
+| ~~IMP-TBD-3~~ | ~~MAR~~ —— M1 显式 `ZERO` | ✅ 2026-09-08 | 投研 |
+| ~~IMP-TBD-4~~ | ~~Risk-free Rate~~ —— 基础币种 × 评价周期，缺期限线性插值 | ✅ 2026-09-08 | 投研 + 数据 |
 | IMP-TBD-5 | 各数据集的**声明式披露时滞**取值 | M1.1 前 | 数据 + 投研 |
 | IMP-TBD-6 | Fund ↔ Share Class 归组规则的具体判据 | M1.1 前 | 技术（可先定后调） |
 | IMP-TBD-7 | M1 回测的默认区间与调仓频率（`P1-16`） | M1.6 前 | 投研 |
@@ -621,8 +620,8 @@ M1 即搭建 `06-technology-stack` §4.6 的 W2 / W5 / W7 压测夹具，测出 
 
 | 里程碑 | 内容 |
 |---|---|
-| **M2 · 实盘与再平衡** | Benchmark 四层建模（含五级优先级选取）→ Relative Performance Score 转为可用；Live Portfolio 三态；Rebalancing 四类触发与分级重算；外部成交回报接收；Prefect 落地 |
-| **M3 · 研究能力加宽** | 因子有效性检验（IC / ICIR / 分层单调性 / 因子间相关性）与 `factor_effectiveness`；Rolling 因子全家族；Maximum Sharpe（含 Charnes-Cooper 路径声明）与 Risk Parity；Walk-forward / IS-OOS |
+| **M2 · 实盘与再平衡** | Benchmark 官方文档自动解析与五级优先级选取增强；Live Portfolio 三态；Rebalancing 四类触发与分级重算；外部成交回报接收；Prefect 落地 |
+| **M3 · 研究能力加宽** | 有效性检验扩展（市场状态分段、完整 Walk-forward 与稳定性研究）；Rolling 因子全家族；Maximum Sharpe（含 Charnes-Cooper 路径声明）与 Risk Parity |
 | **M4 · 治理与运维** | 完整数据质量五维；血缘图；`12-operations` 的四层可观测性与业务事件观测；`13-governance` 的策略生命周期与 Approval Gate |
 | **M5+** | 完整约束库、CVaR、多 `Evaluation Profile`、商业数据源接入（精确 PIT）、性能优化（列存旁路只读副本，若 `OPEN-14` 触发 §4.4） |
 
@@ -642,8 +641,8 @@ M1 即搭建 `06-technology-stack` §4.6 的 W2 / W5 / W7 压测夹具，测出 
 | D-6 | 回补数据的 `available_at` 统一为 `INFERRED` 并在 bias-check 中暴露 | 如实呈现质量等级，而非让回测看起来比实际更严谨 |
 | D-7 | 复权净值由平台自行计算并纳入 `Metric Version` | 累计净值不等于复权净值；它是全链路承重项 |
 | D-8 | 待定参数外置为 `PROVISIONAL` 配置，`LIVE` 消费即告警 | 直接填默认值会让占位值伪装成定案；一律阻断则 M1 无法运行 |
-| D-9 | Benchmark 与 Live / Rebalancing 推到 M2 | 前者缺口是招募说明书文本而非指数数据；后者依赖 M1 不存在的外部执行系统对接 |
-| D-10 | Relative Performance Score 在 M1 走 `UNAVAILABLE` | 符合上游 ①-B 约束 3；且正好在 M1 就跑通 `UNAVAILABLE` 与 `Data Completeness` 机制 |
+| D-9 | M1 纳入版本化人工 Benchmark；官方文档自动解析推到 M2 | 先闭合正式评分，同时不伪装 AKShare 能提供官方复合基准 |
+| D-10 | M1 纳入 REL 因子和最小 OOS 有效性检验 | 正式 Score 必须同时具备 Benchmark 与有效性证据 |
 | D-11 | M1 自建 Job，M2 引入 Prefect | M1 需求可由轻量实现满足；接口隔离使后续替换不触碰业务代码 |
 | D-12 | 前端 API client 由 OpenAPI 生成 | 让 `10-api` 契约与实现的一致性由工具在构建期保证，而非人工同步 |
 | D-13 | M1 内建 W2 / W5 / W7 负载基线 | `OPEN-14` 未测则 L1 存储选型仍是「待验证的选择」 |
@@ -690,4 +689,5 @@ M1 即搭建 `06-technology-stack` §4.6 的 W2 / W5 / W7 压测夹具，测出 
 
 | 版本 | 日期 | 变更内容 |
 |---|---|---|
+| v1.1 | 2026-09-08 | 记录 Plan-1 完成状态；Plan-2 扩展 Benchmark 最小闭环与 15 因子；纳入 OOS 有效性检验；冻结 Peer Group、MAR、Rf 与正式 Profile 权重 |
 | v1.0 | 2026-08-31 | 初始版本。定案四项实施期选择（纵向骨架 / React+TS / AKShare / PROVISIONAL 配置）；确立仓库三层分离与两个承重机制；界定 M1 边界（32 张表、8 个子阶段、三个刻意缺省）；登记 8 项风险与 9 项实施期待决项 |

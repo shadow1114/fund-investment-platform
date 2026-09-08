@@ -1,16 +1,226 @@
-# Evaluation Policy v1 —— MAR、评价周期、评价准入条件
+# Evaluation Policy v1 —— Peer Group、阈值解析、Benchmark 与评分权重
 # Owner: fund-service（01-system-architecture §8.2.1 第 1 子项）
 mar:
-  default:
-    value: 0.0
-    status: PROVISIONAL
-    source: "P1-19 / 上游 TBD-19 待投研定案，下游不得自行填充"
+  policy:
+    value: ZERO
+    status: DECIDED
+    source: "05-fund-evaluation/01 §16.3；2026-09-08 Plan-2 评审确认"
 risk_free_rate:
-  tenor:
-    value: 1Y
-    status: PROVISIONAL
-    source: "上游 TBD-18 待投研与数据共同确定"
-  currency:
-    value: CNY
-    status: PROVISIONAL
-    source: "上游 TBD-18"
+  currency_resolution:
+    value: FUND_BASE_CURRENCY
+    status: DECIDED
+    source: "03-data/01 §3.1.5.5"
+  tenor_resolution:
+    value: MATCH_EVALUATION_PERIOD
+    status: DECIDED
+    source: "03-data/01 §3.1.5.5"
+  missing_tenor:
+    value: LINEAR_INTERPOLATION
+    status: DECIDED
+    source: "03-data/01 §3.1.5.5"
+peer_group:
+  classification_scheme:
+    value: FIP_INTERNAL_L2
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  dimensions:
+    value: [CLASSIFICATION_CODE, BASE_CURRENCY]
+    status: DECIDED
+    source: "05-fund-evaluation/03 §3.4；2026-09-08 Plan-2 评审确认"
+  supported_classifications:
+    value: [ACTIVE_EQUITY, PASSIVE_EQUITY, BOND, HYBRID]
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  minimum_effective_sample:
+    value: 30
+    status: DECIDED
+    source: "01-product/02 §7；05-fund-evaluation/03 §9.3"
+benchmark:
+  active_equity:
+    value: CSI_300_TOTAL_RETURN
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  passive_equity:
+    value: CSI_300_TOTAL_RETURN
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认；基金级配置优先覆盖"
+  bond:
+    value: CHINA_BOND_COMPOSITE_FULL_PRICE
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  hybrid_equity_weight:
+    value: 0.60
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  hybrid_bond_weight:
+    value: 0.40
+    status: DECIDED
+    source: "2026-09-08 Plan-2 评审确认"
+  equity_index_type:
+    value: TOTAL_RETURN
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+  bond_index_type:
+    value: FULL_PRICE
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+factor_normalization:
+  value_field:
+    value: normalized_value
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+  scale:
+    value: [0, 100]
+    status: DECIDED
+    source: "2026-09-08 文档收敛确认"
+  beta_target_range:
+    active_equity:
+      value: [0.85, 1.15]
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    passive_equity:
+      value: [0.98, 1.02]
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    bond:
+      value: [0.90, 1.10]
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    hybrid:
+      value: [0.90, 1.10]
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+  tracking_error:
+    active_equity:
+      value: ACTIVE_INTENTION_REWARD
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    passive_equity:
+      value: LOWER_IS_BETTER
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    bond:
+      value: RISK_BUDGET_LIMIT_1_5_PERCENT
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    hybrid:
+      value: TACTICAL_TILT_INCENTIVE
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+scoring:
+  minimum_weighted_metrics:
+    value: 2
+    status: DECIDED
+    source: "05-fund-evaluation/02 §9.3"
+  minimum_data_completeness:
+    value: 0.80
+    status: DECIDED
+    source: "05-fund-evaluation/05 §6"
+  missing_method:
+    value: EXCLUDE_AND_RENORMALIZE
+    status: DECIDED
+    source: "05-fund-evaluation/02 §9.2"
+  active_equity:
+    alpha:
+      value: 0.30
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    information_ratio:
+      value: 0.30
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    tracking_error:
+      value: 0.05
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    beta:
+      value: 0.10
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    maximum_drawdown:
+      value: 0.15
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    expense_ratio:
+      value: 0.10
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+  passive_equity:
+    alpha:
+      value: 0.00
+      status: DECIDED
+      source: "2026-09-08 投研确认；被动型 Alpha 不评分"
+    information_ratio:
+      value: 0.00
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    tracking_error:
+      value: 0.40
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    beta:
+      value: 0.30
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    maximum_drawdown:
+      value: 0.05
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    expense_ratio:
+      value: 0.25
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+  bond:
+    alpha:
+      value: 0.00
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    information_ratio:
+      value: 0.00
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    tracking_error:
+      value: 0.10
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    beta:
+      value: 0.35
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    maximum_drawdown:
+      value: 0.35
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    expense_ratio:
+      value: 0.20
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+  hybrid:
+    alpha:
+      value: 0.20
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    information_ratio:
+      value: 0.15
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    tracking_error:
+      value: 0.15
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    beta:
+      value: 0.15
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    maximum_drawdown:
+      value: 0.25
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+    expense_ratio:
+      value: 0.10
+      status: DECIDED
+      source: "2026-09-08 投研确认"
+  r_squared:
+    value: DISPLAY_ONLY
+    status: DECIDED
+    source: "01-product/02 §13.5；2026-09-08 投研确认"

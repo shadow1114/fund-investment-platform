@@ -316,7 +316,7 @@ Peer Group = Fund Classification + effective_at + 参与规则
 
 | Period | 最低要求 |
 |---|---|
-| 全部周期 | 该周期内各 Factor 各自的 `Min Obs`（多数为 `<TBD-FD-3>`） |
+| 全部周期 | 该周期内各 Factor 各自的 `Min Obs`：窗口理论交易日数 90%；回归类另须至少 60 个共同日期配对观测 |
 | 基金成立时长 < 周期长度 | 该周期全部 Factor **`UNAVAILABLE`**，**不得**用成立至今年化冒充 |
 
 > **本域不新增最低数据要求** —— 它是 Factor 层的属性，本域只消费其结果。
@@ -497,7 +497,10 @@ RISK_FREE      → MAR 在窗口内是【序列】，且随基金计价币种不
 
 > **因此 `RISK_FREE` 模式在多币种 Peer Group 中不可用** —— 若将来启用该模式，Peer Group 的构建必须先按币种细分。这是切换模式前必须处理的前置条件，不是切换后再修的问题。
 
-> **已定案 · 2026-08-27**：保持 `fund_category × currency`，不再细分。见 `04-factor/03-factor-definition` §2.2.4。
+> **已定案 · 2026-09-08**：Peer Group 使用内部标准二级分类
+> `FIP_INTERNAL_L2 × base_currency`。M1 仅支持 `ACTIVE_EQUITY`、
+> `PASSIVE_EQUITY`、`BOND`、`HYBRID`；无法映射者标记
+> `UNSUPPORTED_CLASSIFICATION`，不得动态建组。见 Plan-2 设计 §3.1。
 >
 > **本域的连带约束**：粒度细于 Peer Group 会直接违反 §16.2 的组内一致性要求。因此本条不只是「暂不细分」，而是**细分的上限就是 Peer Group 的粒度**。
 
@@ -523,6 +526,14 @@ RISK_FREE      → MAR 在窗口内是【序列】，且随基金计价币种不
 | `minimum_data_requirements` | 最低数据要求（§11） |
 | **`mar_configuration`** | 按 `fund_category` × `currency` 的 MAR 取值 |
 | `risk_free_rate_convention` | 使用的 `(currency, tenor)` 口径 |
+
+### 17.1.1 M1 固定策略
+
+- `mar_policy = ZERO`，必须显式配置，不作为缺省兜底。
+- `risk_free_rate.currency = fund_share_class.base_currency`。
+- `risk_free_rate.tenor = evaluation_period`；缺期限时仅允许相邻期限线性插值。
+- Peer Group 最小有效样本数为 30。
+- Profile 权重以 `config/policy/evaluation/v1.yaml` 为机器可读权威来源。
 
 ### 17.2 与 Evaluation Profile 的关系
 
@@ -787,6 +798,7 @@ Fund Evaluation 是**度量**环节，**不产出 Total Score，也不做投资�
 | C-8 | 四类画像的指标集合与方向已定案，本域不得改动 | `02-business-requirements` §5.2.1 |
 | C-9 | Policy 变更不改写历史评价结果 | 上游 §9 原则六 |
 | C-10 | 本域**不引入 ML / AI / LLM** | 上游 §6.2.1、§9 原则十至十一 |
+| C-11 | M1 Peer Group 固定为内部二级分类 × 币种，未知分类不得动态建组 | Plan-2 设计 §3.1 |
 
 ---
 
@@ -801,7 +813,7 @@ Fund Evaluation 是**度量**环节，**不产出 Total Score，也不做投资�
 | FE-5 | 是否需要第五类 `Evaluation Profile`（FOF、可转债等） | 画像覆盖度 | 投研（`02-business-requirements` §5.2.1） |
 | ~~FE-6~~ | ~~`Ranking Policy Version` 与 `Classification Policy Version` 不在九项 Strategy Version 之内~~ —— **已定案**：与 `Evaluation Policy Version` 一并归入第 10 类 `Policy Version`（§21.3.1） | — | ✅ 已定案 2026-08-27 |
 
-> **上游遗留**：`<TBD-P1-1>` Peer Group 最小样本量、`<TBD-P1-2>` Peer Group 与 Profile 不一致时的处理、`<TBD-P1-22>` Beta 目标区间、`<TBD-P1-23>` 画像内权重分配。
+> **仍待后续阶段处理**：`<TBD-P1-22>` 非 M1 分类的 Beta 目标区间，以及是否扩展第五类 Evaluation Profile。Peer Group 最小样本、M1 分类/Profile 映射和画像权重已在 2026-09-08 Plan-2 评审关闭。
 
 ---
 
@@ -822,6 +834,7 @@ Fund Evaluation 是**度量**环节，**不产出 Total Score，也不做投资�
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.4** | 2026-09-08 | 冻结 M1 Peer Group 为内部二级分类 × 币种，限定四类 Profile；明确 MAR、Rf 解析和机器可读 Policy 来源 | Plan-2 设计 v1.0 |
 | **v1.3** | 2026-08-27 | **第二批定案（2 项）**。`FE-1` 多 Share Class **同时进入排名**，去重发生在 Universe 层（Policy D）—— 把去重提前到评价层等于在不知道哪一类更优之前先删掉一类；头部被同一产品多类别占据是真实现象，由展示层视图开关处理。`FE-3` **至少需 1Y 周期可评价**才产出总分，否则 `NOT_ELIGIBLE`（1M 收益仅 21 个交易日，据此产出总分是在给运气打分）；短周期因子仍照常计算。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.2** | 2026-08-27 | **`TBD-FE-4` 关闭**。§16.3 定案 —— `Evaluation Policy` 新增 `mar_configuration` 段，`mar_policy` 三模式且**必填无默认**（§16.3.1：`ZERO` 是推荐取值不是兜底，设默认会让配置遗漏静默产出看起来正常的 Sortino）；新增 §16.3.2 —— `RISK_FREE` 模式使 MAR 变成序列且随币种不同，**在多币种 Peer Group 中不可用**，启用前须先按币种细分 Peer Group。详见 `TBD-resolution.md` Policy ② | `04-factor/03-factor-definition` v1.2 |
 | **v1.1** | 2026-08-27 | **`TBD-FE-6` 关闭**。§21.3 新增 §21.3.1 —— `Evaluation` / `Ranking` / `Classification` 三个 Policy Version 归入新设的第 10 类 `Policy Version`（与九项 Strategy Version 并列），决策快照须同时引用两个组合字段。本域各结果表携带 policy version 的既有做法不变。详见 `TBD-resolution.md` Policy ⑧ | `02-business-requirements` v2.4、`02-architecture/01-system-architecture` v2.4 |

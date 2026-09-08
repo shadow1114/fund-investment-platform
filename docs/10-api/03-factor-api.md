@@ -190,7 +190,7 @@ Correlation / Covariance 的 usage 不含 SCORING
 
 #### 4.2.1 `effectiveness_summary` 是摘要不是全量（v1.2 新增）
 
-> **由 Policy ⑥ 引入**（`04-factor/07-factor-validation` §10.3.1、`TBD-resolution.md` Policy ⑥）：因子权重由有效性检验产出，调用方需要知道某因子当前是否有效。
+> **由 Policy ⑥ 引入，后按 2026-09-08 决策收敛**：有效性检验决定因子是否具备评分资格，不生成权重；调用方仍需知道某因子当前是否有效。
 
 **三条约定**：
 
@@ -266,7 +266,7 @@ Tracking Error  → STRATEGY_DEPENDENT（随 Evaluation Profile 变化）
       "factor_id": "F-RAP-001",
       "window": "1Y",
       "raw_value": 1.24,
-      "normalized_value": 0.87,
+      "normalized_value": 87.0,
       "status": "VALID",
       "as_of_date": "2026-08-24",
       "risk_free_rate_ref": {
@@ -280,7 +280,7 @@ Tracking Error  → STRATEGY_DEPENDENT（随 Evaluation Profile 变化）
       "raw_value": null,
       "normalized_value": null,
       "status": "UNAVAILABLE",
-      "unavailable_reason": "MAR_NOT_CONFIGURED",
+      "reason_code": "MAR_NOT_CONFIGURED",
       "evaluation_policy_version": null
     },
     {
@@ -289,8 +289,8 @@ Tracking Error  → STRATEGY_DEPENDENT（随 Evaluation Profile 变化）
       "raw_value": null,
       "normalized_value": null,
       "status": "UNAVAILABLE",
-      "unavailable_reason": "ZERO_MAX_DRAWDOWN",
-      "unavailable_note": "窗口内无回撤，比率无法计算"
+      "reason_code": "ZERO_MAX_DRAWDOWN",
+      "reason_message": "窗口内无回撤，比率无法计算"
     }
   ],
   "meta": {
@@ -313,10 +313,10 @@ Tracking Error  → STRATEGY_DEPENDENT（随 Evaluation Profile 变化）
 | 值 | 用途 |
 |---|---|
 | **`raw_value`** | 展示、人工核对、**筛选阈值** |
-| **`normalized_value`** | 评分、优化输入 |
+| **`normalized_value`** | 评分、Ranking 与 Tier，范围 `[0,100]` |
 
 ```
-只返回 Normalized → 用户看不懂"0.87"是什么意思
+只返回 Normalized → 用户看不懂"87.0"是什么意思
 只返回 Raw        → 下游各自标准化，破坏一致性
 ```
 
@@ -353,7 +353,7 @@ MAR 是评价配置 → 随 Evaluation Policy 不同
 
 > **沿用 `04-factor/03-factor-definition`：** IR 的公式是 `(R_p − R_b) / TE`。**API 不得为它返回 `risk_free_rate_ref`** —— 那会误导消费者以为 IR 受利率影响。
 
-#### 4.3.5 `unavailable_reason` 必须区分四类 ⚠️
+#### 4.3.5 `reason_code` 必须区分四类 ⚠️
 
 | `status` | 含义 | 是否需修复 |
 |---|---|---|
@@ -366,7 +366,7 @@ MAR 是评价配置 → 随 Evaluation Policy 不同
 
 **`UNAVAILABLE` 的原因需进一步细分**，因为它们的业务含义不同：
 
-| `unavailable_reason` | 含义 |
+| `reason_code` | 含义 |
 |---|---|
 | `INSUFFICIENT_HISTORY` | 成立时长不足 |
 | `BENCHMARK_UNAVAILABLE` | REL 类整类不可算 |
@@ -390,7 +390,7 @@ MDD = 0 意味着【从未回撤】—— 同上
 若不加说明，用户会以为"数据缺失"或"基金有问题"
 ```
 
-**API 通过 `unavailable_note` 提供人可读的说明**，供展示层直接使用。
+**API 通过 `reason_message` 提供人可读的说明**，供展示层直接使用。
 
 #### 4.3.7 `MAR_NOT_CONFIGURED` 与 `mar_policy = ZERO` 是相反的两件事（v1.1）
 
@@ -399,7 +399,7 @@ MDD = 0 意味着【从未回撤】—— 同上
 | 情形 | 响应 |
 |---|---|
 | `mar_policy = ZERO`（已配置） | **正常返回 Sortino**，`evaluation_policy_version` 非空 |
-| `mar_policy` 未配置 | `status = UNAVAILABLE`，`unavailable_reason = MAR_NOT_CONFIGURED` |
+| `mar_policy` 未配置 | `status = UNAVAILABLE`，`reason_code = MAR_NOT_CONFIGURED` |
 
 > **两者算出的 Sortino 数值会完全相同**（MAR 都是 0），但只有前者是有效结果。API **不得**在未配置时按 0 计算并正常返回 —— 那会让调用方拿到一个看起来完全正常、实则标尺从未被确认过的值。
 
@@ -524,7 +524,7 @@ Max fund_ids × factor_ids = TBD
 | **`raw_value` 与 `normalized_value` 成对返回** | §4.3.1 |
 | **`normalized_value` 必须附 Peer Group 上下文** | §4.3.2 |
 | **依赖 MAR 的因子必须附 `evaluation_policy_version`** | §4.3.3 |
-| **`unavailable_reason` 是 `UNAVAILABLE` 时的必备字段** | §4.3.5 |
+| **`reason_code` 是 `INVALID` / `UNAVAILABLE` 时的必备字段** | §4.3.5 |
 | **`meta.series_semantics`** | 序列端点必备（§4.5.1） |
 
 ---
@@ -587,7 +587,7 @@ Authorization: Bearer <token>
       "factor_id": "F-RAP-001",
       "window": "1Y",
       "raw_value": 1.24,
-      "normalized_value": 0.87,
+      "normalized_value": 87.0,
       "status": "VALID",
       "risk_free_rate_ref": { "currency": "CNY", "tenor": "1Y", "effective_at": "2026-08-23", "version": 1, "rate_source_quality": "INTERPOLATED" }
     },
@@ -597,8 +597,8 @@ Authorization: Bearer <token>
       "raw_value": null,
       "normalized_value": null,
       "status": "UNAVAILABLE",
-      "unavailable_reason": "MAR_NOT_CONFIGURED",
-      "unavailable_note": "MAR 尚未在评价政策中配置，Sortino 无法计算"
+      "reason_code": "MAR_NOT_CONFIGURED",
+      "reason_message": "MAR 尚未在评价政策中配置，Sortino 无法计算"
     },
     {
       "factor_id": "F-RAP-003",
@@ -606,8 +606,8 @@ Authorization: Bearer <token>
       "raw_value": null,
       "normalized_value": null,
       "status": "UNAVAILABLE",
-      "unavailable_reason": "ZERO_MAX_DRAWDOWN",
-      "unavailable_note": "该窗口内基金未出现回撤，Calmar 比率无法计算——这是优秀表现，不是数据缺失"
+      "reason_code": "ZERO_MAX_DRAWDOWN",
+      "reason_message": "该窗口内基金未出现回撤，Calmar 比率无法计算——这是优秀表现，不是数据缺失"
     }
   ],
   "meta": {
@@ -623,7 +623,7 @@ Authorization: Bearer <token>
 }
 ```
 
-> **注意第三条的 `unavailable_note`** —— 它把"好消息型不可用"翻译成人可读的说明，避免用户误判为数据问题（§4.3.6）。
+> **注意第三条的 `reason_message`** —— 它把"好消息型不可用"翻译成人可读的说明，避免用户误判为数据问题（§4.3.6）。
 
 ### 7.2 错误示例：不支持的窗口
 
@@ -700,7 +700,7 @@ GET /api/v1/funds/F001/factors/F-RAP-001?window=10Y
 | D-8 | **依赖 MAR 的因子必须附 `evaluation_policy_version`** | 它是标识而非溯源 |
 | D-9 | **IR 不返回 `risk_free_rate_ref`** | IR 不依赖 `R_f` |
 | **D-10** | **`risk_free_rate_ref` 必含 `tenor` 与 `rate_source_quality`** | 前者用于验证期限匹配（同基金 1Y 与 3Y Sharpe 用不同 tenor），后者用于区分「基金确实差」与「`R_f` 是插出来的」 |
-| D-10 | **`unavailable_reason` 细分为八类** | 业务含义不同 |
+| D-10 | **`reason_code` 细分为八类** | 业务含义不同 |
 | D-11 | **"好消息型"不可用须附人可读说明** | 否则被误判为数据缺失 |
 | D-12 | Rolling 序列中的 `UNAVAILABLE` **不中断序列** | 沿用 `04-factor` |
 | D-13 | **`series_semantics` 必须标明** | 两种"历史"语义不同 |
@@ -732,7 +732,7 @@ GET /api/v1/funds/F001/factors/F-RAP-001?window=10Y
 | ~~FTA-1~~ | ~~是否需要按需触发的 Factor 计算 API~~ —— **已定案**：第一阶段【不】提供按需触发的 Factor 计算 API | — | ✅ 2026-08-27 |
 | FTA-2 | 本域各端点的最终路径与参数名 | 契约 | 接口评审 |
 | ~~FTA-3~~ | ~~批量查询的规模上限与传参方式~~ —— **已定案**：批量查询上限 = 500 个 `(fund, factor, window)` 组合；超限改用 POST | — | ✅ 2026-08-27 |
-| FTA-4 | `unavailable_note` 的文案是否需多语言 | 展示层 | 产品 |
+| FTA-4 | `reason_message` 的文案是否需多语言 | 展示层 | 产品 |
 
 ---
 
@@ -754,4 +754,4 @@ GET /api/v1/funds/F001/factors/F-RAP-001?window=10Y
 | **v1.3** | 2026-08-27 | **第二批定案（2 项）**。`FTA-1` **不提供按需触发的 Factor 计算 API** —— 按需计算的结果没有快照归属，用「现在」会产生孤立值、用历史时点等于绕过版本治理；`FTA-3` 批量查询上限 500 组合、超限改用 POST（GET 的 URL 长度在数百个三元组时已触顶）。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.2** | 2026-08-27 | **Policy ⑥ 同步**。§4.2 因子定义响应新增 `effectiveness_summary`（最近一次 OOS 结论 + `peer_group_id` + `validation_policy_version`）；新增 §4.2.1 —— 三条约定并明确 **`latest_verdict = null`（未检验）不等于 `INVALID`（已判无效）**，两者的下游行为不同。原 §4.2.1~§4.2.4 顺移。详见 `TBD-resolution.md` Policy ⑥ | `04-factor/07-factor-validation` v1.2、`11-database/03-erd` v1.1 |
 | **v1.1** | 2026-08-27 | **Policy ①② 同步**。<br/>**Policy ②**：新增 §4.3.7 —— `MAR_NOT_CONFIGURED` 与 `mar_policy = ZERO` 是相反的两件事，两者算出的 Sortino 数值相同但只有后者有效；API 不得在未配置时按 0 计算并正常返回。<br/>**Policy ①**。`risk_free_rate_ref` 补 `rate_source_quality` 字段（示例同步）；新增 D-10；补充说明 Beta 的 `R_f` 依赖是形式上的，但因 Alpha 与 Beta 出自同一回归，两者溯源必须一致。详见 `TBD-resolution.md` Policy ① | `04-factor/03-factor-definition` v1.2、`11-database/04` v1.5 |
-| v1.0 | 2026-08-27 | 初始版本。**§2.1 第一阶段不提供主动计算 API** 及三条理由；**§4.1.2 `usage` 决定因子能出现在哪里**——Correlation 不提供单基金端点；**§4.2.1 不重述公式只提供引用**；**§4.2.2 `preference_direction` 四取值不得简化**并要求返回上下文依赖；§4.2.3 边界条件必须暴露；**§4.3.1–4.3.3 `raw_value`/`normalized_value` 成对返回、Peer Group 上下文、依赖 MAR 者须附 `evaluation_policy_version`**（标识 vs 溯源的区分）；**§4.3.4 IR 不返回 `risk_free_rate_ref`**；**§4.3.5 `unavailable_reason` 八类细分**、**§4.3.6 "好消息型"不可用须附人可读说明**；**§4.5.1 两种"历史"语义的区分**与 `series_semantics`；§4.6.2 批量部分失败不整体失败；**§6.1–6.2 `UNAVAILABLE` 与 `INVALID` 均返回 200** | `04-factor` v1.0–v1.1、`10-api/01-api-overview.md` v1.0 |
+| v1.0 | 2026-08-27 | 初始版本。**§2.1 第一阶段不提供主动计算 API** 及三条理由；**§4.1.2 `usage` 决定因子能出现在哪里**——Correlation 不提供单基金端点；**§4.2.1 不重述公式只提供引用**；**§4.2.2 `preference_direction` 四取值不得简化**并要求返回上下文依赖；§4.2.3 边界条件必须暴露；**§4.3.1–4.3.3 `raw_value`/`normalized_value` 成对返回、Peer Group 上下文、依赖 MAR 者须附 `evaluation_policy_version`**（标识 vs 溯源的区分）；**§4.3.4 IR 不返回 `risk_free_rate_ref`**；**§4.3.5 原不可用原因字段现统一为 `reason_code` 并细分八类**、**§4.3.6 "好消息型"不可用须附人可读说明**；**§4.5.1 两种"历史"语义的区分**与 `series_semantics`；§4.6.2 批量部分失败不整体失败；**§6.1–6.2 `UNAVAILABLE` 与 `INVALID` 均返回 200** | `04-factor` v1.0–v1.1、`10-api/01-api-overview.md` v1.0 |

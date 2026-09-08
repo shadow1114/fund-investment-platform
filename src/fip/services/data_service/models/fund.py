@@ -13,6 +13,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -164,6 +165,44 @@ class FundManagerAssignment(Base, IntervalMixin):
     __table_args__ = (
         *interval_temporal_check_constraints("fund_manager_assignment"),
         interval_check("fund_manager_assignment"),
+        # 04-database-design §6.3 明列的三件事：一条 EXCLUDE + 两个索引。
+        #
+        # 【Ruling PF-6 已裁定】排他键 = (fund_id, manager_id, daterange)，
+        # 【不需要】role 列。理由（逐条抄自裁定）：01-postgresql §8.4 说
+        # share_class_id、04-database-design §6.3 说 fund_id，ORM 是 fund_id ——
+        # 随 ORM 与 §6.3，用 fund_id；该形态【允许共同管理】（同一基金同期
+        # 多位经理各占一行），故不需要 role 列来豁免；2026-08-27 那条
+        # 「EXCLUDE 限于 role='LEAD'」针对的是退化的「仅 fund_id + daterange」
+        # 形态，不适用于此。
+        #
+        # ⚠️ 排他键必须【同时含 manager_id】。01-postgresql §8.4 的
+        # 2026-08-27 已定案否掉的是退化形式
+        # `EXCLUDE (fund_id WITH =, range WITH &&)` —— 那个形式只按基金排他，
+        # 会直接拒绝合法的共管数据（同一基金同期多位经理）。带上 manager_id
+        # 之后排他的是「同一经理对同一基金的任职区间重叠」，共管不受影响，
+        # 这正是 §8.4 正文那一行与 §6.3 表格的写法。因此本仓库【不需要】
+        # role='LEAD' 部分约束，也就不需要新增 role 列。
+        #
+        # ⚠️ 上游字段名不一致：01-postgresql §8.4 写的是 share_class_id，
+        # 04-database-design §6.3 写的是 fund_id，而 ORM 的列是 fund_id
+        # （任职挂在产品级）。以 ORM 现状 + §6.3 为准，如实登记该差异。
+        #
+        # G-16：迁移 0016 在库里建了这三个对象，ORM 必须同时声明 ——
+        # 否则下一次 autogenerate 会把它们判成待删除对象（本仓库已被这个
+        # 形状咬出过三次误删迁移）。tests/integration/test_autogenerate_gate.py
+        # 是这条规矩的机器闸门。
+        # 下面这行的 type: ignore —— SQLAlchemy 的 ExcludeConstraint 至今没有
+        # 类型标注，mypy strict 会报 no-untyped-call。忽略范围精确到这一次
+        # 调用，不放宽整个模块、也不放宽整条规则。
+        ExcludeConstraint(  # type: ignore[no-untyped-call]
+            ("fund_id", "="),
+            ("manager_id", "="),
+            (text("daterange(valid_from, valid_to, '[)')"), "&&"),
+            name="ex_fma_no_overlap",
+            using="gist",
+        ),
+        Index("idx_fma_manager_valid_from", "manager_id", "valid_from"),
+        Index("idx_fma_fund_valid_from", "fund_id", "valid_from"),
         {"schema": "fund"},
     )
 
@@ -199,6 +238,14 @@ class FundStatusHistory(Base, IntervalMixin):
     __table_args__ = (
         *interval_temporal_check_constraints("fund_status_history"),
         interval_check("fund_status_history"),
+        # 状态历史每个份额类别只有一条「当前状态」，键就是 share_class_id
+        # （迁移 0016）。
+        Index(
+            "uq_fsh_open_interval",
+            "share_class_id",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
+        ),
         {"schema": "fund"},
     )
 
@@ -216,8 +263,18 @@ class FundFee(Base, IntervalMixin):
 
     __tablename__ = "fund_fee"
     __table_args__ = (
-        *interval_temporal_check_constraints("fund_fee"),
+        *temporal_check_constraints("fund_fee"),
         interval_check("fund_fee"),
+        # 「至多一条开放区间」的部分唯一索引（迁移 0016）。交接项四明写
+        # 「唯一性键不一定只是外键，需逐表判断」：费率是【每种 fee_type 各有
+        # 一条】开放区间，键必须是 (share_class_id, fee_type) —— 只用
+        # share_class_id 会把「管理费 + 托管费同时开放」判成违规，那是正常数据。
+        Index(
+            "uq_fund_fee_open_interval",
+            "share_class_id", "fee_type",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL"),
+        ),
         {"schema": "fund"},
     )
 
