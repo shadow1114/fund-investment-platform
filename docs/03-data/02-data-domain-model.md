@@ -307,7 +307,7 @@ flowchart TD
 | `source` | 来源优先级（官方基准 / 官方成分 / 策略指定 / 分类默认 / 系统兜底） |
 | `mapping_rule_version` | 映射规则版本 |
 
-### 7.4 价格指数 vs 全收益指数
+### 7.4 Benchmark 指数类型
 
 > **必须明确区分，且不可混用。**
 
@@ -315,12 +315,13 @@ flowchart TD
 |---|---|---|
 | 价格指数（Price Index） | 不含成分股分红 | 长期低估基准收益 → **高估基金 Alpha** |
 | 全收益指数（Total Return Index） | 含分红再投资 | 与复权净值口径一致 |
+| 全价指数（Full Price Index） | 债券净价变动 + 应计利息 | M1 债券与 Hybrid 债券 Component 的指定口径 |
 
 基金净值已含分红再投资，因此**与全收益指数比较才是同口径**。若用价格指数作基准，会系统性高估全部基金的超额收益。
 
-> **已定案 · 2026-08-27**：全收益指数。见 Policy B 与 `DS-6`。
+> **定案 · 2026-09-08**：权益 Benchmark 使用 `TOTAL_RETURN`，债券 M1 使用中债综合全价指数 `FULL_PRICE`。Hybrid 保留两类 Component 及其权重。
 >
-> **本域的动作**：`Benchmark` 实体补 `index_type` 属性；`benchmark_mapping` 映射到 `PRICE` 类型时须触发校验告警。
+> **本域的动作**：`Benchmark` 实体的 `index_type` 至少支持 `PRICE`、`TOTAL_RETURN`、`FULL_PRICE`；权益映射到 `PRICE` 时须阻断相关 Factor。
 
 ---
 
@@ -638,7 +639,7 @@ Data Domain Model 由 **13 个核心实体 + 1 个派生实体**构成，四个�
 | DM-4 | ETF 流动性指标的具体项与来源 | `01-data-source`、`05-fund-evaluation` | 投研 + 数据 |
 | DM-5 | 基金合并时被合并方持仓的处理规则 | `06-portfolio`（退出规则） | 组合管理 |
 
-> **DM-1 与 DM-2 影响面最大**：前者决定分析标的的粒度与 Peer Group 构成，后者决定全部相对指标的基线。两者未定时，下游只能按"Share Class 粒度 + 全收益指数"的默认假设推进，并在确认后复核。
+> **DM-1 与 DM-2 已定案**：分析粒度为 Share Class；Benchmark 类型为权益 `TOTAL_RETURN`、债券 M1 `FULL_PRICE`，Hybrid 保留两类 Component 及权重。
 
 ---
 

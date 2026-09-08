@@ -263,7 +263,7 @@ class FundFee(Base, IntervalMixin):
 
     __tablename__ = "fund_fee"
     __table_args__ = (
-        *interval_temporal_check_constraints("fund_fee"),
+        *temporal_check_constraints("fund_fee"),
         interval_check("fund_fee"),
         # 「至多一条开放区间」的部分唯一索引（迁移 0016）。交接项四明写
         # 「唯一性键不一定只是外键，需逐表判断」：费率是【每种 fee_type 各有

@@ -290,13 +290,13 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
 {
   "date": "2024-03-15",
   "nav": null,
-  "unavailable_reason": "DISTRIBUTION_RECORD_MISSING"
+  "reason_code": "DISTRIBUTION_RECORD_MISSING"
 }
 ```
 
 | # | 约定 |
 |---|---|
-| 1 | `nav_type=ADJUSTED` 时，不可得的点位 `nav` 返回 `null` 并给出 `unavailable_reason`，**不跳过该日期** —— 跳过会让调用方误以为当日无交易 |
+| 1 | `nav_type=ADJUSTED` 时，不可得的点位 `nav` 返回 `null` 并给出 `reason_code`，**不跳过该日期** —— 跳过会让调用方误以为当日无交易 |
 | 2 | `nav_type=RAW` 时不受影响，原始净值永远可得 |
 | 3 | `meta` 中给出本次结果集的 `unavailable_count`，便于调用方判断序列可用性 |
 
@@ -329,7 +329,7 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
         "factor_id": "F-RAP-001",
         "window": "1Y",
         "raw_value": 1.24,
-        "normalized_value": 0.87,
+        "normalized_value": 87.0,
         "status": "VALID",
         "direction": "HIGHER_IS_BETTER"
       },
@@ -339,7 +339,7 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
         "raw_value": null,
         "normalized_value": null,
         "status": "UNAVAILABLE",
-        "unavailable_reason": "MAR_NOT_CONFIGURED"
+        "reason_code": "MAR_NOT_CONFIGURED"
       }
     ]
   },
@@ -403,10 +403,10 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
         "factor_id": "F-RAP-001",
         "window": "1Y",
         "raw_value": 1.24,
-        "normalized_score": 87.0,
+        "normalized_value": 87.0,
         "direction": "HIGHER_IS_BETTER",
         "weight": 0.3333,
-        "weight_source": "EQUAL_WITHIN_VALID",
+        "weight_source": "PROFILE_FIXED_V1",
         "effectiveness_verdict": "VALID",
         "weighted_contribution": 29.0,
         "sub_score": "risk_adjusted_score"
@@ -423,7 +423,7 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
       {
         "factor_id": "F-RAP-002",
         "status": "UNAVAILABLE",
-        "unavailable_reason": "MAR_NOT_CONFIGURED",
+        "reason_code": "MAR_NOT_CONFIGURED",
         "original_weight": 0.10,
         "reallocated_to": [
           { "factor_id": "F-RAP-001", "delta_weight": 0.06 },
@@ -456,16 +456,16 @@ date_from=2022-01-01, date_to=2022-12-31, as_of_date=2023-01-15
 
 | 要求 | 理由 |
 |---|---|
-| **必须含 `raw_value`** | 只有标准化值时用户看不懂"0.87 分"从何而来 |
+| **必须含 `raw_value`** | 只有标准化值时用户看不懂"87.0 分"从何而来 |
 | **被排除的因子也要留痕** | 否则无法解释"为什么 Sharpe 的贡献比配置的权重高" |
 
 #### 4.5.3 权重来源必须标注（v1.4 新增）
 
-> **定案 · 2026-08-27**：因子权重由有效性检验产出（`02-business-requirements` §5.2.1.1、`05-fund-evaluation/02` §8.4.1、`TBD-resolution.md` Policy ⑥）。
+> **定案 · 2026-09-08**：M1 权重来自 `PROFILE_FIXED_V1`；有效性检验只决定指标是否具备评分资格，不生成权重。
 
 | 字段 | 取值 | 说明 |
 |---|---|---|
-| **`weight_source`** | `EQUAL_WITHIN_VALID` / `OPTIMIZED` | 第一版恒为前者 |
+| **`weight_source`** | `PROFILE_FIXED_V1` / `OPTIMIZED` | M1 恒为前者；后者仅为未来扩展 |
 | **`effectiveness_verdict`** | `VALID` / `INVALID` | 该因子在本次检验中的判定 |
 
 **两条要求**：
@@ -1006,8 +1006,9 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
-| **v1.4** | 2026-08-27 | **Policy ⑥ 同步**。§4.5 归因新增 `weight_source`（`EQUAL_WITHIN_VALID`/`OPTIMIZED`）与 `effectiveness_verdict`，示例补一条 `EXCLUDED` 因子；新增 §4.5.3 —— `INVALID` 因子须在归因中留痕，`EXCLUDED`（因子无效，全体一致）与 `UNAVAILABLE`（该基金缺数据）是不同状态；新增 §4.5.4 —— 检验未产出时 `score_status = VALIDATION_PENDING` 且不返回分数。原 §4.5.3 顺移为 §4.5.5。详见 `TBD-resolution.md` Policy ⑥ | `05-fund-evaluation/02` v1.1 |
+| **v1.5** | 2026-09-08 | `weight_source` 第一版枚举改为 `PROFILE_FIXED_V1`；保留 `VALIDATION_PENDING`，明确 OOS 检验决定使用资格而非权重 | Plan-2 设计 v1.0、`05-fund-evaluation/02` v1.3 |
+| **v1.4** | 2026-08-27 | **Policy ⑥ 同步（后由 2026-09-08 决策替代权重来源）**。§4.5 归因新增 `weight_source` 与 `effectiveness_verdict`，示例补一条 `EXCLUDED` 因子；新增 §4.5.3 —— `INVALID` 因子须在归因中留痕，`EXCLUDED`（因子无效，全体一致）与 `UNAVAILABLE`（该基金缺数据）是不同状态；新增 §4.5.4 —— 检验未产出时 `score_status = VALIDATION_PENDING` 且不返回分数。M1 当前 `weight_source` 固定为 `PROFILE_FIXED_V1`。 | `05-fund-evaluation/02` v1.1 |
 | **v1.3** | 2026-08-27 | **Policy ⑤ 同步**。§6.1 改写 —— 样本量不足（`n_effective < 30`）返回 200 但**横截面派生量为 `null`**，附 `*_status = INSUFFICIENT_SAMPLE` 与 `n_effective`；原始因子值照常返回；`confidence_flag` 不再承担样本量不足的表达。D-17 同步。详见 `TBD-resolution.md` Policy ⑤ | `05-fund-evaluation/03` v1.1、`05-fund-evaluation/04` v1.1 |
 | **v1.2** | 2026-08-27 | **Policy ⑩ 同步**。新增 §4.2.2 —— `fee_structure` 必须返回包含关系；`included_in_nav` 是**字符串三值**而非 JSON 布尔（布尔表达不了 `UNKNOWN`）；只返回费率不返回包含关系是错误响应。详见 `TBD-resolution.md` Policy ⑩ | `02-business-requirements` v2.5 §21.7.1 |
-| **v1.1** | 2026-08-27 | **`TBD-DN-3` 关闭后的同步**。§4.3.2 定案 —— `adjustment_convention` 固定为 `BACKWARD` 且仍须返回；新增 §4.3.3 —— `nav_adjusted` 不可得时 `nav` 返回 `null` 并给 `unavailable_reason`，**不跳过日期、不回填原始净值**（跳过会被误读为当日无交易，回填会制造虚假暴跌）。详见 `TBD-resolution.md` Policy ③ | `03-data/05-data-normalization` v1.2 |
+| **v1.1** | 2026-08-27 | **`TBD-DN-3` 关闭后的同步**。§4.3.2 定案 —— `adjustment_convention` 固定为 `BACKWARD` 且仍须返回；新增 §4.3.3 —— `nav_adjusted` 不可得时 `nav` 返回 `null` 并给出原因码（现统一字段名为 `reason_code`），**不跳过日期、不回填原始净值**（跳过会被误读为当日无交易，回填会制造虚假暴跌）。详见 `TBD-resolution.md` Policy ③ | `03-data/05-data-normalization` v1.2 |
 | v1.0 | 2026-08-27 | 初始版本。粒度定为 Share Class；**§4.2.1 Benchmark 须返回 `mapping_version` 且 Composite 不得简化**；**§4.2.2 `lifecycle_status` 与 `investment_eligibility` 必须同时返回**；**§4.3.1 `date_from/to` 与 `as_of_date` 正交**的语义澄清；§4.4.2 `data_completeness` 为必备字段；**§4.5.2 归因须含 `raw_value` 与被排除因子**、§4.5.3 `total_score` 是无量纲相对量；**§4.6.1 `n_effective` 与 `peer_group_size` 须同时返回**、§4.6.2 `percentile_convention` 必须返回、**§4.6.3 历史排名须标注 `ranking_source`**；**§4.7.1 `fund_tier` 不是 `fund_classification`**、**§4.7.2 `peer_group_context` 为强制字段**；**§4.9.1 被排除基金须列出全部未通过条件**；**§4.10.1 不提供按 Score 筛选 Peer Group 成员**；**§6.1 样本量不足不是错误** | `05-fund-evaluation` v1.0、`03-data` v2.2、`10-api/01-api-overview.md` v1.0 |
