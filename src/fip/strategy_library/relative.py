@@ -31,6 +31,11 @@ def calculate_relative_factors(
     annualization: int,
     minimum_observations: int = 60,
 ) -> tuple[FactorResult, ...]:
+    if not risk_free_rates:
+        return tuple(
+            unavailable(fid, "RISK_FREE_UNAVAILABLE")
+            for fid in ("F-REL-002", "F-REL-003", "F-REL-004", "F-REL-005", "F-STAB-002")
+        )
     rows = align_return_series(fund_returns, benchmark_returns, risk_free_rates)
     if len(rows) < minimum_observations:
         return tuple(

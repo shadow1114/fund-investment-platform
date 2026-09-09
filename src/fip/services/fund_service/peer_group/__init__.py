@@ -1,8 +1,16 @@
-from fip.services.fund_service.peer_group.builder import build_peer_groups
+from fip.services.fund_service.peer_group.builder import build_peer_groups, excluded_candidates
 from fip.services.fund_service.peer_group.models import (
     PeerGroupCandidate,
     PeerGroupDraft,
+    PeerGroupExclusion,
     PeerGroupKey,
 )
 
-__all__ = ["PeerGroupCandidate", "PeerGroupDraft", "PeerGroupKey", "build_peer_groups"]
+__all__ = [
+    "PeerGroupCandidate",
+    "PeerGroupDraft",
+    "PeerGroupExclusion",
+    "PeerGroupKey",
+    "build_peer_groups",
+    "excluded_candidates",
+]

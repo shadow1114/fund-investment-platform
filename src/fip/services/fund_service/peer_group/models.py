@@ -20,3 +20,10 @@ class PeerGroupCandidate:
 class PeerGroupDraft:
     key: PeerGroupKey
     member_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PeerGroupExclusion:
+    share_class_id: int
+    status: str
+    reason: str
