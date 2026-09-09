@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -82,6 +83,10 @@ class FundScore(Base):
         UniqueConstraint(
             "evaluation_id", "share_class_id", name="uq_fund_score_evaluation_share_class"
         ),
+        CheckConstraint(
+            "data_completeness >= 0 AND data_completeness <= 1",
+            name="ck_fund_score_data_completeness",
+        ),
         {"schema": "evaluation"},
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -94,6 +99,8 @@ class FundScore(Base):
     value: Mapped[float | None] = mapped_column(Numeric(24, 16))
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason_code: Mapped[str | None] = mapped_column(String(64))
+    data_completeness: Mapped[float] = mapped_column(Numeric(12, 8), nullable=False)
+    weight_source: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class FundScoreAttribution(Base):
@@ -151,7 +158,11 @@ class FundTier(Base):
 class FundUniverseSnapshot(Base):
     __tablename__ = "fund_universe_snapshot"
     __table_args__ = (
-        UniqueConstraint("decision_id", name="uq_fund_universe_snapshot_decision"),
+        UniqueConstraint(
+            "decision_id",
+            "evaluation_id",
+            name="uq_fund_universe_snapshot_decision_evaluation",
+        ),
         {"schema": "evaluation"},
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

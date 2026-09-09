@@ -18,7 +18,10 @@ class NormalizedFactorValue:
 
 
 def normalize_factor(
-    values: Sequence[tuple[int, float]], direction: str, minimum_sample: int
+    values: Sequence[tuple[int, float]],
+    direction: str,
+    minimum_sample: int,
+    target_range: tuple[float, float] | None = None,
 ) -> tuple[NormalizedFactorValue, ...]:
     """Return percentile values without mutating or replacing supplied raw values."""
     ordered = tuple(sorted(values))
@@ -33,14 +36,27 @@ def normalize_factor(
             )
             for share_class_id, raw_value in ordered
         )
-    if direction not in {"HIGHER_IS_BETTER", "LOWER_IS_BETTER"}:
+    if direction not in {"HIGHER_IS_BETTER", "LOWER_IS_BETTER", "TARGET_RANGE"}:
         raise ValueError(f"unsupported normalization direction: {direction}")
-    ranked = sorted(ordered, key=lambda item: item[1], reverse=direction == "HIGHER_IS_BETTER")
+    if direction == "TARGET_RANGE":
+        if target_range is None or target_range[0] > target_range[1]:
+            raise ValueError("TARGET_RANGE normalization requires an ordered target range")
+        lower, upper = target_range
+
+        def rank_value(item: tuple[int, float]) -> float:
+            return max(lower - item[1], 0.0, item[1] - upper)
+
+        ranked = sorted(ordered, key=rank_value)
+    else:
+        def rank_value(item: tuple[int, float]) -> float:
+            return item[1]
+
+        ranked = sorted(ordered, key=rank_value, reverse=direction == "HIGHER_IS_BETTER")
     ranks: dict[int, float] = {}
     index = 0
     while index < len(ranked):
         end = index + 1
-        while end < len(ranked) and ranked[end][1] == ranked[index][1]:
+        while end < len(ranked) and rank_value(ranked[end]) == rank_value(ranked[index]):
             end += 1
         average_rank = (index + 1 + end) / 2
         for share_class_id, _ in ranked[index:end]:

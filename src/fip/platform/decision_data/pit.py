@@ -141,6 +141,13 @@ class BenchmarkPitRepository(Protocol):
         self, index_id: int, date_from: dt.date, date_to: dt.date
     ) -> tuple[tuple[dt.date, Decimal, int, str], ...]: ...
 
+    def composite_series(
+        self,
+        resolution: BenchmarkResolution,
+        date_from: dt.date,
+        date_to: dt.date,
+    ) -> tuple[tuple[dt.date, Decimal | None, str], ...]: ...
+
 
 class PitDataContext:
     """决策上下文的数据视图。

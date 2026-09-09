@@ -102,6 +102,8 @@ class FactorValue(Base):
     reason_code: Mapped[str | None] = mapped_column(String(64))
     raw_value: Mapped[float | None] = mapped_column(Numeric(24, 16))
     normalized_value: Mapped[float | None] = mapped_column(Numeric(24, 16))
+    input_lineage: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    adjustment_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     evaluation_policy_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("governance.policy_version.id", ondelete="RESTRICT")
     )

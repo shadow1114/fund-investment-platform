@@ -10,8 +10,13 @@ from fip.strategy_library.factor_types import (
 )
 
 
-def volatility(values: Sequence[ReturnObservation], annualization: int) -> FactorResult:
-    if len(values) < 2:
+def volatility(
+    values: Sequence[ReturnObservation],
+    annualization: int,
+    *,
+    minimum_observations: int = 2,
+) -> FactorResult:
+    if len(values) < max(2, minimum_observations):
         return unavailable("F-RISK-001", "INSUFFICIENT_OBSERVATIONS", len(values))
     return FactorResult(
         "F-RISK-001",
@@ -23,12 +28,16 @@ def volatility(values: Sequence[ReturnObservation], annualization: int) -> Facto
 
 
 def downside_volatility(
-    values: Sequence[ReturnObservation], annualization: int, mar: float | None
+    values: Sequence[ReturnObservation],
+    annualization: int,
+    mar: float | None,
+    *,
+    minimum_observations: int = 2,
 ) -> FactorResult:
     if mar is None:
         return unavailable("F-RISK-002", "MAR_UNAVAILABLE", len(values))
     downside = [min(0.0, x.value - mar) for x in values]
-    if len(downside) < 2:
+    if len(downside) < max(2, minimum_observations):
         return unavailable("F-RISK-002", "INSUFFICIENT_OBSERVATIONS", len(values))
     return FactorResult(
         "F-RISK-002",
@@ -39,9 +48,11 @@ def downside_volatility(
     )
 
 
-def maximum_drawdown(values: Sequence[ReturnObservation]) -> FactorResult:
-    if not values:
-        return unavailable("F-RISK-003", "NO_OBSERVATIONS")
+def maximum_drawdown(
+    values: Sequence[ReturnObservation], *, minimum_observations: int = 1
+) -> FactorResult:
+    if len(values) < minimum_observations:
+        return unavailable("F-RISK-003", "INSUFFICIENT_OBSERVATIONS", len(values))
     wealth = peak = 1.0
     drawdown = 0.0
     for point in values:

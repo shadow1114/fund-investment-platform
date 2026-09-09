@@ -9,9 +9,11 @@ from fip.strategy_library.factor_types import (
 )
 
 
-def cumulative_return(values: Sequence[ReturnObservation]) -> FactorResult:
-    if not values:
-        return unavailable("F-RET-002", "NO_OBSERVATIONS")
+def cumulative_return(
+    values: Sequence[ReturnObservation], *, minimum_observations: int = 1
+) -> FactorResult:
+    if len(values) < minimum_observations:
+        return unavailable("F-RET-002", "INSUFFICIENT_OBSERVATIONS", len(values))
     return FactorResult(
         "F-RET-002",
         prod(1 + point.value for point in values) - 1,
@@ -21,9 +23,14 @@ def cumulative_return(values: Sequence[ReturnObservation]) -> FactorResult:
     )
 
 
-def annualized_return(values: Sequence[ReturnObservation], annualization: int) -> FactorResult:
-    if not values:
-        return unavailable("F-RET-001", "NO_OBSERVATIONS")
+def annualized_return(
+    values: Sequence[ReturnObservation],
+    annualization: int,
+    *,
+    minimum_observations: int = 1,
+) -> FactorResult:
+    if len(values) < minimum_observations:
+        return unavailable("F-RET-001", "INSUFFICIENT_OBSERVATIONS", len(values))
     cumulative = prod(1 + point.value for point in values)
     if cumulative <= 0:
         return unavailable("F-RET-001", "NON_POSITIVE_COMPOUND_RETURN", len(values))

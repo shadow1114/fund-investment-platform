@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from math import sqrt
 
 
 @dataclass(frozen=True, slots=True)
@@ -10,6 +11,15 @@ class FactorEffectivenessResult:
     redundancy_group: str | None
     verdict: str
     reason_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class EffectivenessThresholds:
+    ic_mean_min: float
+    icir_abs_min: float
+    minimum_cross_sections: int
+    ic_std_ddof: int
+    redundancy_threshold: float
 
 
 def _average_ranks(values: Sequence[float]) -> list[float]:
@@ -45,3 +55,69 @@ def validate_effectiveness(
         return FactorEffectivenessResult(None, None, None, None, "INVALID", "CONSTANT_OOS_SERIES")
     ic = numerator / (x_scale * y_scale) ** 0.5
     return FactorEffectivenessResult(ic, None, ic > 0, None, "VALID", None)
+
+
+def validate_effectiveness_series(
+    ic_series: Sequence[float],
+    *,
+    layer_returns: Sequence[float],
+    expected_direction: str,
+    thresholds: EffectivenessThresholds,
+    redundant_with: tuple[str, float] | None = None,
+) -> FactorEffectivenessResult:
+    if len(ic_series) < thresholds.minimum_cross_sections:
+        return FactorEffectivenessResult(
+            None,
+            None,
+            None,
+            None,
+            "VALIDATION_PENDING",
+            "INSUFFICIENT_OOS_CROSS_SECTIONS",
+        )
+    if expected_direction not in {"POSITIVE", "NEGATIVE"}:
+        raise ValueError(f"unsupported expected direction: {expected_direction}")
+    if thresholds.ic_std_ddof < 0 or len(ic_series) <= thresholds.ic_std_ddof:
+        raise ValueError("IC standard-deviation degrees of freedom are invalid")
+    ic_mean = sum(ic_series) / len(ic_series)
+    variance = sum((value - ic_mean) ** 2 for value in ic_series) / (
+        len(ic_series) - thresholds.ic_std_ddof
+    )
+    ic_std = sqrt(variance)
+    if ic_std == 0:
+        return FactorEffectivenessResult(
+            ic_mean, None, None, None, "INVALID", "ZERO_IC_DISPERSION"
+        )
+    icir = ic_mean / ic_std
+    direction_consistent = (
+        ic_mean > 0 if expected_direction == "POSITIVE" else ic_mean < 0
+    )
+    monotonic = len(layer_returns) >= 2 and all(
+        left <= right if expected_direction == "POSITIVE" else left >= right
+        for left, right in zip(layer_returns, layer_returns[1:], strict=False)
+    )
+    if abs(ic_mean) < thresholds.ic_mean_min:
+        return FactorEffectivenessResult(
+            ic_mean, icir, monotonic, None, "INVALID", "IC_MEAN_BELOW_THRESHOLD"
+        )
+    if not direction_consistent:
+        return FactorEffectivenessResult(
+            ic_mean, icir, monotonic, None, "INVALID", "IC_DIRECTION_MISMATCH"
+        )
+    if abs(icir) < thresholds.icir_abs_min:
+        return FactorEffectivenessResult(
+            ic_mean, icir, monotonic, None, "INVALID", "ICIR_BELOW_THRESHOLD"
+        )
+    if not monotonic:
+        return FactorEffectivenessResult(
+            ic_mean, icir, monotonic, None, "INVALID", "NON_MONOTONIC_LAYERS"
+        )
+    if redundant_with is not None and abs(redundant_with[1]) > thresholds.redundancy_threshold:
+        return FactorEffectivenessResult(
+            ic_mean,
+            icir,
+            monotonic,
+            redundant_with[0],
+            "INVALID",
+            "REDUNDANT_FACTOR",
+        )
+    return FactorEffectivenessResult(ic_mean, icir, monotonic, None, "VALID", None)

@@ -1,3 +1,5 @@
+evaluation.fund_score.ck_fund_score_data_completeness
+    CHECK (((data_completeness >= (0)::numeric) AND (data_completeness <= (1)::numeric)))
 fund.fund_classification_history.ck_fund_classification_history_interval
     CHECK (((valid_to IS NULL) OR (valid_from < valid_to)))
 fund.fund_classification_history.ck_fund_classification_history_quality_source

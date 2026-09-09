@@ -30,7 +30,20 @@ class EvaluationPolicy:
     minimum_data_completeness: Decimal
 
 
-ValidationPolicy = EvaluationPolicy
+@dataclass(frozen=True, slots=True)
+class ValidationPolicy:
+    version: str
+    ic_mean_min: Decimal
+    icir_abs_min: Decimal
+    min_cross_sections: int
+    min_names_per_cross_section: int
+    ic_std_ddof: int
+    forward_horizon_days: int
+    redundancy_threshold: Decimal
+    recent_lookback_days: int
+    require_both_segments: bool
+
+
 ProfileWeights = Mapping[str, Mapping[str, Decimal]]
 BetaTargetRanges = Mapping[str, tuple[Decimal, Decimal]]
 TrackingErrorRules = Mapping[str, str]
@@ -65,7 +78,7 @@ def load_evaluation_policy(path: Path, runtime_mode: RuntimeMode) -> EvaluationP
             raise ValueError(f"beta target range for {profile} must contain two values")
         ranges[profile] = cast(tuple[Decimal, Decimal], values)
     return EvaluationPolicy(
-        version="v1",
+        version=path.stem,
         minimum_peer_group_size=int(get("peer_group.minimum_effective_sample")),
         mar=(Decimal(0) if get("mar.policy") == "ZERO" else Decimal(str(get("mar.policy")))),
         profile_weights=weights,
@@ -79,7 +92,27 @@ def load_evaluation_policy(path: Path, runtime_mode: RuntimeMode) -> EvaluationP
     )
 
 
-def _content(policy: EvaluationPolicy) -> dict[str, object]:
+def load_validation_policy(path: Path, runtime_mode: RuntimeMode) -> ValidationPolicy:
+    config = load_config_file(path, runtime_mode)
+    return ValidationPolicy(
+        version=path.stem,
+        ic_mean_min=Decimal(str(config.get("effectiveness.ic_mean_min"))),
+        icir_abs_min=Decimal(str(config.get("effectiveness.icir_abs_min"))),
+        min_cross_sections=int(config.get("effectiveness.min_cross_sections")),
+        min_names_per_cross_section=int(
+            config.get("effectiveness.min_names_per_cross_section")
+        ),
+        ic_std_ddof=int(config.get("effectiveness.ic_std_ddof")),
+        forward_horizon_days=int(config.get("effectiveness.forward_horizon_days")),
+        redundancy_threshold=Decimal(
+            str(config.get("effectiveness.redundancy_threshold"))
+        ),
+        recent_lookback_days=int(config.get("segments.recent_lookback_days")),
+        require_both_segments=bool(config.get("segments.require_both")),
+    )
+
+
+def _content(policy: EvaluationPolicy | ValidationPolicy) -> dict[str, object]:
     return cast(dict[str, object], json.loads(json.dumps(asdict(policy), default=str)))
 
 
@@ -99,5 +132,25 @@ def persist_policy_version(session: Session, policy: EvaluationPolicy) -> int:
     if row.content != content:
         raise PolicyVersionConflict(
             f"evaluation policy {policy.version} already has different content"
+        )
+    return row.id
+
+
+def persist_validation_policy_version(session: Session, policy: ValidationPolicy) -> int:
+    content = _content(policy)
+    row = session.execute(
+        select(PolicyVersion).where(
+            PolicyVersion.policy_kind == "validation",
+            PolicyVersion.version_label == policy.version,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = PolicyVersion(policy_kind="validation", version_label=policy.version, content=content)
+        session.add(row)
+        session.flush()
+        return row.id
+    if row.content != content:
+        raise PolicyVersionConflict(
+            f"validation policy {policy.version} already has different content"
         )
     return row.id

@@ -9,9 +9,11 @@ from fip.strategy_library.factor_types import (
 from fip.strategy_library.risk_adjusted import sharpe
 
 
-def positive_return_ratio(values: Sequence[ReturnObservation]) -> FactorResult:
-    if not values:
-        return unavailable("F-STAB-001", "NO_OBSERVATIONS")
+def positive_return_ratio(
+    values: Sequence[ReturnObservation], *, minimum_observations: int = 1
+) -> FactorResult:
+    if len(values) < minimum_observations:
+        return unavailable("F-STAB-001", "INSUFFICIENT_OBSERVATIONS", len(values))
     return FactorResult(
         "F-STAB-001",
         sum(x.value > 0 for x in values) / len(values),
@@ -27,10 +29,12 @@ def rolling_sharpe(
     risk_free: float | None,
     window: int,
     minimum_valid_points: int,
+    *,
+    minimum_observations: int = 1,
 ) -> FactorResult:
     if risk_free is None:
         return unavailable("F-STAB-005", "RISK_FREE_UNAVAILABLE", len(values))
-    if len(values) < window:
+    if len(values) < max(window, minimum_observations):
         return unavailable("F-STAB-005", "INSUFFICIENT_OBSERVATIONS", len(values))
     results = [
         sharpe(values[index - window : index], annualization, risk_free).value
