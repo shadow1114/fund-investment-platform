@@ -29,8 +29,8 @@ from fip.platform.db.base import Base
 # tests/fitness/test_architecture.py::test_every_orm_model_module_is_registered_in_env
 # 守住与 env.py 同步。
 from fip.platform.jobs import models as _jobs_models  # noqa: F401
-from fip.services.data_service.models import fund as _fund  # noqa: F401
 from fip.services.data_service.models import benchmark as _benchmark  # noqa: F401
+from fip.services.data_service.models import fund as _fund  # noqa: F401
 from fip.services.data_service.models import governance as _governance  # noqa: F401
 from fip.services.data_service.models import market as _market  # noqa: F401
 from fip.services.data_service.models import raw as _raw  # noqa: F401
