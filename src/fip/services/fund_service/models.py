@@ -146,3 +146,55 @@ class FundTier(Base):
     )
     tier: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class FundUniverseSnapshot(Base):
+    __tablename__ = "fund_universe_snapshot"
+    __table_args__ = (
+        UniqueConstraint("decision_id", name="uq_fund_universe_snapshot_decision"),
+        {"schema": "evaluation"},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    decision_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    evaluation_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation.fund_evaluation.id", ondelete="RESTRICT"), nullable=False
+    )
+    policy_version_id: Mapped[int] = mapped_column(
+        ForeignKey("governance.policy_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FundUniverseMember(Base):
+    __tablename__ = "fund_universe_member"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "share_class_id", name="uq_fund_universe_member"),
+        {"schema": "evaluation"},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation.fund_universe_snapshot.id", ondelete="CASCADE"), nullable=False
+    )
+    share_class_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_share_class.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class SelectionConditionRecord(Base):
+    __tablename__ = "selection_condition_result"
+    __table_args__ = (
+        UniqueConstraint(
+            "universe_member_id", "condition_id", name="uq_selection_condition_member_condition"
+        ),
+        {"schema": "evaluation"},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    universe_member_id: Mapped[int] = mapped_column(
+        ForeignKey("evaluation.fund_universe_member.id", ondelete="CASCADE"), nullable=False
+    )
+    condition_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    passed: Mapped[bool | None] = mapped_column()
