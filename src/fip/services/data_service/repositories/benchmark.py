@@ -105,3 +105,32 @@ class SqlBenchmarkPitRepository:
         return tuple(
             (r["effective_at"], r["value"], r["version"], r["availability_quality"]) for r in rows
         )
+
+    def composite_series(
+        self, resolution: BenchmarkResolution, date_from: dt.date, date_to: dt.date
+    ) -> tuple[tuple[dt.date, Decimal | None, str], ...]:
+        """Materialize a composite without filling or renormalizing missing components."""
+        component_series = {
+            component.index_id: {
+                effective_at: value
+                for effective_at, value, _version, _quality in self.index_series(
+                    component.index_id, date_from, date_to
+                )
+            }
+            for component in resolution.components
+        }
+        dates = sorted({day for series in component_series.values() for day in series})
+        result: list[tuple[dt.date, Decimal | None, str]] = []
+        for day in dates:
+            if any(day not in series for series in component_series.values()):
+                result.append((day, None, "UNAVAILABLE"))
+                continue
+            value = sum(
+                (
+                    component_series[component.index_id][day] * component.weight
+                    for component in resolution.components
+                ),
+                Decimal(0),
+            )
+            result.append((day, value, "AVAILABLE"))
+        return tuple(result)
