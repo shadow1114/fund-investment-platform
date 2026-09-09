@@ -25,6 +25,7 @@ from fip.services.data_service.models import (
     market,  # noqa: F401 — services 层
     raw,  # noqa: F401 — services 层
 )
+from fip.services.fund_service import models as fund_service_models  # noqa: F401
 from fip.settings import settings
 
 config = context.config
