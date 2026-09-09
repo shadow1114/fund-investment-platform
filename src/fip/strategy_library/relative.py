@@ -2,7 +2,12 @@ from collections.abc import Sequence
 from math import sqrt
 from statistics import mean, stdev
 
-from fip.strategy_library.factor_types import FactorResult, ReturnObservation, unavailable
+from fip.strategy_library.factor_types import (
+    FactorResult,
+    FactorStatus,
+    ReturnObservation,
+    unavailable,
+)
 
 
 def align_return_series(
@@ -51,17 +56,24 @@ def calculate_relative_factors(
         f - (mean(fund) + beta * (b - mean(benchmark)))
         for f, b in zip(fund, benchmark, strict=True)
     ]
-    r_squared = 1 - sum(x * x for x in residual) / sum((x - mean(fund)) ** 2 for x in fund)
+    total_variance = sum((x - mean(fund)) ** 2 for x in fund)
+    r_squared = None if total_variance == 0 else 1 - sum(x * x for x in residual) / total_variance
     return (
-        FactorResult("F-REL-002", alpha, "AVAILABLE", None, len(rows)),
-        FactorResult("F-REL-003", beta, "AVAILABLE", None, len(rows)),
+        FactorResult("F-REL-002", alpha, FactorStatus.AVAILABLE, None, len(rows)),
+        FactorResult("F-REL-003", beta, FactorStatus.AVAILABLE, None, len(rows)),
         FactorResult(
             "F-REL-004",
             ir,
-            "AVAILABLE" if ir is not None else "UNAVAILABLE",
+            FactorStatus.AVAILABLE if ir is not None else FactorStatus.UNAVAILABLE,
             None if ir is not None else "ZERO_DENOMINATOR",
             len(rows),
         ),
-        FactorResult("F-REL-005", tracking, "AVAILABLE", None, len(rows)),
-        FactorResult("F-STAB-002", r_squared, "AVAILABLE", None, len(rows)),
+        FactorResult("F-REL-005", tracking, FactorStatus.AVAILABLE, None, len(rows)),
+        FactorResult(
+            "F-STAB-002",
+            r_squared,
+            FactorStatus.AVAILABLE if r_squared is not None else FactorStatus.UNAVAILABLE,
+            None if r_squared is not None else "ZERO_TOTAL_VARIANCE",
+            len(rows),
+        ),
     )

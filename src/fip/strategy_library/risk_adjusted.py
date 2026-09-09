@@ -1,6 +1,11 @@
 from collections.abc import Sequence
 
-from fip.strategy_library.factor_types import FactorResult, ReturnObservation, unavailable
+from fip.strategy_library.factor_types import (
+    FactorResult,
+    FactorStatus,
+    ReturnObservation,
+    unavailable,
+)
 from fip.strategy_library.returns import annualized_return
 from fip.strategy_library.risk import downside_volatility, maximum_drawdown, volatility
 
@@ -14,7 +19,7 @@ def sharpe(
         return unavailable("F-RAP-001", "ZERO_DENOMINATOR", len(values))
     assert vol.value is not None
     return FactorResult(
-        "F-RAP-001", (ret.value - risk_free) / vol.value, "AVAILABLE", None, len(values)
+        "F-RAP-001", (ret.value - risk_free) / vol.value, FactorStatus.AVAILABLE, None, len(values)
     )
 
 
@@ -27,7 +32,7 @@ def sortino(
         return unavailable("F-RAP-002", "ZERO_DENOMINATOR", len(values))
     assert downside.value is not None
     return FactorResult(
-        "F-RAP-002", (ret.value - mar) / downside.value, "AVAILABLE", None, len(values)
+        "F-RAP-002", (ret.value - mar) / downside.value, FactorStatus.AVAILABLE, None, len(values)
     )
 
 
@@ -38,5 +43,5 @@ def calmar(values: Sequence[ReturnObservation], annualization: int) -> FactorRes
         return unavailable("F-RAP-003", "ZERO_DENOMINATOR", len(values))
     assert drawdown.value is not None
     return FactorResult(
-        "F-RAP-003", ret.value / abs(drawdown.value), "AVAILABLE", None, len(values)
+        "F-RAP-003", ret.value / abs(drawdown.value), FactorStatus.AVAILABLE, None, len(values)
     )

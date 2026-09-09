@@ -1,6 +1,11 @@
 from collections.abc import Sequence
 
-from fip.strategy_library.factor_types import FactorResult, ReturnObservation, unavailable
+from fip.strategy_library.factor_types import (
+    FactorResult,
+    FactorStatus,
+    ReturnObservation,
+    unavailable,
+)
 from fip.strategy_library.risk_adjusted import sharpe
 
 
@@ -8,7 +13,11 @@ def positive_return_ratio(values: Sequence[ReturnObservation]) -> FactorResult:
     if not values:
         return unavailable("F-STAB-001", "NO_OBSERVATIONS")
     return FactorResult(
-        "F-STAB-001", sum(x.value > 0 for x in values) / len(values), "AVAILABLE", None, len(values)
+        "F-STAB-001",
+        sum(x.value > 0 for x in values) / len(values),
+        FactorStatus.AVAILABLE,
+        None,
+        len(values),
     )
 
 
@@ -24,4 +33,10 @@ def rolling_sharpe(
     usable = [value for value in results if value is not None]
     if len(usable) < minimum_valid_points:
         return unavailable("F-STAB-005", "INSUFFICIENT_VALID_WINDOWS", len(values))
-    return FactorResult("F-STAB-005", sum(usable) / len(usable), "AVAILABLE", None, len(values))
+    return FactorResult(
+        "F-STAB-005",
+        sum(usable) / len(usable),
+        FactorStatus.AVAILABLE,
+        None,
+        len(values),
+    )

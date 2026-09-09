@@ -13,7 +13,7 @@ class FactorStatus(StrEnum):
 class FactorResult:
     factor_id: str
     value: float | None
-    status: FactorStatus | str
+    status: FactorStatus
     reason: str | None
     observations: int
 

@@ -24,7 +24,11 @@ def upgrade() -> None:
         sa.Column("decision_at", sa.Date, nullable=False),
         sa.Column("status", sa.String(32), nullable=False),
         sa.Column("member_count", sa.Integer, nullable=False),
-        sa.ForeignKeyConstraint(["policy_version_id"], ["governance.policy_version.id"]),
+        sa.ForeignKeyConstraint(
+            ["policy_version_id"],
+            ["governance.policy_version.id"],
+            ondelete="RESTRICT",
+        ),
         sa.UniqueConstraint(
             "decision_id",
             "classification_code",
@@ -41,7 +45,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["snapshot_id"], ["evaluation.peer_group_snapshot.id"], ondelete="CASCADE"
         ),
-        sa.ForeignKeyConstraint(["share_class_id"], ["fund.fund_share_class.id"]),
+        sa.ForeignKeyConstraint(
+            ["share_class_id"],
+            ["fund.fund_share_class.id"],
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("snapshot_id", "share_class_id"),
         schema="evaluation",
     )

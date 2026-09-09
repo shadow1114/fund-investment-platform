@@ -10,9 +10,15 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture()
 def dataset(db_session):
-    provider = DataProvider(provider_code="AKSHARE", display_name="AKShare")
-    db_session.add(provider)
-    db_session.flush()
+    provider = (
+        db_session.query(DataProvider)
+        .filter_by(provider_code="AKSHARE")
+        .one_or_none()
+    )
+    if provider is None:
+        provider = DataProvider(provider_code="AKSHARE", display_name="AKShare")
+        db_session.add(provider)
+        db_session.flush()
     ds = DataProviderDataset(
         provider_id=provider.id,
         dataset_code="fund_open_fund_info_em.单位净值走势",

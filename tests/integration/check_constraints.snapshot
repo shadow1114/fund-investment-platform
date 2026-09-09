@@ -42,6 +42,24 @@ governance.mixin_probe.ck_mixin_probe_quality_source
     CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
 governance.mixin_probe.ck_mixin_probe_time_order
     CHECK ((((published_at IS NULL) OR (published_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text))) AND ((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text)) AND (available_at >= COALESCE(provider_available_at, published_at))))
+market.benchmark_component.ck_benchmark_component_weight
+    CHECK (((weight > (0)::numeric) AND (weight <= (1)::numeric)))
+market.benchmark_index.ck_benchmark_index_type
+    CHECK (((index_type)::text = ANY ((ARRAY['PRICE'::character varying, 'TOTAL_RETURN'::character varying, 'FULL_PRICE'::character varying])::text[])))
+market.benchmark_index_value.ck_benchmark_index_value_positive
+    CHECK ((value > (0)::numeric))
+market.benchmark_index_value.ck_benchmark_index_value_quality_source
+    CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
+market.benchmark_index_value.ck_benchmark_index_value_time_order
+    CHECK ((((published_at IS NULL) OR (published_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text))) AND ((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text)) AND (available_at >= COALESCE(provider_available_at, published_at))))
+market.benchmark_mapping.ck_benchmark_mapping_interval
+    CHECK (((valid_to IS NULL) OR (valid_from < valid_to)))
+market.benchmark_mapping.ck_benchmark_mapping_quality_source
+    CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
+market.benchmark_mapping.ck_benchmark_mapping_scope
+    CHECK (((share_class_id IS NOT NULL) <> (classification_code IS NOT NULL)))
+market.benchmark_mapping.ck_benchmark_mapping_time_order
+    CHECK ((((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= COALESCE(provider_available_at, published_at))))
 market.fund_distribution.ck_fund_distribution_dividend
     CHECK ((dividend_per_unit >= (0)::numeric))
 market.fund_distribution.ck_fund_distribution_quality_source

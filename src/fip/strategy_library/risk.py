@@ -2,7 +2,12 @@ from collections.abc import Sequence
 from math import sqrt
 from statistics import stdev
 
-from fip.strategy_library.factor_types import FactorResult, ReturnObservation, unavailable
+from fip.strategy_library.factor_types import (
+    FactorResult,
+    FactorStatus,
+    ReturnObservation,
+    unavailable,
+)
 
 
 def volatility(values: Sequence[ReturnObservation], annualization: int) -> FactorResult:
@@ -11,7 +16,7 @@ def volatility(values: Sequence[ReturnObservation], annualization: int) -> Facto
     return FactorResult(
         "F-RISK-001",
         stdev(x.value for x in values) * sqrt(annualization),
-        "AVAILABLE",
+        FactorStatus.AVAILABLE,
         None,
         len(values),
     )
@@ -24,7 +29,11 @@ def downside_volatility(
     if len(downside) < 2:
         return unavailable("F-RISK-002", "INSUFFICIENT_OBSERVATIONS", len(values))
     return FactorResult(
-        "F-RISK-002", stdev(downside) * sqrt(annualization), "AVAILABLE", None, len(values)
+        "F-RISK-002",
+        stdev(downside) * sqrt(annualization),
+        FactorStatus.AVAILABLE,
+        None,
+        len(values),
     )
 
 
@@ -37,4 +46,4 @@ def maximum_drawdown(values: Sequence[ReturnObservation]) -> FactorResult:
         wealth *= 1 + point.value
         peak = max(peak, wealth)
         drawdown = min(drawdown, wealth / peak - 1)
-    return FactorResult("F-RISK-003", drawdown, "AVAILABLE", None, len(values))
+    return FactorResult("F-RISK-003", drawdown, FactorStatus.AVAILABLE, None, len(values))
