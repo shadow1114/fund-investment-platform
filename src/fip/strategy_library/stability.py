@@ -22,12 +22,18 @@ def positive_return_ratio(values: Sequence[ReturnObservation]) -> FactorResult:
 
 
 def rolling_sharpe(
-    values: Sequence[ReturnObservation], annualization: int, window: int, minimum_valid_points: int
+    values: Sequence[ReturnObservation],
+    annualization: int,
+    risk_free: float | None,
+    window: int,
+    minimum_valid_points: int,
 ) -> FactorResult:
+    if risk_free is None:
+        return unavailable("F-STAB-005", "RISK_FREE_UNAVAILABLE", len(values))
     if len(values) < window:
         return unavailable("F-STAB-005", "INSUFFICIENT_OBSERVATIONS", len(values))
     results = [
-        sharpe(values[index - window : index], annualization).value
+        sharpe(values[index - window : index], annualization, risk_free).value
         for index in range(window, len(values) + 1)
     ]
     usable = [value for value in results if value is not None]

@@ -23,8 +23,10 @@ def volatility(values: Sequence[ReturnObservation], annualization: int) -> Facto
 
 
 def downside_volatility(
-    values: Sequence[ReturnObservation], annualization: int, mar: float = 0.0
+    values: Sequence[ReturnObservation], annualization: int, mar: float | None
 ) -> FactorResult:
+    if mar is None:
+        return unavailable("F-RISK-002", "MAR_UNAVAILABLE", len(values))
     downside = [min(0.0, x.value - mar) for x in values]
     if len(downside) < 2:
         return unavailable("F-RISK-002", "INSUFFICIENT_OBSERVATIONS", len(values))

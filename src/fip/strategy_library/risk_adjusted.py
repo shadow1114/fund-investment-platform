@@ -11,8 +11,10 @@ from fip.strategy_library.risk import downside_volatility, maximum_drawdown, vol
 
 
 def sharpe(
-    values: Sequence[ReturnObservation], annualization: int, risk_free: float = 0.0
+    values: Sequence[ReturnObservation], annualization: int, risk_free: float | None
 ) -> FactorResult:
+    if risk_free is None:
+        return unavailable("F-RAP-001", "RISK_FREE_UNAVAILABLE", len(values))
     vol = volatility(values, annualization)
     ret = annualized_return(values, annualization)
     if vol.value in (None, 0.0) or ret.value is None:
@@ -24,8 +26,10 @@ def sharpe(
 
 
 def sortino(
-    values: Sequence[ReturnObservation], annualization: int, mar: float = 0.0
+    values: Sequence[ReturnObservation], annualization: int, mar: float | None
 ) -> FactorResult:
+    if mar is None:
+        return unavailable("F-RAP-002", "MAR_UNAVAILABLE", len(values))
     downside = downside_volatility(values, annualization, mar)
     ret = annualized_return(values, annualization)
     if downside.value in (None, 0.0) or ret.value is None:
