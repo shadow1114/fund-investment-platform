@@ -22,8 +22,10 @@ _MAPPING_SQL = text("""
     LIMIT 1
 """)
 _COMPONENT_SQL = text("""
-    SELECT index_id, weight FROM market.benchmark_component
-    WHERE benchmark_id = :benchmark_id ORDER BY index_id
+    SELECT component.index_id, component.weight, index.index_type
+    FROM market.benchmark_component AS component
+    JOIN market.benchmark_index AS index ON index.id = component.index_id
+    WHERE component.benchmark_id = :benchmark_id ORDER BY component.index_id
 """)
 _SERIES_SQL = text("""
     SELECT DISTINCT ON (effective_at) effective_at, value, version, availability_quality
@@ -55,13 +57,26 @@ class SqlBenchmarkPitRepository:
         )
         if row is None:
             return BenchmarkResolution.unavailable()
-        components = tuple(
-            BenchmarkComponentPoint(r["index_id"], r["weight"])
-            for r in self._session.execute(_COMPONENT_SQL, {"benchmark_id": row["benchmark_id"]})
+        component_rows = (
+            self._session.execute(_COMPONENT_SQL, {"benchmark_id": row["benchmark_id"]})
             .mappings()
             .all()
         )
+        components = tuple(
+            BenchmarkComponentPoint(r["index_id"], r["weight"]) for r in component_rows
+        )
         if not components or sum((c.weight for c in components), Decimal(0)) != Decimal(1):
+            return BenchmarkResolution.unavailable()
+        required_types = {
+            "ACTIVE_EQUITY": {"TOTAL_RETURN"},
+            "PASSIVE_EQUITY": {"TOTAL_RETURN"},
+            "BOND": {"FULL_PRICE"},
+            "HYBRID": {"TOTAL_RETURN", "FULL_PRICE"},
+        }.get(classification_code)
+        if (
+            required_types is not None
+            and {r["index_type"] for r in component_rows} != required_types
+        ):
             return BenchmarkResolution.unavailable()
         return BenchmarkResolution(
             row["benchmark_id"],
