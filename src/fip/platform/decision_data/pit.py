@@ -52,6 +52,30 @@ class NavPoint:
     chain_availability_quality: str
 
 
+@dataclass(frozen=True, slots=True)
+class ClassificationPoint:
+    classification_code: str
+    valid_from: dt.date
+    availability_quality: str
+
+
+@dataclass(frozen=True, slots=True)
+class FeePoint:
+    fee_type: str
+    rate: Decimal
+    valid_from: dt.date
+    availability_quality: str
+
+
+@dataclass(frozen=True, slots=True)
+class RiskFreeRatePoint:
+    effective_at: dt.date
+    tenor: str
+    rate: Decimal
+    version: int
+    availability_quality: str
+
+
 @runtime_checkable
 class NavPitRepository(Protocol):
     """时点感知的净值访问。
@@ -67,6 +91,27 @@ class NavPitRepository(Protocol):
         date_from: dt.date,
         date_to: dt.date,
     ) -> list[NavPoint]: ...
+
+
+@runtime_checkable
+class ClassificationPitRepository(Protocol):
+    def current(self, fund_id: int) -> ClassificationPoint | None: ...
+
+
+@runtime_checkable
+class FeePitRepository(Protocol):
+    def current(self, share_class_id: int) -> tuple[FeePoint, ...]: ...
+
+
+@runtime_checkable
+class RiskFreeRatePitRepository(Protocol):
+    def series(
+        self,
+        currency: str,
+        tenor: str,
+        date_from: dt.date,
+        date_to: dt.date,
+    ) -> tuple[RiskFreeRatePoint, ...]: ...
 
 
 class PitDataContext:
@@ -109,3 +154,22 @@ class PitDataContext:
         return SqlNavPitRepository(
             session=self._session, visible_until=self.visible_until
         )
+
+    def classifications(self) -> ClassificationPitRepository:
+        from fip.services.data_service.repositories.classification import (
+            SqlClassificationPitRepository,
+        )
+
+        return SqlClassificationPitRepository(self._session, self.visible_until)
+
+    def fees(self) -> FeePitRepository:
+        from fip.services.data_service.repositories.fee import SqlFeePitRepository
+
+        return SqlFeePitRepository(self._session, self.visible_until)
+
+    def risk_free_rates(self) -> RiskFreeRatePitRepository:
+        from fip.services.data_service.repositories.risk_free_rate import (
+            SqlRiskFreeRatePitRepository,
+        )
+
+        return SqlRiskFreeRatePitRepository(self._session, self.visible_until)

@@ -10,7 +10,13 @@ from fip.platform.decision_data.context import (
     TriggerType,
 )
 from fip.platform.decision_data.current import CurrentViewContext
-from fip.platform.decision_data.pit import NavPitRepository, PitDataContext
+from fip.platform.decision_data.pit import (
+    ClassificationPitRepository,
+    FeePitRepository,
+    NavPitRepository,
+    PitDataContext,
+    RiskFreeRatePitRepository,
+)
 
 
 def _ctx():
@@ -44,6 +50,21 @@ def test_repository_methods_do_not_accept_a_time_parameter():
     sig = inspect.signature(NavPitRepository.adjusted_nav_series)
     forbidden = {"decision_at", "as_of", "as_of_date", "available_at"}
     assert not (set(sig.parameters) & forbidden)
+
+    for method in (
+        ClassificationPitRepository.current,
+        FeePitRepository.current,
+        RiskFreeRatePitRepository.series,
+    ):
+        assert not (set(inspect.signature(method).parameters) & forbidden)
+
+
+def test_pit_context_exposes_dimension_repositories():
+    context = PitDataContext(context=_ctx(), session=object())
+
+    assert isinstance(context.classifications(), ClassificationPitRepository)
+    assert isinstance(context.fees(), FeePitRepository)
+    assert isinstance(context.risk_free_rates(), RiskFreeRatePitRepository)
 
 
 def test_pit_repository_exposes_only_the_time_bounded_query():
