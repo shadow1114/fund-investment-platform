@@ -303,6 +303,25 @@ def committed_session(db_engine):
                 "governance.data_provider_dataset, governance.data_provider "
                 "RESTART IDENTITY CASCADE"
             ))
+            conn.execute(text("""
+                INSERT INTO governance.data_provider (provider_code, display_name)
+                VALUES ('AKSHARE', 'AKShare')
+            """))
+            conn.execute(text("""
+                INSERT INTO governance.data_provider_dataset
+                    (provider_id, dataset_code, adapter_version, library_version)
+                SELECT id, dataset_code, '1', '1.18.94'
+                FROM governance.data_provider
+                CROSS JOIN (VALUES ('fund_nav'), ('fund_distribution'), ('fund_split'))
+                    AS seed(dataset_code)
+                WHERE provider_code = 'AKSHARE'
+            """))
+            conn.execute(text("""
+                INSERT INTO governance.data_source_priority
+                    (dataset_id, field_name, priority, disclosure_lag_days, rule_version)
+                SELECT id, 'available_at', 1, 1, 'v1'
+                FROM governance.data_provider_dataset
+            """))
 
 
 def test_ingest_funds_really_commits_the_successful_part(
