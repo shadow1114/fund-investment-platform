@@ -88,7 +88,7 @@ def _identity_kwargs(**overrides):
 
 def test_one_share_class_can_have_multiple_provider_identities(db_session):
     sc = _make_fund(db_session, "华夏成长混合", "P-0004")
-    p1 = DataProvider(provider_code="AKSHARE", display_name="AKShare")
+    p1 = DataProvider(provider_code="AKSHARE_TEST", display_name="AKShare test")
     p2 = DataProvider(provider_code="VENDOR_X", display_name="Vendor X")
     db_session.add_all([p1, p2])
     db_session.flush()
