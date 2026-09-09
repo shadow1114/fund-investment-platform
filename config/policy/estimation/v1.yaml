@@ -1,0 +1,86 @@
+window:
+  lookback_trading_days:
+    value: 756
+    status: DECIDED
+    source: "2026-09-10 user confirmation: three-year daily window"
+  type:
+    value: ROLLING
+    status: DECIDED
+    source: "07-return-risk/05 Policy EM-6"
+horizon:
+  forecast:
+    value: QUARTER
+    status: DECIDED
+    source: "2026-09-10 user confirmation"
+  rebalance_frequency:
+    value: QUARTER
+    status: DECIDED
+    source: "2026-09-10 user confirmation; forecast horizon must equal rebalance period"
+returns:
+  primary_basis:
+    value: ABSOLUTE
+    status: DECIDED
+    source: "2026-09-10 user confirmation: production optimization input"
+  secondary_bases:
+    value: [EXCESS]
+    status: DECIDED
+    source: "2026-09-10 user confirmation: retain excess return as a core parallel estimate"
+  type:
+    value: SIMPLE
+    status: DECIDED
+    source: "07-return-risk/02 Policy F"
+  method:
+    value: HISTORICAL_MEAN_JAMES_STEIN
+    status: DECIDED
+    source: "07-return-risk/02 RE2-2 and RE2-5"
+  shrinkage_target:
+    value: CROSS_SECTIONAL_MEAN
+    status: DECIDED
+    source: "07-return-risk/02 RE2-5"
+  shrinkage_intensity:
+    value: ANALYTIC
+    status: DECIDED
+    source: "07-return-risk/02 RE2-5"
+covariance:
+  method:
+    value: LEDOIT_WOLF_CONSTANT_CORRELATION
+    status: DECIDED
+    source: "07-return-risk/04 CC-5"
+  shrinkage_target:
+    value: CONSTANT_CORRELATION
+    status: DECIDED
+    source: "07-return-risk/04 CC-5"
+  shrinkage_intensity:
+    value: ANALYTIC
+    status: DECIDED
+    source: "07-return-risk/04 CC-5"
+observations:
+  frequency:
+    value: DAILY
+    status: DECIDED
+    source: "07-return-risk/04 CC-8"
+  annualization_factor:
+    value: 252
+    status: DECIDED
+    source: "Platform Policy P0"
+  missing_strategy:
+    value: EXCLUDE_NO_FILL
+    status: DECIDED
+    source: "07-return-risk/05 Policy EM-2"
+  outlier_handling:
+    value: NONE
+    status: DECIDED
+    source: "07-return-risk/05 Policy EM-4"
+  minimum_t_over_n:
+    value: 3
+    status: DECIDED
+    source: "07-return-risk/04 CC-7"
+  warning_t_over_n:
+    value: 5
+    status: DECIDED
+    source: "07-return-risk/04 CC-7"
+risk:
+  downside_threshold:
+    value: 0
+    status: DECIDED
+    source: "07-return-risk/03 RI-7"
