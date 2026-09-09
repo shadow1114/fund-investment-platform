@@ -497,6 +497,7 @@ GUARDED_ROOTS: list[tuple[str, ...]] = [
     ("strategy_library",),
     ("quant_engine",),
     ("services", "portfolio_service"),
+    ("services", "fund_service", "peer_group"),
     ("platform",),
 ]
 
@@ -512,7 +513,7 @@ def test_scanned_roots_exist(parts: tuple[str, ...]):
     assert root.is_dir(), f"{'/'.join(parts)} 目录不存在，适应度测试将失去意义"
 
 
-def test_peer_group_guard_is_visible_not_silent():
+def test_peer_group_guard_is_active():
     """C-4 检查（test_peer_group_module_does_not_depend_on_scoring_or_universe）
     扫描 services/fund_service/peer_group，但该模块要到 Plan-3（M1.5）才会创建
     （见实现计划『缺口』附录：B1/B2/B3 决策边界产生于 Peer Group / Universe /
@@ -527,17 +528,7 @@ def test_peer_group_guard_is_visible_not_silent():
     """
     pkg = SRC / "services" / "fund_service" / "peer_group"
     single_file = pkg.with_suffix(".py")
-    if pkg.exists() or single_file.exists():
-        pytest.fail(
-            "services/fund_service/peer_group 已创建：请将其加入 GUARDED_ROOTS "
-            "（若为包）或确认 _py_files 的单文件分支已覆盖它（若为单文件模块），"
-            "并删除本占位测试。"
-        )
-    pytest.skip(
-        "services/fund_service/peer_group 尚未创建，计划于 Plan-3（M1.5）随 "
-        "Peer Group 决策边界一起落地；在此之前 C-4 检查是 vacuous 的（可见占位，"
-        "非静默通过）。"
-    )
+    assert pkg.is_dir() or single_file.is_file()
 
 
 VIOLATION_HIDDEN_IN_MODULE_LEVEL_FOR = """
