@@ -76,6 +76,25 @@ class RiskFreeRatePoint:
     availability_quality: str
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkComponentPoint:
+    index_id: int
+    weight: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkResolution:
+    benchmark_id: int | None
+    components: tuple[BenchmarkComponentPoint, ...]
+    mapping_source: str | None
+    mapping_version: str | None
+    status: str
+
+    @classmethod
+    def unavailable(cls) -> "BenchmarkResolution":
+        return cls(None, (), None, None, "BENCHMARK_UNAVAILABLE")
+
+
 @runtime_checkable
 class NavPitRepository(Protocol):
     """时点感知的净值访问。
@@ -112,6 +131,15 @@ class RiskFreeRatePitRepository(Protocol):
         date_from: dt.date,
         date_to: dt.date,
     ) -> tuple[RiskFreeRatePoint, ...]: ...
+
+
+@runtime_checkable
+class BenchmarkPitRepository(Protocol):
+    def resolve(self, share_class_id: int, classification_code: str) -> BenchmarkResolution: ...
+
+    def index_series(
+        self, index_id: int, date_from: dt.date, date_to: dt.date
+    ) -> tuple[tuple[dt.date, Decimal, int, str], ...]: ...
 
 
 class PitDataContext:
@@ -151,9 +179,7 @@ class PitDataContext:
         # 反转了架构规定的依赖方向（Task 6 的 fitness test 会对此断言）。
         from fip.services.data_service.repositories.nav import SqlNavPitRepository
 
-        return SqlNavPitRepository(
-            session=self._session, visible_until=self.visible_until
-        )
+        return SqlNavPitRepository(session=self._session, visible_until=self.visible_until)
 
     def classifications(self) -> ClassificationPitRepository:
         from fip.services.data_service.repositories.classification import (
@@ -173,3 +199,10 @@ class PitDataContext:
         )
 
         return SqlRiskFreeRatePitRepository(self._session, self.visible_until)
+
+    def benchmarks(self) -> BenchmarkPitRepository:
+        from fip.services.data_service.repositories.benchmark import (
+            SqlBenchmarkPitRepository,
+        )
+
+        return SqlBenchmarkPitRepository(self._session, self.visible_until)

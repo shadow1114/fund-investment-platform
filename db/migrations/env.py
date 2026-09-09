@@ -5,7 +5,6 @@ from sqlalchemy import engine_from_config, pool
 
 from fip.platform.db.autogenerate import include_object
 from fip.platform.db.base import Base
-from fip.settings import settings
 
 # 下面这组 import 是 Base.metadata 的唯一注册点：每新增一个定义了 ORM
 # model（Base 子类）的模块，都必须在此追加一行 import，否则该模块不会被
@@ -19,10 +18,14 @@ from fip.settings import settings
 # test_every_orm_model_module_is_registered_in_env 会校验这份列表与
 # src/fip 下实际存在的 Base 子类模块一致，防止本清单被遗忘。
 from fip.platform.jobs import models as jobs_models  # noqa: F401 — platform 层
-from fip.services.data_service.models import fund  # noqa: F401 — services 层
-from fip.services.data_service.models import governance  # noqa: F401 — services 层
-from fip.services.data_service.models import market  # noqa: F401 — services 层
-from fip.services.data_service.models import raw  # noqa: F401 — services 层
+from fip.services.data_service.models import (
+    benchmark,  # noqa: F401 — services 层
+    fund,  # noqa: F401 — services 层
+    governance,  # noqa: F401 — services 层
+    market,  # noqa: F401 — services 层
+    raw,  # noqa: F401 — services 层
+)
+from fip.settings import settings
 
 config = context.config
 if config.config_file_name is not None:

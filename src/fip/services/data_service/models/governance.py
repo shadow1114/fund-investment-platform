@@ -93,7 +93,10 @@ class PolicyVersion(Base):
     """五个 Policy 子项的版本登记。决策快照以 FK 引用本表。"""
 
     __tablename__ = "policy_version"
-    __table_args__ = {"schema": "governance"}
+    __table_args__ = (
+        UniqueConstraint("policy_kind", "version_label", name="uq_policy_version_kind_label"),
+        {"schema": "governance"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     policy_kind: Mapped[str] = mapped_column(String(32), nullable=False)
