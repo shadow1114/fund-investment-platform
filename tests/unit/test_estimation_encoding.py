@@ -2,6 +2,7 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+from typing import get_type_hints
 
 import numpy as np
 import pytest
@@ -76,3 +77,27 @@ def test_estimation_dtos_are_frozen_and_slotted():
     dated = DatedReturn(dt.date(2024, 1, 1), 0.1)
     with pytest.raises(dataclasses.FrozenInstanceError):
         dated.value = 0.2
+
+
+def test_estimation_dto_ndarray_annotations_are_public_numpy_ndarray():
+    ndarray_fields = {
+        AlignedReturns: ("matrix",),
+        ReturnEstimateResult: (
+            "sample_mean_daily",
+            "shrunk_mu_annualized",
+            "annualized_mu",
+            "clipped",
+        ),
+        CovarianceEstimateResult: (
+            "sample_covariance_daily",
+            "target_covariance_daily",
+            "covariance",
+            "correlation",
+            "variance",
+            "volatility",
+        ),
+    }
+    for dto, fields in ndarray_fields.items():
+        hints = get_type_hints(dto)
+        for field in fields:
+            assert hints[field] is np.ndarray
