@@ -39,7 +39,24 @@ class EstimationPolicy:
     outlier_handling: str
     minimum_t_over_n: int
     warning_t_over_n: int
+    numeric_scale: str
+    covariance_ddof: int
+    mu_cross_section_ddof: int
     downside_threshold: Decimal
+    provisional_parameters: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EstimationValidationPolicy:
+    version: str
+    minimum_t_over_n: int
+    warning_t_over_n: int
+    psd_relative_tolerance: float
+    symmetry_tolerance: float
+    correlation_tolerance: float
+    condition_warning: float
+    condition_reject: float
+    relative_tolerance: float
     provisional_parameters: tuple[str, ...]
 
 
@@ -82,10 +99,49 @@ def load_estimation_policy(path: Path, runtime_mode: RuntimeMode) -> EstimationP
         outlier_handling=str(get("observations.outlier_handling")),
         minimum_t_over_n=int(get("observations.minimum_t_over_n")),
         warning_t_over_n=int(get("observations.warning_t_over_n")),
+        numeric_scale=str(get("numeric.scale")),
+        covariance_ddof=int(get("numeric.covariance_ddof")),
+        mu_cross_section_ddof=int(get("numeric.mu_cross_section_ddof")),
         downside_threshold=Decimal(str(get("risk.downside_threshold"))),
         provisional_parameters=provisional,
     )
     _validate(policy)
+    return policy
+
+
+def load_estimation_validation_policy(
+    path: Path, runtime_mode: RuntimeMode
+) -> EstimationValidationPolicy:
+    config = load_config_file(path, runtime_mode)
+    provisional = tuple(
+        sorted(
+            parameter.path
+            for parameter in config.parameters.values()
+            if parameter.status is ParameterStatus.PROVISIONAL
+        )
+    )
+    if runtime_mode is RuntimeMode.LIVE and provisional:
+        raise ValueError(
+            "LIVE estimation validation rejects provisional parameters: "
+            + ", ".join(provisional)
+        )
+
+    def get(parameter_path: str) -> Any:
+        return config.get(parameter_path)
+
+    policy = EstimationValidationPolicy(
+        version=path.stem,
+        minimum_t_over_n=int(get("sample_size.minimum_t_over_n")),
+        warning_t_over_n=int(get("sample_size.warning_t_over_n")),
+        psd_relative_tolerance=float(get("matrix.psd_relative_tolerance")),
+        symmetry_tolerance=float(get("matrix.symmetry_tolerance")),
+        correlation_tolerance=float(get("matrix.correlation_tolerance")),
+        condition_warning=float(get("matrix.condition_warning")),
+        condition_reject=float(get("matrix.condition_reject")),
+        relative_tolerance=float(get("cross_check.relative_tolerance")),
+        provisional_parameters=provisional,
+    )
+    _validate_validation(policy)
     return policy
 
 
@@ -106,6 +162,21 @@ def _validate(policy: EstimationPolicy) -> None:
         raise ValueError("minimum_t_over_n must be positive")
     if policy.warning_t_over_n < policy.minimum_t_over_n:
         raise ValueError("warning_t_over_n must not be below minimum_t_over_n")
+    if policy.numeric_scale != "ANNUALIZED":
+        raise ValueError("Plan-3 numeric scale must be ANNUALIZED")
+    if policy.covariance_ddof != 1:
+        raise ValueError("Plan-3 covariance ddof must be 1")
+    if policy.mu_cross_section_ddof != 1:
+        raise ValueError("Plan-3 mu cross-section ddof must be 1")
+
+
+def _validate_validation(policy: EstimationValidationPolicy) -> None:
+    if policy.minimum_t_over_n < 1:
+        raise ValueError("minimum_t_over_n must be positive")
+    if policy.warning_t_over_n < policy.minimum_t_over_n:
+        raise ValueError("warning_t_over_n must not be below minimum_t_over_n")
+    if policy.condition_warning > policy.condition_reject:
+        raise ValueError("condition_warning must not exceed condition_reject")
 
 
 def persist_estimation_policy_version(session: Session, policy: EstimationPolicy) -> int:
@@ -128,5 +199,31 @@ def persist_estimation_policy_version(session: Session, policy: EstimationPolicy
     if row.content != content:
         raise EstimationPolicyVersionConflict(
             f"estimation policy {policy.version} already has different content"
+        )
+    return row.id
+
+
+def persist_estimation_validation_policy_version(
+    session: Session, policy: EstimationValidationPolicy
+) -> int:
+    content = cast(dict[str, object], json.loads(json.dumps(asdict(policy), default=str)))
+    row = session.execute(
+        select(PolicyVersion).where(
+            PolicyVersion.policy_kind == "estimation_validation",
+            PolicyVersion.version_label == policy.version,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = PolicyVersion(
+            policy_kind="estimation_validation",
+            version_label=policy.version,
+            content=content,
+        )
+        session.add(row)
+        session.flush()
+        return row.id
+    if row.content != content:
+        raise EstimationPolicyVersionConflict(
+            f"estimation validation policy {policy.version} already has different content"
         )
     return row.id

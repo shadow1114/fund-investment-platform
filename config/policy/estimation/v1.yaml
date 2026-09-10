@@ -79,6 +79,19 @@ observations:
     value: 5
     status: DECIDED
     source: "07-return-risk/04 CC-7"
+numeric:
+  scale:
+    value: ANNUALIZED
+    status: DECIDED
+    source: "Plan-3 D-4"
+  covariance_ddof:
+    value: 1
+    status: DECIDED
+    source: "Plan-3 D-4"
+  mu_cross_section_ddof:
+    value: 1
+    status: DECIDED
+    source: "Plan-3 D-4"
 risk:
   downside_threshold:
     value: 0

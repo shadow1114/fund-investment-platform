@@ -1,0 +1,11 @@
+sample_size:
+  minimum_t_over_n: {value: 3, status: DECIDED, source: "Plan-3 D-7"}
+  warning_t_over_n: {value: 5, status: DECIDED, source: "Plan-3 D-7"}
+matrix:
+  psd_relative_tolerance: {value: 1.0e-8, status: DECIDED, source: "Plan-3 D-7"}
+  symmetry_tolerance: {value: 1.0e-12, status: DECIDED, source: "Plan-3 D-7"}
+  correlation_tolerance: {value: 1.0e-12, status: DECIDED, source: "Plan-3 D-7"}
+  condition_warning: {value: 1.0e4, status: DECIDED, source: "Plan-3 D-7"}
+  condition_reject: {value: 1.0e6, status: DECIDED, source: "Plan-3 D-7"}
+cross_check:
+  relative_tolerance: {value: 1.0e-6, status: DECIDED, source: "Plan-3 D-4"}

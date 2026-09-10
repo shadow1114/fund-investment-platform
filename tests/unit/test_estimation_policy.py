@@ -3,13 +3,17 @@ from pathlib import Path
 import pytest
 
 from fip.platform.decision_data.context import RuntimeMode
-from fip.services.portfolio_service.estimation.policy import load_estimation_policy
+from fip.services.portfolio_service.estimation.policy import (
+    load_estimation_policy,
+    load_estimation_validation_policy,
+)
+
+POLICY = Path("config/policy/estimation/v1.yaml")
+VALIDATION = Path("config/policy/estimation/validation_v1.yaml")
 
 
 def test_estimation_policy_v1_matches_decided_contract():
-    policy = load_estimation_policy(
-        Path("config/policy/estimation/v1.yaml"), RuntimeMode.LIVE
-    )
+    policy = load_estimation_policy(POLICY, RuntimeMode.LIVE)
 
     assert policy.lookback_trading_days == 756
     assert policy.forecast_horizon == policy.rebalance_frequency == "QUARTER"
@@ -17,6 +21,25 @@ def test_estimation_policy_v1_matches_decided_contract():
     assert policy.secondary_return_bases == ("EXCESS",)
     assert policy.return_method == "HISTORICAL_MEAN_JAMES_STEIN"
     assert policy.covariance_method == "LEDOIT_WOLF_CONSTANT_CORRELATION"
+    assert policy.provisional_parameters == ()
+
+
+def test_estimation_policy_fixes_numeric_conventions():
+    policy = load_estimation_policy(POLICY, RuntimeMode.LIVE)
+
+    assert policy.numeric_scale == "ANNUALIZED"
+    assert policy.covariance_ddof == policy.mu_cross_section_ddof == 1
+
+
+def test_validation_policy_loads_all_decided_thresholds():
+    policy = load_estimation_validation_policy(VALIDATION, RuntimeMode.LIVE)
+
+    assert policy.minimum_t_over_n == 3
+    assert policy.warning_t_over_n == 5
+    assert policy.psd_relative_tolerance == 1.0e-8
+    assert policy.condition_warning == 1.0e4
+    assert policy.condition_reject == 1.0e6
+    assert policy.relative_tolerance == 1.0e-6
     assert policy.provisional_parameters == ()
 
 

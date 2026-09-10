@@ -8,10 +8,14 @@ from fip.services.data_service.models.governance import PolicyVersion
 from fip.services.portfolio_service.estimation.policy import (
     EstimationPolicyVersionConflict,
     load_estimation_policy,
+    load_estimation_validation_policy,
     persist_estimation_policy_version,
+    persist_estimation_validation_policy_version,
 )
 
 pytestmark = pytest.mark.integration
+
+VALIDATION = Path("config/policy/estimation/validation_v1.yaml")
 
 
 def test_estimation_policy_is_versioned_and_idempotent(db_session):
@@ -40,4 +44,24 @@ def test_estimation_policy_version_rejects_different_content(db_session):
         persist_estimation_policy_version(
             db_session,
             replace(policy, lookback_trading_days=252),
+        )
+
+
+def test_validation_policy_persists_as_distinct_kind(db_session):
+    policy = load_estimation_validation_policy(VALIDATION, RuntimeMode.LIVE)
+    row_id = persist_estimation_validation_policy_version(db_session, policy)
+
+    row = db_session.get(PolicyVersion, row_id)
+    assert row is not None
+    assert row.policy_kind == "estimation_validation"
+
+
+def test_validation_policy_version_rejects_different_content(db_session):
+    policy = load_estimation_validation_policy(VALIDATION, RuntimeMode.LIVE)
+    persist_estimation_validation_policy_version(db_session, policy)
+
+    with pytest.raises(EstimationPolicyVersionConflict):
+        persist_estimation_validation_policy_version(
+            db_session,
+            replace(policy, condition_reject=1.0e5),
         )
