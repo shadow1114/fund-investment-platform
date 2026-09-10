@@ -47,6 +47,12 @@ def test_encode_float64_rejects_non_finite_values():
             encode_float64(value)
 
 
+def test_canonical_checksum_rejects_non_finite_floats():
+    for value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError):
+            canonical_checksum({"nested": [value]})
+
+
 def test_lower_triangle_requires_square_matrix_and_matching_size():
     with pytest.raises(ValueError):
         encode_lower_triangle(np.ones((2, 3)))

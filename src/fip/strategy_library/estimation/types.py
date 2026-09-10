@@ -2,7 +2,6 @@
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -17,29 +16,29 @@ class DatedReturn:
 class AlignedReturns:
     instrument_order: tuple[int, ...]
     observation_dates: tuple[dt.date, ...]
-    matrix: np.ndarray[Any, Any]
+    matrix: np.ndarray  # type: ignore[type-arg]
     excluded_instruments: tuple[tuple[int, str], ...]
     dropped_dates: tuple[dt.date, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class ReturnEstimateResult:
-    sample_mean_daily: np.ndarray[Any, Any]
+    sample_mean_daily: np.ndarray  # type: ignore[type-arg]
     target_daily: float
     shrinkage_intensity: float
-    shrunk_mu_annualized: np.ndarray[Any, Any]
-    annualized_mu: np.ndarray[Any, Any]
-    clipped: np.ndarray[Any, Any]
+    shrunk_mu_annualized: np.ndarray  # type: ignore[type-arg]
+    annualized_mu: np.ndarray  # type: ignore[type-arg]
+    clipped: np.ndarray  # type: ignore[type-arg]
 
 
 @dataclass(frozen=True, slots=True)
 class CovarianceEstimateResult:
-    sample_covariance_daily: np.ndarray[Any, Any]
-    target_covariance_daily: np.ndarray[Any, Any]
-    covariance: np.ndarray[Any, Any]
-    correlation: np.ndarray[Any, Any]
-    variance: np.ndarray[Any, Any]
-    volatility: np.ndarray[Any, Any]
+    sample_covariance_daily: np.ndarray  # type: ignore[type-arg]
+    target_covariance_daily: np.ndarray  # type: ignore[type-arg]
+    covariance: np.ndarray  # type: ignore[type-arg]
+    correlation: np.ndarray  # type: ignore[type-arg]
+    variance: np.ndarray  # type: ignore[type-arg]
+    volatility: np.ndarray  # type: ignore[type-arg]
     shrinkage_intensity: float
     sample_min_eigenvalue: float
     sample_max_eigenvalue: float
