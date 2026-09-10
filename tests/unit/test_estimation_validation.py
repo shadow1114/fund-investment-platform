@@ -152,6 +152,13 @@ def test_gate_warns_when_sample_size_is_between_policy_thresholds(valid_bundle: 
     assert result_for(bundle, "MIN_T_OVER_N").status == "PASSED"
 
 
+def test_gate_accepts_exact_minimum_t_over_n_boundary(valid_bundle: ValidationBundle):
+    bundle = replace(valid_bundle, matrix=valid_bundle.matrix[:9])
+
+    assert result_for(bundle, "MIN_T_OVER_N").status == "PASSED"
+    assert result_for(bundle, "WARNING_T_OVER_N").status == "FAILED"
+
+
 @pytest.mark.parametrize(
     ("condition", "severity", "status"),
     [
@@ -191,6 +198,24 @@ def test_gate_rejects_bad_dimensions_symmetric_correlation_and_risk_identity(
         "CORRELATION_NOT_SYMMETRIC",
         "RISK_IDENTITY_MISMATCH",
     } <= failed_codes(bundle)
+
+
+def test_gate_audits_zero_sized_square_matrices_without_aborting(valid_bundle: ValidationBundle):
+    empty = np.empty((0, 0))
+    bundle = replace(
+        valid_bundle,
+        matrix=empty,
+        mu=np.empty(0),
+        covariance=empty,
+        correlation=empty,
+        variance=np.empty(0),
+        volatility=np.empty(0),
+    )
+
+    results = validate_bundle(bundle, POLICY, ())
+
+    assert result_for(bundle, "DIMENSION_MISMATCH").status == "FAILED"
+    assert {result.code for result in results} >= {"SIGMA_NOT_PSD", "NOT_COMPARABLE"}
 
 
 def test_gate_allows_relative_psd_roundoff_but_rejects_material_negative_eigenvalue(
@@ -249,6 +274,64 @@ def test_factor_cross_check_ignores_unavailable_or_lineage_mismatched_candidates
     result = result_for(valid_bundle, "NOT_COMPARABLE", (unavailable, different_window))
 
     assert result.status == "FAILED"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"observation_fingerprint": "different-fingerprint"},
+        {"return_type": "LOG"},
+        {"ddof": 0},
+        {"annualization": 365},
+    ],
+)
+def test_factor_cross_check_requires_each_lineage_field(
+    valid_bundle: ValidationBundle, mutation: dict[str, object]
+):
+    observation = replace(matching_observation(), **mutation)
+
+    result = result_for(valid_bundle, "NOT_COMPARABLE", (observation,))
+
+    assert (result.severity, result.status) == ("WARNING", "FAILED")
+
+
+@pytest.mark.parametrize(
+    ("bundle_fingerprint", "candidate_fingerprint"),
+    [(None, "window-fingerprint"), ("window-fingerprint", None)],
+)
+def test_factor_cross_check_requires_non_null_observation_fingerprints(
+    valid_bundle: ValidationBundle,
+    bundle_fingerprint: str | None,
+    candidate_fingerprint: str | None,
+):
+    bundle = replace(valid_bundle, observation_fingerprint=bundle_fingerprint)
+    observation = replace(matching_observation(), observation_fingerprint=candidate_fingerprint)
+
+    result = result_for(bundle, "NOT_COMPARABLE", (observation,))
+
+    assert (result.severity, result.status) == ("WARNING", "FAILED")
+
+
+@pytest.mark.parametrize(
+    "unrelated",
+    [
+        replace(matching_observation(factor_value_id=8), volatility=np.nan, window="504D"),
+        replace(matching_observation(factor_value_id=8), volatility=np.nan, status="UNAVAILABLE"),
+    ],
+)
+def test_nonfinite_unselected_factor_candidate_does_not_reject_valid_cross_check(
+    valid_bundle: ValidationBundle, unrelated: FactorRiskObservation
+):
+    results = validate_bundle(valid_bundle, POLICY, (matching_observation(), unrelated))
+
+    assert (
+        result_for(valid_bundle, "NON_FINITE", (matching_observation(), unrelated)).status
+        == "PASSED"
+    )
+    assert (
+        next(result for result in results if result.code == "FACTOR_RISK_CROSS_CHECK").status
+        == "PASSED"
+    )
 
 
 @pytest.mark.parametrize(

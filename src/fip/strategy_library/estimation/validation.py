@@ -83,13 +83,14 @@ def validate_bundle(
     dimensions_valid = _dimensions_are_valid(
         matrix, mu, covariance, correlation, variance, volatility, instrument_count
     )
+    factor_matches = _matching_factor_observations(bundle, factor_observations)
     finite_inputs = all(
         _array_is_finite(value)
         for value in (matrix, mu, covariance, correlation, variance, volatility)
     ) and (
         _float_is_finite(bundle.condition_number)
         and _optional_float_is_finite(bundle.factor_volatility)
-        and all(_optional_float_is_finite(item.volatility) for item in factor_observations)
+        and (len(factor_matches) != 1 or _optional_float_is_finite(factor_matches[0].volatility))
     )
 
     results = [
@@ -130,7 +131,7 @@ def validate_bundle(
         _correlation_range_result(correlation, policy.correlation_tolerance),
         _risk_identity_result(covariance, variance, volatility),
         _condition_result(bundle.condition_number, policy),
-        _factor_cross_check_result(bundle, policy, factor_observations),
+        _factor_cross_check_result(bundle, policy, factor_matches),
     ]
     return tuple(results)
 
@@ -207,7 +208,12 @@ def _finite_float(value: object) -> float | None:
 
 
 def _is_square_finite(matrix: Array) -> bool:
-    return matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1] and _array_is_finite(matrix)
+    return (
+        matrix.ndim == 2
+        and matrix.shape[0] > 0
+        and matrix.shape[0] == matrix.shape[1]
+        and _array_is_finite(matrix)
+    )
 
 
 def _symmetric_result(code: str, matrix: Array, tolerance: float) -> ValidationResult:
@@ -307,18 +313,8 @@ def _condition_result(condition_number: object, policy: ValidationPolicy) -> Val
 def _factor_cross_check_result(
     bundle: ValidationBundle,
     policy: ValidationPolicy,
-    observations: tuple[FactorRiskObservation, ...],
+    matches: tuple[FactorRiskObservation, ...],
 ) -> ValidationResult:
-    matches = tuple(
-        observation
-        for observation in observations
-        if observation.status == "AVAILABLE"
-        and observation.window == bundle.window
-        and observation.observation_fingerprint == bundle.observation_fingerprint
-        and observation.return_type == bundle.return_type
-        and observation.ddof == bundle.ddof
-        and observation.annualization == bundle.annualization
-    )
     if len(matches) != 1 or bundle.factor_volatility is None:
         ids = ",".join(
             str(item.factor_value_id)
@@ -355,4 +351,23 @@ def _factor_cross_check_result(
         relative_error <= policy.relative_tolerance,
         f"factor_value_id={observation.factor_value_id}, relative_error={relative_error}, "
         f"tolerance={policy.relative_tolerance}",
+    )
+
+
+def _matching_factor_observations(
+    bundle: ValidationBundle,
+    observations: tuple[FactorRiskObservation, ...],
+) -> tuple[FactorRiskObservation, ...]:
+    if bundle.observation_fingerprint is None:
+        return ()
+    return tuple(
+        observation
+        for observation in observations
+        if observation.status == "AVAILABLE"
+        and observation.window == bundle.window
+        and observation.observation_fingerprint is not None
+        and observation.observation_fingerprint == bundle.observation_fingerprint
+        and observation.return_type == bundle.return_type
+        and observation.ddof == bundle.ddof
+        and observation.annualization == bundle.annualization
     )
