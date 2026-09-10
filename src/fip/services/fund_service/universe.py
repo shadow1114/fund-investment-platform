@@ -49,6 +49,18 @@ class UniverseRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def load_selected_members_ordered(self, snapshot_id: int) -> tuple[int, ...]:
+        return tuple(
+            self._session.execute(
+                select(FundUniverseMember.share_class_id)
+                .where(
+                    FundUniverseMember.snapshot_id == snapshot_id,
+                    FundUniverseMember.status == "SELECTED",
+                )
+                .order_by(FundUniverseMember.share_class_id)
+            ).scalars()
+        )
+
     def save(
         self,
         *,

@@ -95,6 +95,25 @@ class BenchmarkResolution:
         return cls(None, (), None, None, "BENCHMARK_UNAVAILABLE")
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkIndexObservationVersion:
+    index_id: int
+    effective_at: dt.date
+    version: int
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkResolutionSegment:
+    effective_from: dt.date
+    effective_to: dt.date
+    benchmark_id: int
+    components: tuple[BenchmarkComponentPoint, ...]
+    mapping_source: str
+    mapping_version: str
+    index_versions: tuple[BenchmarkIndexObservationVersion, ...]
+    status: str
+
+
 @runtime_checkable
 class NavPitRepository(Protocol):
     """时点感知的净值访问。
@@ -136,6 +155,14 @@ class RiskFreeRatePitRepository(Protocol):
 @runtime_checkable
 class BenchmarkPitRepository(Protocol):
     def resolve(self, share_class_id: int, classification_code: str) -> BenchmarkResolution: ...
+
+    def resolve_history(
+        self,
+        share_class_id: int,
+        classification_code: str,
+        date_from: dt.date,
+        date_to: dt.date,
+    ) -> tuple[BenchmarkResolutionSegment, ...]: ...
 
     def index_series(
         self, index_id: int, date_from: dt.date, date_to: dt.date
