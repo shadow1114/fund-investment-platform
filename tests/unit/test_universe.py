@@ -16,7 +16,7 @@ class _OrderedMemberSession:
     def execute(self, statement):
         sql = str(statement)
         assert "fund_universe_member.status = :status_1" in sql
-        assert "ORDER BY evaluation.fund_universe_member.share_class_id" in sql
+        assert "ORDER BY evaluation.fund_universe_member.share_class_id ASC" in sql
         return _ScalarResult((3, 8, 21))
 
 

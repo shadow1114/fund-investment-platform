@@ -57,7 +57,7 @@ class UniverseRepository:
                     FundUniverseMember.snapshot_id == snapshot_id,
                     FundUniverseMember.status == "SELECTED",
                 )
-                .order_by(FundUniverseMember.share_class_id)
+                .order_by(FundUniverseMember.share_class_id.asc())
             ).scalars()
         )
 
