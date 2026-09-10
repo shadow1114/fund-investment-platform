@@ -29,7 +29,7 @@ def estimate_expected_returns(
     target_daily = float(sample_mean_daily.mean(dtype=np.float64))
     mean_variance = float(np.trace(sample_covariance_daily) / (instrument_count * time_count))
     dispersion = float(np.sum((sample_mean_daily - target_daily) ** 2, dtype=np.float64))
-    if not np.isfinite(sample_covariance_daily).all() or not np.isfinite(mean_variance):
+    if not np.isfinite(sample_covariance_daily).all():
         raise ValueError("sample covariance must be finite")
     if not np.isfinite(dispersion) or dispersion < 0:
         raise ValueError("sample mean dispersion must be finite and non-negative")
@@ -37,6 +37,8 @@ def estimate_expected_returns(
     if dispersion == 0.0:
         shrinkage_intensity = 1.0
     else:
+        if not np.isfinite(mean_variance) or mean_variance <= 0.0:
+            raise ValueError("sample covariance must produce positive mean variance")
         shrinkage_intensity = float(
             np.clip(
                 (instrument_count - 3) * mean_variance / dispersion,

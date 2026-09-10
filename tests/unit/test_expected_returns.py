@@ -46,6 +46,37 @@ def test_james_stein_uses_stable_full_shrinkage_for_equal_means():
     assert not result.clipped.any()
 
 
+def test_james_stein_rejects_zero_variance_when_asset_means_differ():
+    matrix = np.array(
+        [
+            [0.01, 0.02, 0.03, 0.04],
+            [0.01, 0.02, 0.03, 0.04],
+        ]
+    )
+
+    with pytest.raises(ValueError, match="positive mean variance"):
+        estimate_expected_returns(matrix)
+
+
+def test_james_stein_clips_an_outlying_annualized_expected_return():
+    matrix = np.array(
+        [
+            [-0.000001, -0.000001, -0.000001, -0.000001, -0.000001, 0.099999],
+            [0.000001, 0.000001, 0.000001, 0.000001, 0.000001, 0.100001],
+        ]
+    )
+
+    result = estimate_expected_returns(matrix)
+
+    assert result.shrunk_mu_annualized[-1] == pytest.approx(25.2)
+    assert result.clipped.tolist() == [False, False, False, False, False, True]
+    assert result.annualized_mu == pytest.approx(
+        [0.000000001512, 0.000000001512, 0.000000001512, 0.000000001512,
+         0.000000001512, 24.7757138]
+    )
+    assert result.annualized_mu[-1] < result.shrunk_mu_annualized[-1]
+
+
 @pytest.mark.parametrize(
     "matrix",
     [
