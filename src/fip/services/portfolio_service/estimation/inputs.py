@@ -4,7 +4,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 from math import isfinite
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 from sqlalchemy import select
@@ -27,6 +27,9 @@ from fip.strategy_library.estimation.types import DatedReturn, FactorRiskObserva
 _INSUFFICIENT_VALID_RETURNS = "INSUFFICIENT_VALID_RETURNS"
 _CLASSIFICATION_UNAVAILABLE = "CLASSIFICATION_UNAVAILABLE"
 _BENCHMARK_UNAVAILABLE = "BENCHMARK_UNAVAILABLE"
+_INSUFFICIENT_COMPLETE_CASES = "INSUFFICIENT_COMPLETE_CASES"
+
+type BasisInputStatus = Literal["AVAILABLE", "REJECTED"]
 
 
 class FactorRiskCrossCheckProvider(Protocol):
@@ -40,6 +43,8 @@ class FactorRiskCrossCheckProvider(Protocol):
 @dataclass(frozen=True, slots=True)
 class EstimationBasisInput:
     return_basis: str
+    status: BasisInputStatus
+    rejection_reason: str | None
     matrix: np.ndarray  # type: ignore[type-arg]
     instrument_order: tuple[int, ...]
     observation_dates: tuple[dt.date, ...]
@@ -200,9 +205,15 @@ class EstimationInputAssembler:
         session: Session,
         *,
         adjustment_policy_version: str,
+        estimation_method_version: str | int | None = None,
+        estimation_parameter_version: str | int | None = None,
+        validation_policy_version: str | int | None = None,
     ) -> None:
         self._session = session
         self._adjustment_policy_version = adjustment_policy_version
+        self._estimation_method_version = estimation_method_version
+        self._estimation_parameter_version = estimation_parameter_version
+        self._validation_policy_version = validation_policy_version
 
     def load(
         self,
@@ -284,10 +295,20 @@ class EstimationInputAssembler:
             )
 
         absolute = self._assemble_basis(
-            "ABSOLUTE", snapshot_id, policy, candidate_order, tuple(instruments)
+            "ABSOLUTE",
+            snapshot_id,
+            policy,
+            context.code_version,
+            candidate_order,
+            tuple(instruments),
         )
         excess = self._assemble_basis(
-            "EXCESS", snapshot_id, policy, candidate_order, tuple(instruments)
+            "EXCESS",
+            snapshot_id,
+            policy,
+            context.code_version,
+            candidate_order,
+            tuple(instruments),
         )
         return (absolute, excess)
 
@@ -318,7 +339,7 @@ class EstimationInputAssembler:
         lineage: list[dict[str, object]] = []
         switch_dates = tuple(segment.effective_from for segment in segments[1:])
         for segment in segments:
-            component_series: dict[int, dict[dt.date, Decimal]] = {}
+            component_series: dict[int, dict[dt.date, Decimal | None]] = {}
             index_lineage: list[dict[str, object]] = []
             for component in segment.components:
                 observations = benchmarks.index_series(
@@ -327,7 +348,8 @@ class EstimationInputAssembler:
                     segment.effective_to - dt.timedelta(days=1),
                 )
                 component_series[component.index_id] = {
-                    day: value for day, value, _version, _quality in observations
+                    day: value if quality != "UNAVAILABLE" else None
+                    for day, value, _version, quality in observations
                 }
                 index_lineage.append(
                     {
@@ -349,16 +371,22 @@ class EstimationInputAssembler:
             )
             levels: list[tuple[dt.date, Decimal | None]] = []
             for day in dates:
-                if segment.status != "AVAILABLE" or any(
-                    day not in component_series[component.index_id]
+                component_values = [
+                    component_series[component.index_id].get(day)
                     for component in segment.components
+                ]
+                if segment.status != "AVAILABLE" or any(
+                    value is None for value in component_values
                 ):
                     levels.append((day, None))
                     continue
                 composite = sum(
                     (
-                        component_series[component.index_id][day] * component.weight
-                        for component in segment.components
+                        value * component.weight
+                        for value, component in zip(
+                            component_values, segment.components, strict=True
+                        )
+                        if value is not None
                     ),
                     Decimal(0),
                 )
@@ -382,13 +410,20 @@ class EstimationInputAssembler:
                     "index_observations": index_lineage,
                 }
             )
-        return tuple(result), tuple(lineage), switch_dates
+        switch_date_set = set(switch_dates)
+        filtered = tuple(
+            observation
+            for observation in result
+            if observation.effective_at not in switch_date_set
+        )
+        return filtered, tuple(lineage), switch_dates
 
     def _assemble_basis(
         self,
         return_basis: str,
         snapshot_id: int,
         policy: EstimationPolicy,
+        code_version: str,
         candidate_order: tuple[int, ...],
         instruments: tuple[_InstrumentInput, ...],
     ) -> EstimationBasisInput:
@@ -404,6 +439,13 @@ class EstimationInputAssembler:
             }
         aligned = _align(series, tuple(list(candidate_order)), exclusion_reasons)
         observation_dates = tuple(list(aligned.observation_dates))
+        is_available = (
+            len(aligned.instrument_order) > 0
+            and len(observation_dates)
+            >= policy.minimum_t_over_n * len(aligned.instrument_order)
+        )
+        status: BasisInputStatus = "AVAILABLE" if is_available else "REJECTED"
+        rejection_reason = None if is_available else _INSUFFICIENT_COMPLETE_CASES
         observation_fingerprint = canonical_checksum(
             {"observation_dates": [day.isoformat() for day in observation_dates]}
         )
@@ -430,10 +472,16 @@ class EstimationInputAssembler:
             if return_basis == "EXCESS"
             else []
         )
+        dropped_dates = tuple(sorted(set(aligned.dropped_dates) | set(switch_dates)))
         lineage: dict[str, Any] = {
             "universe_snapshot_id": snapshot_id,
             "instrument_order": list(aligned.instrument_order),
             "adjustment_policy_version": self._adjustment_policy_version,
+            "estimation_method_version": self._estimation_method_version,
+            "estimation_parameter_version": self._estimation_parameter_version,
+            "estimation_policy_version": policy.version,
+            "validation_policy_version": self._validation_policy_version,
+            "code_version": code_version,
             "window": {
                 "lookback_trading_days": policy.lookback_trading_days,
                 "type": policy.window_type,
@@ -441,17 +489,19 @@ class EstimationInputAssembler:
             "forecast_horizon": policy.forecast_horizon,
             "return_basis": return_basis,
             "numeric_scale": policy.numeric_scale,
+            "status": status,
+            "rejection_reason": rejection_reason,
             "excluded_instruments": [
                 {"share_class_id": share_class_id, "reason": reason}
                 for share_class_id, reason in aligned.excluded_instruments
             ],
             "observation_dates": [day.isoformat() for day in observation_dates],
-            "dropped_dates": [day.isoformat() for day in aligned.dropped_dates],
+            "dropped_dates": [day.isoformat() for day in dropped_dates],
             "data_completeness": {
                 "candidate_count": len(candidate_order),
                 "included_count": len(aligned.instrument_order),
                 "observation_count": len(observation_dates),
-                "dropped_dates_count": len(aligned.dropped_dates),
+                "dropped_dates_count": len(dropped_dates),
                 "aligned_from": observation_dates[0].isoformat() if observation_dates else None,
                 "aligned_to": observation_dates[-1].isoformat() if observation_dates else None,
                 "valid_return_counts": {
@@ -460,17 +510,33 @@ class EstimationInputAssembler:
                 },
             },
             "instruments": instrument_lineage,
+            "observation_fingerprint": observation_fingerprint,
+            "warnings": (
+                [
+                    {
+                        "code": "BENCHMARK_MAPPING_SWITCH",
+                        "dates": [day.isoformat() for day in switch_dates],
+                    }
+                ]
+                if switch_dates
+                else []
+            ),
         }
         if return_basis == "EXCESS":
             lineage["benchmark_switch_dates"] = [day.isoformat() for day in switch_dates]
         basis_fingerprint = canonical_checksum(lineage)
+        matrix = aligned.matrix.copy() if is_available else np.empty((0, 0), dtype=np.float64)
+        instrument_order = tuple(list(aligned.instrument_order)) if is_available else ()
+        consumable_observation_dates = observation_dates if is_available else ()
         return EstimationBasisInput(
             return_basis=return_basis,
-            matrix=aligned.matrix.copy(),
-            instrument_order=tuple(list(aligned.instrument_order)),
-            observation_dates=observation_dates,
+            status=status,
+            rejection_reason=rejection_reason,
+            matrix=matrix,
+            instrument_order=instrument_order,
+            observation_dates=consumable_observation_dates,
             excluded_instruments=tuple(list(aligned.excluded_instruments)),
-            dropped_dates=tuple(list(aligned.dropped_dates)),
+            dropped_dates=dropped_dates,
             lineage=lineage,
             observation_fingerprint=observation_fingerprint,
             basis_fingerprint=basis_fingerprint,
