@@ -36,6 +36,7 @@ from fip.services.data_service.models import market as _market  # noqa: F401
 from fip.services.data_service.models import raw as _raw  # noqa: F401
 from fip.services.factor_service import models as _factor_service_models  # noqa: F401
 from fip.services.fund_service import models as _fund_service_models  # noqa: F401
+from fip.services.portfolio_service.estimation import models as _estimation_models  # noqa: F401
 
 pytestmark = pytest.mark.integration
 

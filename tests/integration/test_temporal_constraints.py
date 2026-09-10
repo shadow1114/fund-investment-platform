@@ -422,6 +422,22 @@ _ALL_CHECKS = text("""
     ORDER BY 1
 """)
 
+_REQUIRED_PLAN3_CHECKS = {
+    "portfolio.covariance_estimate.ck_covariance_estimate_basis",
+    "portfolio.covariance_estimate.ck_covariance_estimate_correlation_payload",
+    "portfolio.covariance_estimate.ck_covariance_estimate_covariance_payload",
+    "portfolio.covariance_estimate.ck_covariance_estimate_nonnegative_counts",
+    "portfolio.estimation_run.ck_estimation_run_approval_status",
+    "portfolio.estimation_run.ck_estimation_run_final_lineage",
+    "portfolio.estimation_run.ck_estimation_run_lineage_fingerprint_length",
+    "portfolio.estimation_run.ck_estimation_run_status",
+    "portfolio.estimation_validation_result.ck_estimation_validation_basis",
+    "portfolio.estimation_validation_result.ck_estimation_validation_severity",
+    "portfolio.estimation_validation_result.ck_estimation_validation_status",
+    "portfolio.return_estimate.ck_return_estimate_basis",
+    "portfolio.risk_estimate.ck_risk_estimate_basis",
+}
+
 
 def test_check_constraints_match_the_committed_snapshot(db_session):
     """库里【实际】的 CHECK 定义必须与提交在仓库里的快照逐字相同。
@@ -451,6 +467,11 @@ def test_check_constraints_match_the_committed_snapshot(db_session):
     git diff 再不带该环境变量重跑一次。
     """
     rows = db_session.execute(_ALL_CHECKS).all()
+    actual_keys = {key for key, _definition in rows}
+    assert _REQUIRED_PLAN3_CHECKS <= actual_keys, (
+        "Plan-3 CHECK 约束未全部进入真实迁移结果："
+        f"{sorted(_REQUIRED_PLAN3_CHECKS - actual_keys)}"
+    )
     actual = "\n".join(f"{k}\n    {d}" for k, d in rows) + "\n"
 
     if os.environ.get("FIP_WRITE_CHECK_SNAPSHOT") == "1":

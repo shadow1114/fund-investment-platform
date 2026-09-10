@@ -266,3 +266,29 @@ market.risk_free_rate.ck_risk_free_rate_quality_source
     CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
 market.risk_free_rate.ck_risk_free_rate_time_order
     CHECK ((((published_at IS NULL) OR (published_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text))) AND ((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= ((effective_at)::timestamp without time zone AT TIME ZONE 'UTC'::text)) AND (available_at >= COALESCE(provider_available_at, published_at))))
+portfolio.covariance_estimate.ck_covariance_estimate_basis
+    CHECK (((return_basis)::text = ANY ((ARRAY['ABSOLUTE'::character varying, 'EXCESS'::character varying])::text[])))
+portfolio.covariance_estimate.ck_covariance_estimate_correlation_payload
+    CHECK ((correlation_payload ?& ARRAY['shape'::text, 'instrument_order'::text, 'lower_triangle'::text, 'numeric_encoding_version'::text, 'checksum'::text]))
+portfolio.covariance_estimate.ck_covariance_estimate_covariance_payload
+    CHECK ((covariance_payload ?& ARRAY['shape'::text, 'instrument_order'::text, 'lower_triangle'::text, 'numeric_encoding_version'::text, 'checksum'::text]))
+portfolio.covariance_estimate.ck_covariance_estimate_nonnegative_counts
+    CHECK (((observation_count >= 0) AND (instrument_count >= 0) AND (dropped_dates_count >= 0)))
+portfolio.estimation_run.ck_estimation_run_approval_status
+    CHECK ((approved_for_optimization = ((status)::text = ANY ((ARRAY['COMPLETED'::character varying, 'COMPLETED_WITH_WARNING'::character varying])::text[]))))
+portfolio.estimation_run.ck_estimation_run_final_lineage
+    CHECK (((input_lineage_fingerprint IS NOT NULL) OR ((status)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'FAILED'::character varying])::text[]))))
+portfolio.estimation_run.ck_estimation_run_lineage_fingerprint_length
+    CHECK (((input_lineage_fingerprint IS NULL) OR (char_length((input_lineage_fingerprint)::text) = 64)))
+portfolio.estimation_run.ck_estimation_run_status
+    CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'RUNNING'::character varying, 'COMPLETED'::character varying, 'COMPLETED_WITH_WARNING'::character varying, 'REJECTED'::character varying, 'FAILED'::character varying])::text[])))
+portfolio.estimation_validation_result.ck_estimation_validation_basis
+    CHECK (((return_basis IS NULL) OR ((return_basis)::text = ANY ((ARRAY['ABSOLUTE'::character varying, 'EXCESS'::character varying])::text[]))))
+portfolio.estimation_validation_result.ck_estimation_validation_severity
+    CHECK (((severity)::text = ANY ((ARRAY['REJECT'::character varying, 'WARNING'::character varying])::text[])))
+portfolio.estimation_validation_result.ck_estimation_validation_status
+    CHECK (((status)::text = ANY ((ARRAY['PASSED'::character varying, 'FAILED'::character varying])::text[])))
+portfolio.return_estimate.ck_return_estimate_basis
+    CHECK (((return_basis)::text = ANY ((ARRAY['ABSOLUTE'::character varying, 'EXCESS'::character varying])::text[])))
+portfolio.risk_estimate.ck_risk_estimate_basis
+    CHECK (((return_basis)::text = ANY ((ARRAY['ABSOLUTE'::character varying, 'EXCESS'::character varying])::text[])))
