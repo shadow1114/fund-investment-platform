@@ -18,6 +18,10 @@ from fip.strategy_library.estimation.types import FactorRiskObservation
 _RISK_FACTOR_ID = "F-RISK-001"
 
 
+def _lineage_mapping(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _observation_fingerprint(lineage: dict[str, Any]) -> str | None:
     fingerprint = _lineage_string(lineage, "observation_fingerprint")
     if fingerprint is None:
@@ -76,7 +80,7 @@ class SqlFactorRiskCrossCheckProvider:
 
 
 def _observation_from_row(factor_run_id: int, value: FactorValue) -> FactorRiskObservation:
-    lineage = value.input_lineage
+    lineage = _lineage_mapping(value.input_lineage)
     return FactorRiskObservation(
         factor_run_id=factor_run_id,
         factor_value_id=value.id,

@@ -2,6 +2,7 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 
 from fip.services.data_service.models.fund import Fund, FundShareClass
 from fip.services.data_service.models.governance import PolicyVersion
@@ -217,3 +218,31 @@ def test_adapter_marks_incomplete_lineage_not_comparable(db_session, factor_risk
         1,
         252,
     )
+
+
+@pytest.mark.parametrize("lineage", ('"scalar"', "[]", "null"))
+def test_adapter_treats_non_mapping_jsonb_lineage_as_not_comparable(
+    db_session, factor_risk_candidates, lineage
+):
+    db_session.execute(
+        text(
+            "UPDATE factor.factor_value "
+            "SET input_lineage = CAST(:lineage AS jsonb) WHERE id = 205"
+        ),
+        {"lineage": lineage},
+    )
+
+    candidates = SqlFactorRiskCrossCheckProvider(db_session).load_candidates(
+        factor_risk_candidates, "decision-1"
+    )
+
+    malformed = candidates[1]
+    assert malformed.factor_value_id == 205
+    assert malformed.volatility == 0.22
+    assert malformed.status == "AVAILABLE"
+    assert (
+        malformed.observation_fingerprint,
+        malformed.return_type,
+        malformed.ddof,
+        malformed.annualization,
+    ) == (None, None, None, None)
