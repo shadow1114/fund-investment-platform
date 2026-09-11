@@ -1,9 +1,13 @@
 import dataclasses
 import datetime as dt
+import threading
+import time
+import uuid
 
 import numpy as np
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import event, func, select, text
+from sqlalchemy.orm import Session
 
 from fip.services.data_service.models.fund import Fund, FundShareClass
 from fip.services.data_service.models.governance import PolicyVersion
@@ -167,9 +171,150 @@ def repository_fixture(db_session):
     return db_session, EstimationRunRepository(db_session), identity, bundle
 
 
-def _complete(repository, identity, bundle, *, fingerprint="a" * 64):
+def _complete(repository, identity, bundle, *, fingerprint=None):
     started = repository.start(identity)
-    return repository.complete(started.run_id, (bundle,), fingerprint, with_warning=True)
+    fingerprint = fingerprint or _aggregate_fingerprint(bundle)
+    return repository.complete(started.run_id, (bundle,), fingerprint)
+
+
+def _aggregate_fingerprint(*outcomes):
+    return canonical_checksum(
+        {
+            outcome.return_basis: outcome.input_fingerprint
+            for outcome in sorted(outcomes, key=lambda item: item.return_basis)
+        }
+    )
+
+
+def _seed_concurrency_identity(db_engine):
+    suffix = uuid.uuid4().hex[:10]
+    session = Session(db_engine, future=True)
+    policies = {
+        kind: PolicyVersion(
+            policy_kind=kind,
+            version_label=f"concurrent-{suffix}-{index}",
+            content={},
+        )
+        for index, kind in enumerate(("evaluation", "estimation", "estimation_validation"), start=1)
+    }
+    session.add_all(policies.values())
+    session.flush()
+    fund = Fund(
+        fund_code=f"concurrent-{suffix}",
+        product_name=f"Concurrent {suffix}",
+        grouping_status="CONFIRMED",
+    )
+    session.add(fund)
+    session.flush()
+    share = FundShareClass(
+        fund_id=fund.id,
+        share_class_code="A",
+        display_name=f"Concurrent {suffix} A",
+    )
+    session.add(share)
+    session.flush()
+    decision_id = f"concurrent-{suffix}"
+    peer_group = PeerGroupSnapshot(
+        decision_id=decision_id,
+        classification_code="BOND",
+        base_currency="CNY",
+        policy_version_id=policies["evaluation"].id,
+        decision_at=dt.date(2026, 9, 10),
+        status="AVAILABLE",
+        member_count=1,
+    )
+    session.add(peer_group)
+    session.flush()
+    factor_run = FactorRun(
+        decision_id=decision_id,
+        peer_group_snapshot_id=peer_group.id,
+        metric_version_id=policies["evaluation"].id,
+        evaluation_policy_version_id=policies["evaluation"].id,
+        input_quality_summary={},
+    )
+    session.add(factor_run)
+    session.flush()
+    evaluation = FundEvaluation(
+        decision_id=decision_id,
+        peer_group_snapshot_id=peer_group.id,
+        factor_run_id=factor_run.id,
+        policy_version_id=policies["evaluation"].id,
+    )
+    session.add(evaluation)
+    session.flush()
+    universe = FundUniverseSnapshot(
+        decision_id=decision_id,
+        evaluation_id=evaluation.id,
+        policy_version_id=policies["evaluation"].id,
+    )
+    method = EstimationMethodVersion(
+        method_code=f"concurrent-{suffix}",
+        version_label="v1",
+        implementation_path="fip.strategy_library.estimation",
+        specification={},
+    )
+    parameters = EstimationParameterVersion(version_label=f"concurrent-{suffix}", parameters={})
+    session.add_all((universe, method, parameters))
+    session.flush()
+    identity = EstimationRunIdentity(
+        decision_id=decision_id,
+        universe_snapshot_id=universe.id,
+        estimation_method_version_id=method.id,
+        estimation_parameter_version_id=parameters.id,
+        estimation_policy_version_id=policies["estimation"].id,
+        validation_policy_version_id=policies["estimation_validation"].id,
+        code_version="code-v1",
+    )
+    session.commit()
+    session.close()
+    return identity
+
+
+def _cleanup_concurrency_identity(db_engine, identity):
+    parameters = {"decision_id": identity.decision_id}
+    statements = (
+        "DELETE FROM portfolio.estimation_run WHERE decision_id = :decision_id",
+        "DELETE FROM evaluation.fund_universe_snapshot WHERE decision_id = :decision_id",
+        "DELETE FROM evaluation.fund_evaluation WHERE decision_id = :decision_id",
+        "DELETE FROM factor.factor_run WHERE decision_id = :decision_id",
+        "DELETE FROM evaluation.peer_group_snapshot WHERE decision_id = :decision_id",
+        "DELETE FROM fund.fund_share_class WHERE fund_id IN "
+        "(SELECT id FROM fund.fund WHERE fund_code = :decision_id)",
+        "DELETE FROM fund.fund WHERE fund_code = :decision_id",
+        "DELETE FROM portfolio.estimation_method_version "
+        "WHERE id = :estimation_method_version_id",
+        "DELETE FROM portfolio.estimation_parameter_version "
+        "WHERE id = :estimation_parameter_version_id",
+        "DELETE FROM governance.policy_version WHERE id IN "
+        "(:estimation_policy_version_id, :validation_policy_version_id)",
+        "DELETE FROM governance.policy_version WHERE version_label LIKE :evaluation_label",
+    )
+    parameters.update(
+        {
+            "estimation_method_version_id": identity.estimation_method_version_id,
+            "estimation_parameter_version_id": identity.estimation_parameter_version_id,
+            "estimation_policy_version_id": identity.estimation_policy_version_id,
+            "validation_policy_version_id": identity.validation_policy_version_id,
+            "evaluation_label": f"%{identity.decision_id.removeprefix('concurrent-')}%",
+        }
+    )
+    with db_engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement), parameters)
+
+
+def _wait_for_backend_lock(db_engine, backend_pid):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with db_engine.connect() as connection:
+            wait_event_type = connection.execute(
+                text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                {"pid": backend_pid},
+            ).scalar_one_or_none()
+        if wait_event_type == "Lock":
+            return
+        time.sleep(0.01)
+    raise AssertionError("worker backend did not block on the run row lock")
 
 
 def test_start_is_idempotent_and_returns_existing_running_state(repository_fixture):
@@ -185,6 +330,71 @@ def test_start_is_idempotent_and_returns_existing_running_state(repository_fixtu
         False,
     )
     assert db_session.scalar(select(func.count()).select_from(EstimationRun)) == 1
+
+
+def test_concurrent_start_unique_key_race_returns_one_run(db_engine):
+    identity = _seed_concurrency_identity(db_engine)
+    barrier = threading.Barrier(2)
+    seen_threads: set[str] = set()
+    seen_lock = threading.Lock()
+    results = {}
+
+    def synchronize_after_initial_lookup(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ):
+        thread_name = threading.current_thread().name
+        if (
+            "portfolio.estimation_run" not in statement
+            or "FOR UPDATE" not in statement
+            or not thread_name.startswith("estimation-start-")
+        ):
+            return
+        with seen_lock:
+            if thread_name in seen_threads:
+                return
+            seen_threads.add(thread_name)
+        barrier.wait(timeout=10)
+
+    def worker(name):
+        session = Session(db_engine, future=True)
+        try:
+            results[name] = EstimationRunRepository(session).start(identity)
+            session.commit()
+        except BaseException as exc:  # noqa: BLE001 - propagate thread failures
+            results[name] = exc
+        finally:
+            session.close()
+
+    event.listen(db_engine, "after_cursor_execute", synchronize_after_initial_lookup)
+    threads = tuple(
+        threading.Thread(target=worker, args=(name,), name=f"estimation-start-{name}")
+        for name in ("a", "b")
+    )
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+        assert not any(thread.is_alive() for thread in threads)
+        assert set(results) == {"a", "b"}
+        for result in results.values():
+            if isinstance(result, BaseException):
+                raise AssertionError("concurrent start raised") from result
+        first, second = results["a"], results["b"]
+        assert first.run_id == second.run_id
+        assert sorted((first.should_execute, second.should_execute)) == [False, True]
+        with Session(db_engine, future=True) as check_session:
+            assert (
+                check_session.scalar(
+                    select(func.count())
+                    .select_from(EstimationRun)
+                    .where(EstimationRun.decision_id == identity.decision_id)
+                )
+                == 1
+            )
+    finally:
+        event.remove(db_engine, "after_cursor_execute", synchronize_after_initial_lookup)
+        _cleanup_concurrency_identity(db_engine, identity)
 
 
 def test_failed_run_is_returned_without_implicit_retry(repository_fixture):
@@ -220,11 +430,73 @@ def test_only_explicit_retry_reuses_failed_run(repository_fixture):
         repository.retry_failed(started.run_id)
 
 
+def test_retry_failed_waits_for_row_lock_and_rechecks_transition(db_engine):
+    identity = _seed_concurrency_identity(db_engine)
+    setup_session = Session(db_engine, future=True)
+    started = EstimationRunRepository(setup_session).start(identity)
+    setup_session.commit()
+    EstimationRunRepository(setup_session).fail(started.run_id, "CALCULATION_ERROR")
+    setup_session.commit()
+    setup_session.close()
+
+    blocker = Session(db_engine, future=True)
+    worker_session = Session(db_engine, future=True)
+    worker_backend_pid = worker_session.scalar(text("SELECT pg_backend_pid()"))
+    assert worker_backend_pid is not None
+    locked = blocker.execute(
+        select(EstimationRun).where(EstimationRun.id == started.run_id).with_for_update()
+    ).scalar_one()
+    worker_query_started = threading.Event()
+    worker_result = {}
+
+    def observe_worker_query(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if (
+            threading.current_thread().name == "estimation-retry-worker"
+            and "portfolio.estimation_run" in statement
+        ):
+            worker_query_started.set()
+
+    def retry_worker():
+        try:
+            worker_result["result"] = EstimationRunRepository(worker_session).retry_failed(
+                started.run_id
+            )
+            worker_session.commit()
+        except BaseException as exc:  # noqa: BLE001 - propagate thread failures
+            worker_session.rollback()
+            worker_result["result"] = exc
+
+    event.listen(db_engine, "before_cursor_execute", observe_worker_query)
+    thread = threading.Thread(target=retry_worker, name="estimation-retry-worker")
+    try:
+        thread.start()
+        assert worker_query_started.wait(timeout=10)
+        _wait_for_backend_lock(db_engine, worker_backend_pid)
+        locked.status = "RUNNING"
+        locked.error_code = None
+        locked.completed_at = None
+        blocker.commit()
+        thread.join(timeout=15)
+        assert not thread.is_alive()
+        assert isinstance(worker_result.get("result"), EstimationStateError)
+        with Session(db_engine, future=True) as check_session:
+            run = check_session.get(EstimationRun, started.run_id)
+            assert run is not None and run.status == "RUNNING"
+    finally:
+        if thread.is_alive():
+            blocker.rollback()
+            thread.join(timeout=5)
+        event.remove(db_engine, "before_cursor_execute", observe_worker_query)
+        blocker.close()
+        worker_session.close()
+        _cleanup_concurrency_identity(db_engine, identity)
+
+
 def test_complete_persists_exact_bundle_and_does_not_duplicate(repository_fixture):
     db_session, repository, identity, bundle = repository_fixture
 
     completed = _complete(repository, identity, bundle)
-    repeated = repository.complete(completed.run_id, (bundle,), "a" * 64, with_warning=True)
+    repeated = repository.complete(completed.run_id, (bundle,), _aggregate_fingerprint(bundle))
     restarted = repository.start(identity)
 
     assert (completed.status, completed.approved_for_optimization) == (
@@ -243,19 +515,113 @@ def test_complete_persists_exact_bundle_and_does_not_duplicate(repository_fixtur
     assert db_session.scalar(select(func.count()).select_from(EstimationValidationResult)) == 2
 
 
+def test_failed_absolute_reject_validation_derives_rejected_unapproved_run(
+    repository_fixture,
+):
+    _db_session, repository, identity, bundle = repository_fixture
+    started = repository.start(identity)
+    failed_reject = dataclasses.replace(
+        bundle,
+        validations=bundle.validations
+        + (ValidationResult("SIGMA_NOT_PSD", "REJECT", "FAILED", "negative eigenvalue"),),
+    )
+
+    finalized = repository.complete(
+        started.run_id, (failed_reject,), _aggregate_fingerprint(failed_reject)
+    )
+
+    assert (finalized.status, finalized.approved_for_optimization) == ("REJECTED", False)
+
+
+def test_failed_absolute_warning_validation_derives_completed_with_warning(
+    repository_fixture,
+):
+    _db_session, repository, identity, bundle = repository_fixture
+    started = repository.start(identity)
+    warning_only = dataclasses.replace(
+        bundle,
+        validations=(
+            ValidationResult("MIN_T_OVER_N", "REJECT", "PASSED", "enough observations"),
+            ValidationResult("NOT_COMPARABLE", "WARNING", "FAILED", "no factor candidate"),
+        ),
+    )
+
+    finalized = repository.complete(
+        started.run_id, (warning_only,), _aggregate_fingerprint(warning_only)
+    )
+
+    assert (finalized.status, finalized.approved_for_optimization) == (
+        "COMPLETED_WITH_WARNING",
+        True,
+    )
+
+
 def test_same_key_with_different_fingerprint_conflicts(repository_fixture):
     _db_session, repository, identity, bundle = repository_fixture
-    completed = _complete(repository, identity, bundle, fingerprint="a" * 64)
+    completed = _complete(repository, identity, bundle)
+    changed_lineage = {**bundle.input_lineage, "revision": 2}
+    changed_bundle = dataclasses.replace(
+        bundle,
+        input_lineage=changed_lineage,
+        input_fingerprint=canonical_checksum(changed_lineage),
+    )
 
     with pytest.raises(EstimationRunConflict):
-        repository.complete(completed.run_id, (bundle,), "c" * 64, with_warning=True)
+        repository.complete(
+            completed.run_id,
+            (changed_bundle,),
+            _aggregate_fingerprint(changed_bundle),
+        )
+
+
+def test_complete_rejects_arbitrary_run_fingerprint(repository_fixture):
+    db_session, repository, identity, bundle = repository_fixture
+    started = repository.start(identity)
+
+    with pytest.raises(EstimationIntegrityError):
+        repository.complete(started.run_id, (bundle,), "a" * 64)
+
+    assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 0
+
+
+def test_approved_provider_recomputes_persisted_basis_aggregate(repository_fixture):
+    db_session, repository, identity, bundle = repository_fixture
+    started = repository.start(identity)
+    completed = repository.complete(
+        started.run_id,
+        (bundle,),
+        _aggregate_fingerprint(bundle),
+    )
+    db_session.execute(
+        text(
+            """
+            UPDATE portfolio.estimation_run
+            SET input_lineage_fingerprint = :fingerprint
+            WHERE id = :run_id
+            """
+        ),
+        {"run_id": completed.run_id, "fingerprint": "a" * 64},
+    )
+    db_session.expire_all()
+
+    with pytest.raises(EstimationIntegrityError):
+        ApprovedEstimationProvider(db_session).load(completed.run_id)
 
 
 def test_reject_persists_audit_bundle_but_never_approves(repository_fixture):
     db_session, repository, identity, bundle = repository_fixture
     started = repository.start(identity)
+    rejected_bundle = dataclasses.replace(
+        bundle,
+        validations=bundle.validations
+        + (ValidationResult("SIGMA_NOT_PSD", "REJECT", "FAILED", "negative eigenvalue"),),
+    )
 
-    rejected = repository.reject(started.run_id, (bundle,), "a" * 64)
+    rejected = repository.reject(
+        started.run_id,
+        (rejected_bundle,),
+        _aggregate_fingerprint(rejected_bundle),
+    )
 
     assert (rejected.status, rejected.approved_for_optimization) == ("REJECTED", False)
     assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 2
@@ -286,7 +652,7 @@ def test_reject_persists_input_rejection_without_fabricating_numeric_results(
     rejected = repository.reject(
         started.run_id,
         (),
-        "a" * 64,
+        _aggregate_fingerprint(rejection),
         basis_rejections=(rejection,),
     )
 
@@ -330,8 +696,7 @@ def test_complete_can_audit_rejected_excess_without_mixing_it_into_approval(
     completed = repository.complete(
         started.run_id,
         (bundle,),
-        "a" * 64,
-        with_warning=True,
+        _aggregate_fingerprint(bundle, rejection),
         basis_rejections=(rejection,),
     )
 
@@ -401,7 +766,11 @@ def test_complete_rejects_dimension_order_or_member_mismatch_before_save(
     started = repository.start(identity)
 
     with pytest.raises(EstimationIntegrityError):
-        repository.complete(started.run_id, (mutate(bundle),), "a" * 64)
+        repository.complete(
+            started.run_id,
+            (mutate(bundle),),
+            _aggregate_fingerprint(bundle),
+        )
 
     assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 0
     run = db_session.get(EstimationRun, started.run_id)
@@ -414,11 +783,12 @@ def test_complete_rejects_input_fingerprint_that_does_not_match_lineage(
     db_session, repository, identity, bundle = repository_fixture
     started = repository.start(identity)
 
+    mismatched = dataclasses.replace(bundle, input_fingerprint="b" * 64)
     with pytest.raises(EstimationIntegrityError):
         repository.complete(
             started.run_id,
-            (dataclasses.replace(bundle, input_fingerprint="b" * 64),),
-            "a" * 64,
+            (mismatched,),
+            _aggregate_fingerprint(mismatched),
         )
 
     assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 0
@@ -435,7 +805,11 @@ def test_complete_rejects_nonannualized_result_bundle(repository_fixture):
     )
 
     with pytest.raises(EstimationIntegrityError):
-        repository.complete(started.run_id, (nonannualized,), "a" * 64)
+        repository.complete(
+            started.run_id,
+            (nonannualized,),
+            _aggregate_fingerprint(nonannualized),
+        )
 
     assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 0
 
@@ -449,7 +823,7 @@ def test_complete_normalizes_malformed_scalar_to_integrity_error(repository_fixt
         repository.complete(
             started.run_id,
             (dataclasses.replace(bundle, return_estimate=malformed_returns),),  # type: ignore[arg-type]
-            "a" * 64,
+            _aggregate_fingerprint(bundle),
         )
 
     assert db_session.scalar(select(func.count()).select_from(ReturnEstimate)) == 0
@@ -490,6 +864,63 @@ def test_approved_provider_rejects_corrupted_checksum(repository_fixture):
         ),
         {"run_id": completed.run_id, "checksum": "f" * 64},
     )
+    db_session.expire_all()
+
+    with pytest.raises(EstimationIntegrityError):
+        ApprovedEstimationProvider(db_session).load(completed.run_id)
+
+
+@pytest.mark.parametrize("corrupted_value", [0.04, "0.040"])
+def test_approved_provider_rejects_noncanonical_matrix_numbers(repository_fixture, corrupted_value):
+    db_session, repository, identity, bundle = repository_fixture
+    completed = _complete(repository, identity, bundle)
+    covariance = db_session.scalar(
+        select(CovarianceEstimate).where(
+            CovarianceEstimate.run_id == completed.run_id,
+            CovarianceEstimate.return_basis == "ABSOLUTE",
+        )
+    )
+    assert covariance is not None
+    payload = dict(covariance.covariance_payload)
+    lower_triangle = list(payload["lower_triangle"])
+    lower_triangle[0] = corrupted_value
+    payload["lower_triangle"] = lower_triangle
+    core = {key: value for key, value in payload.items() if key != "checksum"}
+    payload["checksum"] = canonical_checksum(core)
+    covariance.covariance_payload = payload
+    db_session.flush()
+    db_session.expire_all()
+
+    with pytest.raises(EstimationIntegrityError):
+        ApprovedEstimationProvider(db_session).load(completed.run_id)
+
+
+@pytest.mark.parametrize(
+    ("model", "field", "noncanonical"),
+    [
+        (ReturnEstimate, "sample_mean", "0.00010"),
+        (ReturnEstimate, "shrinkage_target", "0.000150"),
+        (ReturnEstimate, "shrinkage_intensity", "0.250"),
+        (ReturnEstimate, "mu_before_clip", "0.040"),
+        (ReturnEstimate, "mu", "0.040"),
+        (RiskEstimate, "variance", "0.040"),
+        (RiskEstimate, "volatility", "0.20"),
+    ],
+)
+def test_approved_provider_rejects_noncanonical_per_fund_numeric_strings(
+    repository_fixture, model, field, noncanonical
+):
+    db_session, repository, identity, bundle = repository_fixture
+    completed = _complete(repository, identity, bundle)
+    row = db_session.scalars(
+        select(model).where(
+            model.run_id == completed.run_id,
+            model.return_basis == "ABSOLUTE",
+        )
+    ).first()
+    assert row is not None
+    setattr(row, field, noncanonical)
+    db_session.flush()
     db_session.expire_all()
 
     with pytest.raises(EstimationIntegrityError):

@@ -138,6 +138,17 @@ def _validate_fingerprint(value: str, field: str) -> None:
         raise EstimationIntegrityError(f"{field} must be a lowercase SHA-256 digest")
 
 
+def aggregate_input_lineage_fingerprint(basis_fingerprints: dict[str, str]) -> str:
+    """Aggregate canonical per-basis fingerprints into the immutable run digest."""
+    if not basis_fingerprints:
+        raise EstimationIntegrityError("run fingerprint requires at least one basis outcome")
+    if any(basis not in RETURN_BASES for basis in basis_fingerprints):
+        raise EstimationIntegrityError("run fingerprint contains an unsupported return basis")
+    for basis, fingerprint in basis_fingerprints.items():
+        _validate_fingerprint(fingerprint, f"{basis} input_fingerprint")
+    return canonical_checksum(dict(sorted(basis_fingerprints.items())))
+
+
 def _shape(value: object) -> tuple[int, ...]:
     return tuple(np.asarray(value).shape)
 
@@ -149,6 +160,19 @@ def _require_finite(value: object, field: str) -> None:
         raise EstimationIntegrityError(f"{field} must contain float64 values") from exc
     if not finite:
         raise EstimationIntegrityError(f"{field} must contain only finite values")
+
+
+def _decode_canonical_float64(value: object, field: str) -> float:
+    if not isinstance(value, str):
+        raise EstimationIntegrityError(f"{field} must be a canonical float64 string")
+    try:
+        decoded = float(value)
+        canonical = encode_float64(decoded)
+    except (TypeError, ValueError) as exc:
+        raise EstimationIntegrityError(f"{field} is not a finite float64 string") from exc
+    if canonical != value:
+        raise EstimationIntegrityError(f"{field} is not shortest-roundtrip float64 encoding")
+    return decoded
 
 
 def _validate_bundle(bundle: EstimationResultBundle) -> None:
@@ -325,15 +349,12 @@ class EstimationRunRepository:
         bundles: tuple[EstimationResultBundle, ...],
         fingerprint: str,
         *,
-        with_warning: bool = False,
         basis_rejections: tuple[EstimationBasisRejection, ...] = (),
     ) -> EstimationRunResult:
         return self._finalize(
             run_id,
             bundles,
             fingerprint,
-            status="COMPLETED_WITH_WARNING" if with_warning else "COMPLETED",
-            approved=True,
             basis_rejections=basis_rejections,
         )
 
@@ -349,8 +370,6 @@ class EstimationRunRepository:
             run_id,
             bundles,
             fingerprint,
-            status="REJECTED",
-            approved=False,
             basis_rejections=basis_rejections,
         )
 
@@ -378,20 +397,9 @@ class EstimationRunRepository:
         bundles: tuple[EstimationResultBundle, ...],
         fingerprint: str,
         *,
-        status: str,
-        approved: bool,
         basis_rejections: tuple[EstimationBasisRejection, ...],
     ) -> EstimationRunResult:
         _validate_fingerprint(fingerprint, "input_lineage_fingerprint")
-        row = self._locked_run(run_id)
-        if row.status in FINAL_BUSINESS_STATUSES:
-            if row.input_lineage_fingerprint != fingerprint:
-                raise EstimationRunConflict(
-                    f"run {run_id} identity conflicts with different input lineage"
-                )
-            return _run_result(row)
-        if row.status != "RUNNING":
-            raise EstimationStateError(f"run {run_id} cannot finalize from {row.status}")
         if not bundles and not basis_rejections:
             raise EstimationIntegrityError(
                 "a final business run must contain a result or rejected-basis audit"
@@ -404,14 +412,32 @@ class EstimationRunRepository:
             raise EstimationIntegrityError("each rejected return basis may appear only once")
         if set(bases) & set(rejected_bases):
             raise EstimationIntegrityError("a return basis cannot be both estimated and rejected")
-        if approved and "ABSOLUTE" not in bases:
-            raise EstimationIntegrityError("an approved run requires an ABSOLUTE result bundle")
-        if not approved and "ABSOLUTE" not in {*bases, *rejected_bases}:
-            raise EstimationIntegrityError("a rejected run requires an ABSOLUTE basis outcome")
+        if "ABSOLUTE" not in {*bases, *rejected_bases}:
+            raise EstimationIntegrityError("a final run requires an ABSOLUTE basis outcome")
         for bundle in bundles:
             _validate_bundle(bundle)
         for rejection in basis_rejections:
             _validate_basis_rejection(rejection)
+        status, approved = self._derive_outcome(bundles, basis_rejections)
+        basis_fingerprints = {bundle.return_basis: bundle.input_fingerprint for bundle in bundles}
+        basis_fingerprints.update(
+            {rejection.return_basis: rejection.input_fingerprint for rejection in basis_rejections}
+        )
+        expected_fingerprint = aggregate_input_lineage_fingerprint(basis_fingerprints)
+        if fingerprint != expected_fingerprint:
+            raise EstimationIntegrityError(
+                "run input fingerprint does not match persisted basis fingerprints"
+            )
+
+        row = self._locked_run(run_id)
+        if row.status in FINAL_BUSINESS_STATUSES:
+            if row.input_lineage_fingerprint != fingerprint:
+                raise EstimationRunConflict(
+                    f"run {run_id} identity conflicts with different input lineage"
+                )
+            return _run_result(row)
+        if row.status != "RUNNING":
+            raise EstimationStateError(f"run {run_id} cannot finalize from {row.status}")
 
         for bundle in bundles:
             self._save_bundle(run_id, bundle)
@@ -424,6 +450,29 @@ class EstimationRunRepository:
         row.completed_at = dt.datetime.now(dt.UTC)
         self._session.flush()
         return _run_result(row)
+
+    @staticmethod
+    def _derive_outcome(
+        bundles: tuple[EstimationResultBundle, ...],
+        basis_rejections: tuple[EstimationBasisRejection, ...],
+    ) -> tuple[str, bool]:
+        rejected_bases = {rejection.return_basis for rejection in basis_rejections}
+        by_basis = {bundle.return_basis: bundle for bundle in bundles}
+        absolute = by_basis.get("ABSOLUTE")
+        absolute_reject_failed = absolute is not None and any(
+            result.severity == "REJECT" and result.status == "FAILED"
+            for result in absolute.validations
+        )
+        if "ABSOLUTE" in rejected_bases or absolute_reject_failed:
+            return "REJECTED", False
+
+        any_failed_validation = any(
+            result.status == "FAILED" for bundle in bundles for result in bundle.validations
+        )
+        has_excess_rejection = "EXCESS" in rejected_bases
+        if any_failed_validation or has_excess_rejection:
+            return "COMPLETED_WITH_WARNING", True
+        return "COMPLETED", True
 
     def _save_bundle(self, run_id: int, bundle: EstimationResultBundle) -> None:
         order = bundle.instrument_order
@@ -554,16 +603,54 @@ class ApprovedEstimationProvider:
         if run is None or run.input_lineage_fingerprint is None:
             raise EstimationIntegrityError(f"run {run_id} is not a final approved estimation")
 
-        covariance_rows = (
+        all_covariance_rows = (
             self._session.execute(
-                select(CovarianceEstimate).where(
-                    CovarianceEstimate.run_id == run_id,
-                    CovarianceEstimate.return_basis == "ABSOLUTE",
+                select(CovarianceEstimate).where(CovarianceEstimate.run_id == run_id)
+            )
+            .scalars()
+            .all()
+        )
+        rejection_rows = (
+            self._session.execute(
+                select(EstimationValidationResult).where(
+                    EstimationValidationResult.run_id == run_id,
+                    EstimationValidationResult.code == "BASIS_INPUT_REJECTED",
                 )
             )
             .scalars()
             .all()
         )
+        basis_fingerprints: dict[str, str] = {}
+        for covariance_result in all_covariance_rows:
+            self._add_verified_basis_fingerprint(
+                basis_fingerprints,
+                covariance_result.return_basis,
+                covariance_result.input_lineage,
+                covariance_result.input_fingerprint,
+            )
+        for rejection in rejection_rows:
+            detail = rejection.detail
+            lineage = detail.get("input_lineage")
+            basis_fingerprint = detail.get("input_fingerprint")
+            if (
+                rejection.return_basis is None
+                or not isinstance(lineage, dict)
+                or not isinstance(basis_fingerprint, str)
+            ):
+                raise EstimationIntegrityError("rejected basis lineage payload is invalid")
+            self._add_verified_basis_fingerprint(
+                basis_fingerprints,
+                rejection.return_basis,
+                lineage,
+                basis_fingerprint,
+            )
+        expected_run_fingerprint = aggregate_input_lineage_fingerprint(basis_fingerprints)
+        if run.input_lineage_fingerprint != expected_run_fingerprint:
+            raise EstimationIntegrityError(
+                "run input fingerprint does not match persisted basis lineage"
+            )
+
+        covariance_rows = [row for row in all_covariance_rows if row.return_basis == "ABSOLUTE"]
         if len(covariance_rows) != 1:
             raise EstimationIntegrityError(
                 "approved run must contain exactly one ABSOLUTE covariance result"
@@ -630,19 +717,56 @@ class ApprovedEstimationProvider:
         if return_encoding_mismatch or risk_encoding_mismatch:
             raise EstimationIntegrityError("result numeric encoding versions differ")
 
+        for return_result in return_rows:
+            for field in (
+                "sample_mean",
+                "shrinkage_target",
+                "shrinkage_intensity",
+                "mu_before_clip",
+                "mu",
+            ):
+                _decode_canonical_float64(getattr(return_result, field), f"ReturnEstimate.{field}")
+        for risk_result in risk_rows:
+            for field in ("variance", "volatility"):
+                _decode_canonical_float64(getattr(risk_result, field), f"RiskEstimate.{field}")
+        for field in (
+            "shrinkage_intensity",
+            "sample_min_eigenvalue",
+            "sample_max_eigenvalue",
+            "sample_condition_number",
+            "final_min_eigenvalue",
+            "final_max_eigenvalue",
+            "final_condition_number",
+        ):
+            _decode_canonical_float64(getattr(covariance_row, field), f"CovarianceEstimate.{field}")
+
         try:
             mu = np.asarray(
-                [float(return_by_member[member].mu) for member in order], dtype=np.float64
+                [
+                    _decode_canonical_float64(return_by_member[member].mu, "ReturnEstimate.mu")
+                    for member in order
+                ],
+                dtype=np.float64,
             )
             variance = np.asarray(
-                [float(risk_by_member[member].variance) for member in order],
+                [
+                    _decode_canonical_float64(
+                        risk_by_member[member].variance, "RiskEstimate.variance"
+                    )
+                    for member in order
+                ],
                 dtype=np.float64,
             )
             volatility = np.asarray(
-                [float(risk_by_member[member].volatility) for member in order],
+                [
+                    _decode_canonical_float64(
+                        risk_by_member[member].volatility, "RiskEstimate.volatility"
+                    )
+                    for member in order
+                ],
                 dtype=np.float64,
             )
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, EstimationIntegrityError) as exc:
             raise EstimationIntegrityError("approved vector payload cannot be decoded") from exc
         if not all(np.isfinite(value).all() for value in (mu, variance, volatility)):
             raise EstimationIntegrityError("approved vector payload contains non-finite values")
@@ -666,6 +790,26 @@ class ApprovedEstimationProvider:
             code_version=run.code_version,
             input_lineage_fingerprint=run.input_lineage_fingerprint,
         )
+
+    @staticmethod
+    def _add_verified_basis_fingerprint(
+        collected: dict[str, str],
+        basis: str,
+        lineage: dict[str, Any],
+        fingerprint: str,
+    ) -> None:
+        if basis in collected:
+            raise EstimationIntegrityError(f"duplicate persisted {basis} basis outcome")
+        _validate_fingerprint(fingerprint, "input_fingerprint")
+        try:
+            expected = canonical_checksum(lineage)
+        except (TypeError, ValueError) as exc:
+            raise EstimationIntegrityError("persisted basis lineage is not canonical JSON") from exc
+        if fingerprint != expected:
+            raise EstimationIntegrityError(
+                f"persisted {basis} fingerprint does not match canonical lineage"
+            )
+        collected[basis] = fingerprint
 
     @staticmethod
     def _decode_payload(payload: object) -> tuple[np.ndarray[Any, Any], tuple[int, ...]]:
@@ -699,6 +843,8 @@ class ApprovedEstimationProvider:
         size = len(order_value)
         if shape_value != [size, size] or not isinstance(triangle_value, list):
             raise EstimationIntegrityError("matrix shape does not match instrument order")
+        for index, value in enumerate(triangle_value):
+            _decode_canonical_float64(value, f"matrix lower_triangle[{index}]")
         try:
             lower = decode_lower_triangle(tuple(cast(list[str], triangle_value)), size)
         except (TypeError, ValueError) as exc:
