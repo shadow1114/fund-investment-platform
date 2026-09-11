@@ -1,5 +1,6 @@
 """Transactional persistence and approved reads for estimation results."""
 
+import dataclasses
 import datetime as dt
 import math
 from dataclasses import dataclass
@@ -70,6 +71,7 @@ class EstimationRunResult:
     status: str
     approved_for_optimization: bool
     input_lineage_fingerprint: str | None
+    basis_statuses: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +112,16 @@ class ApprovedEstimation:
     validation_policy_version_id: int
     code_version: str
     input_lineage_fingerprint: str
+
+    @property
+    def Sigma(self) -> np.ndarray:  # type: ignore[type-arg]  # noqa: N802
+        """Annualized covariance under the notation used by Stage 6."""
+        return self.covariance
+
+    @property
+    def order(self) -> tuple[int, ...]:
+        """Frozen instrument order shared by ``mu`` and ``Sigma``."""
+        return self.instrument_order
 
 
 def _identity_predicates(identity: EstimationRunIdentity) -> tuple[Any, ...]:
@@ -313,7 +325,7 @@ class EstimationRunRepository:
             estimation_policy_version_id=identity.estimation_policy_version_id,
             validation_policy_version_id=identity.validation_policy_version_id,
             code_version=identity.code_version,
-            status="RUNNING",
+            status="PENDING",
             approved_for_optimization=False,
         )
         try:
@@ -327,6 +339,8 @@ class EstimationRunRepository:
             if existing is None:
                 raise
             return StartRunResult(existing.id, existing.status, False)
+        row.status = "RUNNING"
+        self._session.flush()
         return StartRunResult(row.id, row.status, True)
 
     def retry_failed(self, run_id: int) -> StartRunResult:
