@@ -535,6 +535,7 @@ def test_covariance_rejects_matrix_payloads_missing_required_keys(
         ("portfolio.estimation_parameter_version", "parameter_id"),
         ("evaluation.fund_universe_snapshot", "universe_snapshot_id"),
         ("governance.policy_version", "estimation_policy_id"),
+        ("governance.policy_version", "validation_policy_id"),
     ],
 )
 def test_run_restricts_deletion_of_immutable_inputs(db_session, referenced_table, id_key):
@@ -542,10 +543,51 @@ def test_run_restricts_deletion_of_immutable_inputs(db_session, referenced_table
     _insert_run(db_session, ids, suffix=f"restrict-{id_key[:8]}")
 
     with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.execute(
+                text(f"DELETE FROM {referenced_table} WHERE id = :id"),
+                {"id": ids[id_key]},
+            )
+
+    assert db_session.execute(text("SELECT 1")).scalar_one() == 1
+    assert (
         db_session.execute(
-            text(f"DELETE FROM {referenced_table} WHERE id = :id"),
+            text(f"SELECT count(*) FROM {referenced_table} WHERE id = :id"),
             {"id": ids[id_key]},
-        )
+        ).scalar_one()
+        == 1
+    )
+
+
+@pytest.mark.parametrize("result_kind", ["return", "risk"])
+def test_result_rows_restrict_deletion_of_share_class(db_session, result_kind):
+    ids = _seed_dependencies(db_session, f"restrict-share-{result_kind}")
+    run_id = _insert_run(db_session, ids, suffix=f"restrict-share-{result_kind}")
+    if result_kind == "return":
+        _insert_return(db_session, run_id, ids["share_class_id"])
+        result_table = "return_estimate"
+    else:
+        _insert_risk(db_session, run_id, ids["share_class_id"])
+        result_table = "risk_estimate"
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.execute(
+                text("DELETE FROM fund.fund_share_class WHERE id = :share_class_id"),
+                {"share_class_id": ids["share_class_id"]},
+            )
+
+    assert db_session.execute(text("SELECT 1")).scalar_one() == 1
+    assert (
+        db_session.execute(
+            text(
+                f"SELECT count(*) FROM portfolio.{result_table} "
+                "WHERE run_id = :run_id AND share_class_id = :share_class_id"
+            ),
+            {"run_id": run_id, "share_class_id": ids["share_class_id"]},
+        ).scalar_one()
+        == 1
+    )
 
 
 def test_deleting_run_cascades_to_all_run_owned_results(db_session):
