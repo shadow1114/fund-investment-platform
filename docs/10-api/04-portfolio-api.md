@@ -4,7 +4,7 @@
 > 业务语义来源：docs/06-portfolio/（v1.0–v1.1，全 6 份）、docs/07-return-risk/（v1.0，全 6 份）
 > 本域上游：docs/10-api/01-api-overview.md（v1.0）
 >
-> **文档版本**：v1.1 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -595,15 +595,41 @@ Idempotency-Key: <uuid>
 
 ### 4.9 GET /estimates/returns — Return Estimate
 
-**Response 要点**
+**Response**
 
-| 字段 | 说明 |
-|---|---|
-| `fund_id` / `expected_return` | 估计值 |
-| **`return_basis`** | `ABSOLUTE` / `EXCESS` —— **不可省略** |
-| **`forecast_horizon`** / **`lookback_window`** | 两个独立参数 |
-| `method_id` + `method_version` + `parameter_version` | 方法与参数 |
-| **`status`** | `07-return-risk/01` §12 |
+```json
+{
+  "data": {
+    "run_id": "...",
+    "run_status": "COMPLETED_WITH_WARNING",
+    "approval_status": "APPROVED_FOR_USE",
+    "approved_for_optimization": true,
+    "return_basis": "ABSOLUTE",
+    "numeric_scale": "ANNUALIZED",
+    "forecast_horizon": "QUARTER",
+    "lookback_window": 756,
+    "annualization": 252,
+    "instrument_order": [101, 205, 309],
+    "estimates": [
+      {"share_class_id": 101, "mu": "0.041"},
+      {"share_class_id": 205, "mu": "0.053"},
+      {"share_class_id": 309, "mu": "0.038"}
+    ],
+    "versions": {
+      "estimation_method_version_id": 12,
+      "estimation_parameter_version_id": 7,
+      "estimation_policy_version_id": 23,
+      "validation_policy_version_id": 24,
+      "code_version": "..."
+    }
+  },
+  "error": null
+}
+```
+
+逐基金估计字段名为 `mu`，与 Stage ⑥ 的向量契约一致。`instrument_order` 是向量顺序，
+成员必须与同一 Run / basis 的矩阵
+载荷完全一致。
 
 #### 4.9.1 `return_basis` 不可省略 ⚠️
 
@@ -623,9 +649,21 @@ Benchmark-relative 方法产出的是 Expected Excess Return
 用 3 年历史估计未来 1 年  ≠  用 1 年历史估计未来 3 年
 ```
 
-#### 4.9.3 只有 `APPROVED_FOR_USE` 的估计可用于优化
+#### 4.9.3 API 批准语义与 Run 生命周期分离
 
-> **沿用 `07-return-risk/01` §12.3：`VALIDATED` 不等于可用。** API 必须返回完整的 `status`，消费者不得仅凭"有数值"就使用。
+`run_status` 原样表达持久化生命周期：`PENDING` / `RUNNING` / `COMPLETED` /
+`COMPLETED_WITH_WARNING` / `REJECTED` / `FAILED`，不存在 `APPROVED` Run 状态。
+
+`approval_status` 是 API 派生的消费语义，不是 ORM 状态枚举：当且仅当
+`return_basis=ABSOLUTE`、Run 已最终完成且 `approved_for_optimization=true` 时返回
+`APPROVED_FOR_USE`，否则返回 `NOT_APPROVED_FOR_USE`。EXCESS 即使自身 Validation
+通过也固定为 `NOT_APPROVED_FOR_USE`。消费者不得仅凭“有数值”进入 Stage ⑥。
+
+#### 4.9.4 Stage ⑥ 只消费年化同包数据
+
+`numeric_scale` 固定为 `ANNUALIZED`。`Forecast Horizon=QUARTER` 表示适用期，不表示
+响应已经缩放为季度：`mu` 与同一包中的 `Sigma` 均按 252 年化，Stage ⑥ 的风险厌恶
+参数也必须按该尺度解释。API 不允许只对 `mu` 或只对 `Sigma` 做持有期转换。
 
 ---
 
@@ -636,18 +674,26 @@ Benchmark-relative 方法产出的是 Expected Excess Return
 ```json
 {
   "data": {
-    "estimate_id": "...",
-    "instrument_ids": ["F001", "F002", "F003"],
-    "covariance_matrix": [
-      [0.018010, 0.006420, 0.003115],
-      [0.006420, 0.014400, 0.004032],
-      [0.003115, 0.004032, 0.010240]
-    ],
-    "correlation_matrix": [
-      [1.0000, 0.3987, 0.2294],
-      [0.3987, 1.0000, 0.3320],
-      [0.2294, 0.3320, 1.0000]
-    ],
+    "run_id": "...",
+    "return_basis": "ABSOLUTE",
+    "run_status": "COMPLETED_WITH_WARNING",
+    "approval_status": "APPROVED_FOR_USE",
+    "approved_for_optimization": true,
+    "numeric_scale": "ANNUALIZED",
+    "covariance_payload": {
+      "shape": [3, 3],
+      "instrument_order": [101, 205, 309],
+      "lower_triangle": ["0.01801", "0.00642", "0.0144", "0.003115", "0.004032", "0.01024"],
+      "numeric_encoding_version": "FLOAT64_SHORTEST_ROUNDTRIP_V1",
+      "checksum": "..."
+    },
+    "correlation_payload": {
+      "shape": [3, 3],
+      "instrument_order": [101, 205, 309],
+      "lower_triangle": ["1", "0.3987", "1", "0.2294", "0.332", "1"],
+      "numeric_encoding_version": "FLOAT64_SHORTEST_ROUNDTRIP_V1",
+      "checksum": "..."
+    },
     "diagnostics": {
       "effective_observation_count": 756,
       "n_instruments": 3,
@@ -657,17 +703,15 @@ Benchmark-relative 方法产出的是 Expected Excess Return
       "psd_adjustment_applied": false
     },
     "excluded_instruments": [
-      { "fund_id": "F022", "reason": "INSUFFICIENT_HISTORY" }
-    ],
-    "return_basis": "ABSOLUTE",
-    "status": "APPROVED_FOR_USE"
+      { "share_class_id": 422, "reason": "INSUFFICIENT_VALID_RETURNS" }
+    ]
   },
-  "meta": { "risk_model_version": "...", "lookback_window": "3Y", "frequency": "DAILY" },
+  "meta": { "lookback_window": 756, "frequency": "DAILY", "annualization": 252 },
   "error": null
 }
 ```
 
-#### 4.10.1 `instrument_ids` 的顺序是矩阵语义的一部分 ⚠️
+#### 4.10.1 `instrument_order` 的顺序是矩阵语义的一部分 ⚠️
 
 > **沿用 `07-return-risk/04` §9.1：**
 
@@ -678,7 +722,8 @@ Benchmark-relative 方法产出的是 Expected Excess Return
     → 【且不会报错】
 ```
 
-**API 必须保证 `instrument_ids` 与矩阵行列严格对应，且与同批次的 `μ` 使用同一序列。**
+**API 必须保证 `instrument_order` 与矩阵行列严格对应，且与同一 Run / basis 的 `mu`
+使用同一序列。** 两个载荷必须具有相同的 `shape` 和 `instrument_order`。
 
 #### 4.10.2 `diagnostics` 是必备字段 ⚠️
 
@@ -691,22 +736,23 @@ Benchmark-relative 方法产出的是 Expected Excess Return
 | **`condition_number`** | **比半正定更能反映可用性** |
 | `psd_adjustment_applied` | 是否做过最近半正定投影 |
 
-#### 4.10.3 矩阵可能很大
+#### 4.10.3 完整下三角载荷是唯一矩阵表示
 
-> `N × N` 的矩阵在 Universe 较大时体积可观。**是否支持稀疏表示或分块获取待接口评审。**
-
-> **已定案 · 2026-08-27**：协方差矩阵传输 = **完整下三角 + `instrument_ids` 顺序数组**，**不做稀疏化**。
+> 协方差与相关矩阵传输 = **完整下三角 + `instrument_order` 顺序数组**，**不返回完整方阵、不做稀疏化**。
 >
 > **依据**：
 >
 > | 方案 | 评价 |
 > |---|---|
-> | **下三角 + 顺序数组**（已采纳） | 协方差矩阵**对称**，下三角已含全部信息，省一半传输量；`instrument_ids` 的顺序是矩阵语义的一部分（`07-return-risk/04` §9.1） |
+> | **下三角 + 顺序数组**（已采纳） | 协方差矩阵**对称**，下三角已含全部信息，省一半传输量；`instrument_order` 是矩阵语义的一部分（`07-return-risk/04` §9.1） |
 > | 完整方阵 | 冗余一倍，且存在上下三角不一致的可能（实现缺陷会被掩盖） |
 > | 稀疏格式 | **协方差矩阵稠密** —— 收缩估计后几乎无零元素，稀疏格式的开销大于收益 |
 > | 分块 | 增加协议复杂度，而 N ≤ 数百时单次传输的量级可接受 |
 >
-> **`instrument_ids` 必须与矩阵一并返回且顺序严格对应** —— 缺它则矩阵无法解读，而这是一个容易被当作「元数据」而遗漏的字段。
+下三角按行展开：`[m00, m10, m11, m20, m21, m22, ...]`，元素数量必须为
+`N(N+1)/2`。元素使用 `FLOAT64_SHORTEST_ROUNDTRIP_V1` 十进制字符串编码；checksum
+覆盖不含 checksum 自身的 canonical payload。**`instrument_order` 必须与矩阵一并返回
+且顺序严格对应**，缺它则矩阵无法解读。
 
 ---
 
@@ -971,7 +1017,7 @@ Idempotency-Key: 3f2a...
 | D-21 | 成本模型不可用时返回 `NOT_AVAILABLE`，**不假设成本** | 沿用 `06-portfolio/06` §7.3 |
 | D-22 | **`Override` 的 `reason` 必填，且须返回前后权重** | 上游 §7.1.1 |
 | D-23 | **`return_basis` / `forecast_horizon` / `lookback_window` 必须返回** | 语义不可推断 |
-| D-24 | **`instrument_ids` 顺序与矩阵严格对应** | 顺序错乱不会报错 |
+| D-24 | **`instrument_order` 顺序与下三角矩阵载荷严格对应** | 顺序错乱不会报错；完整方阵会引入冗余和上下三角不一致风险 |
 | D-25 | **协方差 `diagnostics` 是必备字段** | 只给矩阵等于只给结论 |
 | D-26 | 异步下业务失败用 200 + result 内状态 | Operation 查询本身成功 |
 
@@ -987,7 +1033,7 @@ Idempotency-Key: 3f2a...
 | C-4 | **策略配置权限与决策放行权限必须分离** | SEC-2 |
 | C-5 | **Override 必须完整留痕** | 上游 §7.1.1 |
 | C-6 | 不可行时**不得返回权重**或静默降级 | 上游 §4.2 ⑦、§5.3 |
-| C-7 | **只有 `APPROVED_FOR_USE` 的估计可进入优化** | `07-return-risk/01` §12.3 |
+| C-7 | 只有 API 派生为 `APPROVED_FOR_USE` 的 ABSOLUTE 年化估计可进入 Stage ⑥；它不是 Run 状态 | Plan-3 D-6 / D-9 |
 | C-8 | `Portfolio Benchmark` 不得借用成分基金的 Benchmark | 上游 §4.2 ①-B |
 | C-9 | 本域**不提供**实盘下单能力 | 上游 §6 Out of Scope |
 | C-10 | `μ` / `Σ` 的维度对齐由 `07-return-risk` 保证，API 不得自行截断 | `07-return-risk/01` §6.2 |
@@ -999,7 +1045,7 @@ Idempotency-Key: 3f2a...
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
 | PA-1 | 本域各端点的最终路径与参数名 | 契约 | 接口评审 |
-| ~~PA-2~~ | ~~大规模协方差矩阵的传输格式~~ —— **已定案**：协方差矩阵传输 = **完整下三角 + `instrument_ids` 顺序数组**，不做稀疏 | — | ✅ 2026-08-27 |
+| ~~PA-2~~ | ~~大规模协方差矩阵的传输格式~~ —— **已定案**：协方差矩阵传输 = **完整下三角 + `instrument_order` 顺序数组**，不做稀疏 | — | ✅ 2026-08-27 |
 | PA-3 | 优化的异步阈值（何时同步、何时 202） | 响应模式 | 产品 + 运维 |
 | PA-4 | 组合的资源级可见性规则（= `TBD-API-7`） | 授权 | 产品 + 治理 |
 | PA-5 | 是否暴露 Constraint 与 Risk Budget 的**写**接口 | 配置管理 | 产品 + 治理 |
@@ -1025,5 +1071,6 @@ Idempotency-Key: 3f2a...
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.2** | 2026-09-14 | 同步 Plan-3 已实现的估计查询契约：逐基金字段统一为 `mu`；Run 生命周期与 API 派生批准语义分离；Stage ⑥只消费 ABSOLUTE 年化同包数据；协方差和相关矩阵只返回带顺序、编码版本与 checksum 的完整下三角载荷 | `2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.1** | 2026-08-27 | **第二批定案（1 项）**。`PA-2` 协方差矩阵传输 = **完整下三角 + `instrument_ids` 顺序数组**，不做稀疏化（收缩估计后矩阵稠密）；`instrument_ids` 必须一并返回且顺序严格对应 —— 它是矩阵语义的一部分，容易被当作元数据而遗漏。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | v1.0 | 2026-08-27 | 初始版本。**§4.1.2 `portfolio_version` 与 `portfolio_rule_version` 的区分**；**§4.2 三态持仓端点**及不得以 Target 冒充 Actual、§4.2.3 份额为主权重为导出、§4.2.4 冻结持仓标注；**§4.3.1 `weight_basis` 必备**、§4.3.2 `euler_check` 暴露、**§4.3.4 风险端点不返回"预期最大回撤"**；**§4.4.2 `NOT_AVAILABLE` 不等于 `WITHIN_LIMIT`**；**§4.5.1–4.5.4 约束的 `scope`/`is_binding`/`is_unresolvable`/`mode`**；**§4.6.1 请求体传版本引用而非估计值**（否则服务端无法强制 PIT）、**§4.6.5 `INFEASIBLE` 与 `NOT_CONVERGED` 区别对待**并落到 422/500、§4.6.7 `solve_path` 必须返回；**§4.7.3 `turnover_convention`**、**§4.7.4 `gap_disposition`**、**§4.7.5 `Pending` 期间 409**（与幂等是两回事）；**§4.8.2 `reason` 必填**、§4.8.3 职责分离；**§4.9.1–4.9.2 `return_basis` 与两个窗口参数必须返回**；**§4.10.1 `instrument_ids` 顺序是矩阵语义的一部分**、§4.10.2 `diagnostics` 必备；**§7.2.1 异步下业务失败用 200** | `06-portfolio` v1.0–v1.1、`07-return-risk` v1.0、`10-api/01-api-overview.md` v1.0 |

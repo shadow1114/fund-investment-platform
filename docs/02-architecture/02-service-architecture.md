@@ -4,7 +4,7 @@
 > 业务需求：docs/01-product/02-business-requirements.md（v2.3）
 > 同层上游：docs/02-architecture/01-system-architecture.md（v2.0）
 >
-> **文档版本**：v1.3 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.4 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -449,6 +449,43 @@ flowchart TD
 
 对应 FR：`FR-RET-001~004`、`FR-RISK-001~004`、`FR-CONS-001~005`、`FR-OPT-001~005`、`FR-PRISK-001~004`、`FR-DEC-001~005`、`FR-EXPL-001~003`、`FR-LIVE-001~004`、`FR-REBAL-001~005`。
 
+#### 6.4.1 Stage ⑤ 已实现的 Estimation Service 契约
+
+Plan-3 只闭合 Stage ⑤。`EstimationService` 从冻结的 `FundUniverseSnapshot` 读取
+`SELECTED` 成员，按 `share_class_id ASC` 固定顺序，并经绑定了 `decision_at` 的
+`PitDataContext` 读取 NAV 与 Benchmark 历史。服务为两个 return basis 独立组装结果包：
+
+```text
+ABSOLUTE bundle = (annualized mu, Sigma, rho, variance, volatility,
+                   instrument_order, lineage, diagnostics, validation)
+EXCESS bundle   = (annualized mu, Sigma, rho, variance, volatility,
+                   instrument_order, lineage, diagnostics, validation)
+```
+
+两套结果可有不同的基金集合、观察日期、排除原因和 Validation 结论；禁止跨 basis
+复用向量、矩阵或血缘。`Sigma` 的对角线是 `variance` / `volatility` 的生产单一真值，
+`rho` 只由同一 `Sigma` 推导。Factor 风险仅通过只读
+`FactorRiskCrossCheckProvider` Protocol 注入用于可比性核对，因此
+`portfolio-service` 仍不导入或依赖 `factor-service` 的实现。
+
+生产结果统一为 `ANNUALIZED`：日频 `mu` 与 `Sigma` 均按 252 年化，
+`volatility = sqrt(diag(Sigma))`。`Forecast Horizon=QUARTER` 只描述适用持有期和失效
+周期，不触发季度缩放。Stage ⑥只可通过 `ApprovedEstimationProvider` 读取同一 Run、
+同一 ABSOLUTE basis、同一 `instrument_order` 的年化 `mu` 与 `Sigma`；EXCESS 是独立
+审计包，不进入 M1 Stage ⑥。
+
+Run 生命周期状态固定为 `PENDING` / `RUNNING` / `COMPLETED` /
+`COMPLETED_WITH_WARNING` / `REJECTED` / `FAILED`，不存在 `APPROVED` Run 状态。
+`approved_for_optimization` 是与状态分离的批准语义，只代表主 ABSOLUTE Gate 是否允许
+Stage ⑥消费：`COMPLETED` / `COMPLETED_WITH_WARNING` 固定为 `true`，其余状态固定为
+`false`。
+Validation 拒绝会保留审计结果；未处理系统异常回滚业务结果，并以独立短事务把 Run
+标为 `FAILED`。
+
+周期性 OOS 质量评估（Return MAE、Risk RMSE、稳定性漂移、VaR Kupiec POF）、调度和
+未来实现值解析延期到 Plan-3B。Plan-3 不实现 Portfolio Construction、Optimizer、ML、
+交易成本或 Backtest timeline。
+
 ### 6.5 Non-responsibilities
 
 | 不负责 | 归属 |
@@ -485,7 +522,7 @@ data-service   →  portfolio-service    净值序列、可投资性、Benchmark
 
 | 数据 | 一致性要求 |
 |---|---|
-| Return Estimate、`Σ`、相关性矩阵 | 每决策时点一份；与 Return Estimate / Risk Model Version 绑定 |
+| Stage ⑤ Estimation Run 与 ABSOLUTE / EXCESS 结果包 | 每决策时点一份；冻结 Method / Parameter / Estimation Policy / Validation Policy / Code 版本；数值、Validation、PIT 血缘与最终 Run 状态在同一业务事务提交 |
 | Constraint Set、Risk Budget | 强一致；属 Portfolio Rule Version |
 | Optimization Run | 完整记录输入、状态、输出、诊断 |
 | **决策快照** | **强一致 · 必须在单一事务内完整写入**——含 Universe、Score、μ、Risk Metrics、相关性、协方差、约束集、风险预算、目标函数、Optimization Run、目标权重、Human Review 记录、九项版本号 |
@@ -781,6 +818,7 @@ flowchart TD
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| v1.4 | 2026-09-14 | 同步 Plan-3 已实现的 Stage ⑤ 服务契约：ABSOLUTE / EXCESS 独立结果包、年化 Stage ⑥读取边界、Run 生命周期与独立批准语义、事务失败处理，以及 Plan-3B 和下游功能延期范围 | `2026-09-10-plan3-return-risk-estimation-design.md` |
 | v1.3 | 2026-08-26 | `SVC-4`（回测中某期不可行的处理）获 `08-backtest` 回应：默认**中止回测**——实盘的 Human Review 闭环在回测中不存在，而"本期不调仓"会系统性美化结果（跳过的往往是市场极端时期） | `08-backtest/01-backtest-engine.md` v1.0 |
 | v1.2 | 2026-08-25 | **补充 Threshold Resolution 的服务归属与依赖**（上游 v2.5 §5.5、`01-system-architecture` v2.1 §13）。`factor-service` 新增职责 R-8；§4.6 反向依赖由一条扩为两条（`Peer Group` + `Evaluation Policy`），明确**两条反向依赖读的都是配置、正向依赖读的是数据**，因此不构成循环；新增 DEP-6：**`Evaluation Policy` 的构建不得依赖 Factor 或 Score**，违反则两条依赖闭合成真正的循环 | `01-system-architecture.md` v2.1 |
 | v1.1 | 2026-08-25 | **随 01-system-architecture v2.0 同步**。新增 §2.3 **Domain Service 是逻辑边界**（非部署单元、非数据库边界，共享同一数据库实例）；§3.3.1 区分 **Investment Eligibility（事实）与 Eligibility Rules（规则）**；§6.3 Live Portfolio 模块改为维护 **Target / Pending / Actual 三态**；§7.1.1 新增 **Strategy Execution Interface** 复用机制；§7.1.2 新增**快照优先原则**；修正 §2.3 失效引用（§8.1 → §8.4） | `01-product-overview.md` v2.4、`01-system-architecture.md` v2.0 |

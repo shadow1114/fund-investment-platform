@@ -4,7 +4,7 @@
 > 业务需求：docs/01-product/02-business-requirements.md（v2.3）
 > 同层上游：docs/02-architecture/01-system-architecture.md（v2.0）、02-service-architecture.md（v1.1）
 >
-> **文档版本**：v1.1 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -76,7 +76,7 @@ Raw 层看似冗余（Normalized 已经足够下游使用），但必须保留�
 
 ## 3. 核心数据域
 
-### 3.1 十五个数据域
+### 3.1 十七个数据域
 
 | # | 数据域 | 所属层 | Stage | Owner |
 |---|---|---|---|---|
@@ -327,6 +327,27 @@ B3 Decision Snapshot     ← 原子写入，引用 B2 的 ID + 本阶段全部�
 
 Universe Snapshot 适用同样的约束（`FR-UNIV-002` BR-3）。
 
+### 6.5 Stage ⑤ 估计结果包与消费边界
+
+一次 `Estimation Run` 引用冻结的 Universe Snapshot，并为 `ABSOLUTE` 与 `EXCESS`
+分别保存 `mu`、`Sigma`、`rho`、风险向量、`instrument_order`、排除原因、Validation
+明细和完整 PIT 血缘。每个 basis 的集合与顺序自洽，不要求两套结果使用相同成员或日期，
+也不得跨 basis 拼接。
+
+所有生产数值使用 `ANNUALIZED` 尺度：日频 `mu` 和 `Sigma` 都按 252 年化，风险由
+`Sigma` 对角线推导。`Forecast Horizon=QUARTER` 是适用期元数据，不改变数值尺度。
+Stage ⑥只消费通过主 Gate 的 ABSOLUTE 年化结果包及其精确顺序；EXCESS 只作独立审计。
+
+矩阵是不可拆分的集合值，以 `shape`、`instrument_order`、`lower_triangle`、
+`numeric_encoding_version` 和 checksum 组成的结构化载荷传递和持久化。下三角已完整表达
+对称矩阵，避免完整方阵的冗余及上下三角不一致。逐基金 Return / Risk 行必须与载荷中的
+成员集合完全相等。
+
+Run 状态与批准语义分离：Run 状态为 `PENDING` / `RUNNING` / `COMPLETED` /
+`COMPLETED_WITH_WARNING` / `REJECTED` / `FAILED`；`approved_for_optimization` 只表示
+ABSOLUTE 是否可供 Stage ⑥使用，不是另一个 Run 状态。Validation rejection 连同结果或
+输入拒绝血缘保留用于审计；系统异常不留下部分业务结果。
+
 ---
 
 ## 7. Data Lineage
@@ -491,6 +512,7 @@ Investment Decision (标注受影响的持仓)
 | D-6 | 质量标记作为数据伴随属性传递，而非旁路信息 | 靠事后关联查询获得标记，容易在某一环丢失 |
 | D-7 | `INVALID` 数据进入隔离区而非丢弃 | 保留排查与恢复能力，且隔离量是数据源质量的直接度量 |
 | D-8 | Strategy Metadata 分域拥有，不设集中配置服务 | 各版本项的变更与其 Owner 的业务逻辑强相关；集中管理会引入跨服务的配置一致性问题 |
+| D-9 | Stage ⑤ 矩阵使用带顺序与 checksum 的完整下三角载荷 | 对称矩阵无需完整方阵；显式顺序与校验和共同防止静默错配和编码漂移 |
 
 ---
 
@@ -505,6 +527,7 @@ Investment Decision (标注受影响的持仓)
 | C-5 | 无 `decision_at` 的数据查询必须被拒绝 | 本文档 §5.4 PIT-2 | **否** |
 | C-6 | 写入权唯一——一份数据只能由一个 Service 写入 | 本文档 §4.2 | 否 |
 | C-7 | 质量标记必须逐级传递至最终输出 | `FR-DQ-001` BR-2 | 否 |
+| C-8 | Stage ⑥只能消费获批的 ABSOLUTE 年化 `mu` / `Sigma` 及其精确顺序 | Plan-3 D-6 / D-9 | 否 |
 
 ---
 
@@ -516,7 +539,6 @@ Investment Decision (标注受影响的持仓)
 | DATA-2 | 快照的存储粒度与压缩策略 | `11-database` |
 | DATA-3 | 多源数据不一致时的仲裁规则 | `03-data` |
 | DATA-4 | Quarantine 区的处理时限与升级机制 | `03-data` + `12-operations` |
-| DATA-5 | 协方差矩阵的序列化形式（整体存储 vs 分解存储） | `11-database` |
 
 ---
 
@@ -534,5 +556,6 @@ Investment Decision (标注受影响的持仓)
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| v1.2 | 2026-09-14 | 同步 Plan-3 Stage ⑤ 数据契约：ABSOLUTE / EXCESS 独立结果包、年化 Stage ⑥消费边界、Run 状态与批准语义分离，以及带顺序和 checksum 的完整下三角矩阵载荷；关闭 DATA-5 | `2026-09-10-plan3-return-risk-estimation-design.md` |
 | v1.1 | 2026-08-25 | **随 01-system-architecture v2.0 同步**。§6.4.1 新增**三级一致性边界与快照引用**机制（B1/B2/B3，Decision Snapshot 引用上游快照 ID 而非复制）；§3.1 Portfolio Data 明确为 **Target / Pending / Actual 三态** | `01-product-overview.md` v2.4、`01-system-architecture.md` v2.0 |
 | v1.0 | 2026-08-25 | 初始版本。定义六层数据流与十七个数据域；确立"写入权唯一、读取权开放"的 Ownership 模型；PIT 四时点关联规则与数据访问层强制实施机制；五类快照及 Decision Snapshot 的一致性边界约束；完整血缘链含 Human Review 环节；数据质量门与三级阻断粒度 | `01-product-overview.md` v2.4、`02-service-architecture.md` v1.0 |

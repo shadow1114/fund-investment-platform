@@ -4,7 +4,7 @@
 > 本域上游：docs/11-database/01-postgresql.md（v1.0）、03-erd.md（v1.0）
 > 架构依赖：docs/02-architecture/06-technology-stack.md（v1.2）§4.6 Workload Matrix
 >
-> **文档版本**：v1.9 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.10 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -60,7 +60,7 @@
 | `market` | `data-service` | 7 | ✅ |
 | `factor` | `factor-service` | 4 | ✅ |
 | `evaluation` | `fund-service` | 9 | ✅ |
-| `portfolio` | `portfolio-service` | 17 | ❌ |
+| `portfolio` | `portfolio-service` | 18 | ❌ |
 | `backtest` | `backtest-service` | 8 | ✅ |
 | `governance` | 多方（按表授权） | 6 | ✅ |
 
@@ -202,7 +202,7 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 | `market` | `fund_nav`、`fund_distribution`、`benchmark_definition`、`benchmark_component`、`benchmark_index`、`benchmark_index_value`、`benchmark_mapping`、`risk_free_rate` |
 | `factor` | `factor_definition`、`factor_version`、`factor_run`、`factor_value`、**`factor_effectiveness`** |
 | `evaluation` | `peer_group_snapshot`、`peer_group_member`、`fund_evaluation`、`fund_score`、`fund_score_attribution`、`fund_ranking`、`fund_tier`、`fund_universe_snapshot`、`fund_universe_member`、`selection_condition_result` |
-| `portfolio` | `portfolio`、`portfolio_target`、`portfolio_pending`、`portfolio_actual`、`portfolio_position`、**`estimation_method`**、`estimation_run`、`return_estimate`、`risk_estimate`、`covariance_estimate`、`covariance_instrument`、`optimization_result`、`binding_constraint`、`investment_decision`、`decision_review`、`rebalance`、`rebalance_trade` |
+| `portfolio` | `portfolio`、`portfolio_target`、`portfolio_pending`、`portfolio_actual`、`portfolio_position`、**`estimation_method_version`**、**`estimation_parameter_version`**、`estimation_run`、`return_estimate`、`risk_estimate`、`covariance_estimate`、**`estimation_validation_result`**、`optimization_result`、`binding_constraint`、`investment_decision`、`decision_review`、`rebalance`、`rebalance_trade` |
 | `backtest` | `backtest`、`backtest_run`、`backtest_period`、`backtest_position`、`backtest_trade`、`backtest_nav`、`backtest_metric`、`backtest_bias_check`、`backtest_report` |
 | `governance` | `policy_version`、`lineage_node`、`lineage_edge`、`data_quality_result`、`audit_log`、`data_provider`、`data_provider_dataset`、`data_source_priority` |
 
@@ -851,25 +851,27 @@ Universe 最终 50 只，但候选集可能 1,200 只
 >
 > **回测与实盘同表**，以 `run_context` 区分（同 `ERD-3`）。
 
-### 11.3 `covariance_estimate` + `covariance_instrument`
+### 11.3 `covariance_estimate`
 
-| 表 | 说明 |
-|---|---|
-| `covariance_estimate` | **一行 = 一个矩阵**；`matrix JSONB` + 诊断量列 |
-| **`covariance_instrument`** | **`(estimate_id, ordinal, share_class_id)` —— 保证顺序与成员可校验** |
+`covariance_estimate` **一行 = 一个 Run + Return Basis 的完整结果矩阵**。Business Key
+为 `(run_id, return_basis)`；`return_basis` 只允许 `ABSOLUTE` / `EXCESS`。
 
-#### 11.3.1 为什么矩阵用 JSONB 而成员用明细表 ⚠️
+#### 11.3.1 矩阵载荷为什么使用 JSONB 完整下三角 ⚠️
 
 > **沿用 `01-postgresql` §13.3 与 `07-return-risk/04` §9.1。**
 
 ```
-矩阵数值：整体读写，不做字段级查询 → JSONB
-成员顺序：需要外键校验成员有效性，需要按 ordinal 排序 → 明细表
-
-两者组合：顺序可校验，数值可整体存取
+covariance_payload / correlation_payload = {
+  shape, instrument_order, lower_triangle,
+  numeric_encoding_version, checksum
+}
 ```
 
-**失配的后果**：`w'Σw` 算出无意义的数，**且不会报错** —— 明细表的外键至少保证成员存在。
+矩阵整体读写且收缩后稠密，JSONB 比逐元素行式存储更贴合访问模式。对称矩阵只存按行
+展开的完整下三角，不保存冗余完整方阵；`instrument_order` 与数值在同一 checksummed
+payload 内原子保存。Repository 读取时再将顺序与 `(run_id, return_basis,
+share_class_id)` 的 Return / Risk 行校验，缺行、多行、未知成员或顺序不一致均为完整性
+错误。
 
 ### 11.4 `optimization_result` + `binding_constraint`
 
@@ -920,44 +922,105 @@ Universe 最终 50 只，但候选集可能 1,200 只
 
 ## 12. Return & Risk Tables
 
-### 12.1 `return_estimate` / `risk_estimate`
+### 12.1 Plan-3 实际七表
+
+Plan-3 在 `portfolio` schema 新增且仅新增以下七表：
+
+| 表 | 粒度 / Purpose |
+|---|---|
+| `estimation_method_version` | `(method_code, version_label)`；不可变算法身份、实现路径和 specification |
+| `estimation_parameter_version` | `version_label`；不可变参数快照 |
+| `estimation_run` | 一次幂等业务运行；引用 Universe、Method、Parameter、Estimation Policy、Validation Policy 和 Code Version |
+| `return_estimate` | `(run_id, return_basis, share_class_id)` 一基金一行 |
+| `risk_estimate` | `(run_id, return_basis, share_class_id)` 一基金一行 |
+| `covariance_estimate` | `(run_id, return_basis)` 一结果包一行，同时保存 covariance / correlation 下三角载荷、诊断和 PIT 血缘 |
+| `estimation_validation_result` | `(run_id, return_basis, code)` 一规则一行；Run 级规则允许 basis 为空 |
+
+`estimation_policy_version_id` 与 `validation_policy_version_id` 使用 `RESTRICT` 外键引用
+现有 `governance.policy_version`，不新建重复的 Policy 表。Run 拥有的四类结果以
+`ON DELETE CASCADE` 清理；Universe、版本和逐基金 Share Class 外键使用 `RESTRICT`，
+防止历史输入被删除。
+
+### 12.2 `return_estimate` / `risk_estimate`
 
 | 项 | 说明 |
 |---|---|
-| PK | `(estimation_run_id, share_class_id)` 或代理键 |
-| **关键列** | `return_basis`、`forecast_horizon`、`lookback_window`、`method_id`、`method_version`、`parameter_version`、`status` |
+| PK | 代理键；Business Key 为 `(run_id, return_basis, share_class_id)` |
+| `return_estimate` 关键列 | `sample_mean`、`shrinkage_target`、`shrinkage_intensity`、`mu_before_clip`、`mu`、`mu_clipped`、`numeric_encoding_version` |
+| `risk_estimate` 关键列 | `variance`、`volatility`、`numeric_encoding_version` |
 | 数据量 | 每决策时点 × Universe 规模 |
-| Partition | 按 `estimation_as_of_date` 年分区 |
+| UPDATE | 不提供业务结果 UPDATE API；结果随 Run 不可变 |
 
-#### 12.1.1 `return_basis` 是 `NOT NULL`
+#### 12.2.1 `return_basis` 是 `NOT NULL`
 
 > **沿用 `07-return-risk/02` §5.5.1：** 不记录则下游无法判断是否需要还原。
 
-### 12.2 `estimation_method` — Method Registry
+ABSOLUTE 与 EXCESS 的逐基金行独立保存，不得将一个 basis 的 `mu` / 风险与另一个 basis
+的矩阵组合。`variance = diag(Sigma)` 且 `volatility = sqrt(variance)`；Risk 行不使用另一
+套参数重算。
+
+所有数值列是 `TEXT`，不是 PostgreSQL 浮点或 `NUMERIC`：它们保存
+`FLOAT64_SHORTEST_ROUNDTRIP_V1` canonical 十进制字符串，以无损恢复算法使用的同一
+float64。这是可复现编码的有意例外，不是通用金融金额列的类型规则。
+
+### 12.3 `estimation_method_version` / `estimation_parameter_version`
 
 | 项 | 说明 |
 |---|---|
-| **为什么存在** | **历史估计必须能查到当时方法的完整定义**（`07-return-risk/05` §2.1） |
+| **为什么存在** | **历史估计必须能查到当时方法与参数的完整定义** |
 | PK | `id BIGINT` |
-| Business Key | `(method_id, version)` |
-| 列 | `method_type`、`formula_ref`、`required_parameters`、`applicable_horizon`、`min_observation_count`、`status` |
+| Method Business Key | `(method_code, version_label)` |
+| Parameter Business Key | `version_label` |
+| Method 列 | `implementation_path`、`specification JSONB` |
+| Parameter 列 | `parameters JSONB` |
 | **UPDATE** | 定义不可变；变更产生新 `version` |
-| Retention | **永久** —— 已 `DEPRECATED` / `RETIRED` 的方法定义仍须可查 |
+| Retention | **永久** —— 已被 Run 引用的版本由 `RESTRICT` 外键保护 |
 
-#### 12.2.1 方法版本与参数版本分离
+#### 12.3.1 方法版本与参数版本分离
 
 > **沿用 `07-return-risk/05` §3.3：** 参数不并入方法版本，否则每次调 `λ` 都产生一个公式相同的"新方法"。
 
 ```
-estimation_method   : 公式变了 → 新 version
-policy_version      : 参数取值变了 → 新 parameter_version（§8.4）
+estimation_method_version    : 公式或实现身份变化 → 新 version
+estimation_parameter_version : 参数取值变化 → 新 version
 ```
 
-> **两者组合唯一确定一次估计** —— `estimation_run` 同时引用两者。
+### 12.4 `estimation_run` 生命周期与批准约束
 
-### 12.3 `estimation_run`
+幂等键为：
 
-> 批次实体，承载幂等键 `(decision_at, strategy_version)` 与方法/参数版本。
+```text
+(decision_id, universe_snapshot_id,
+ estimation_method_version_id, estimation_parameter_version_id,
+ estimation_policy_version_id, validation_policy_version_id, code_version)
+```
+
+Run 状态固定为 `PENDING` / `RUNNING` / `COMPLETED` /
+`COMPLETED_WITH_WARNING` / `REJECTED` / `FAILED`；数据库拒绝旧的 `APPROVED` 状态。
+`approved_for_optimization` 不是状态枚举，只表示 ABSOLUTE Gate 的 Stage ⑥消费批准，
+且由 CHECK 强制等价于最终成功状态 `COMPLETED` / `COMPLETED_WITH_WARNING`。
+最终业务状态必须有 64 字符聚合 `input_lineage_fingerprint`；`PENDING`、`RUNNING`、
+`FAILED` 可为空。
+
+短事务创建 `PENDING` 并推进到 `RUNNING`；结果事务原子写入全部数值、Validation、
+血缘和最终状态。系统异常回滚结果事务后，以独立短事务写 `FAILED` 与 `error_code`，
+因此不会留下部分结果。
+
+### 12.5 `covariance_estimate` / `estimation_validation_result`
+
+`covariance_payload` 与 `correlation_payload` 均为 JSONB，CHECK 至少要求 `shape`、
+`instrument_order`、`lower_triangle`、`numeric_encoding_version`、`checksum` 五个 key。
+诊断列同时保存收缩前与最终矩阵的最小/最大特征值和条件数，并保存 shrinkage、样本数、
+成员数、删除日期数、排除原因、PIT `input_lineage` 和 basis fingerprint；三个计数均不得
+为负。
+
+Validation 的 `severity` 只允许 `REJECT` / `WARNING`，`status` 只允许 `PASSED` /
+`FAILED`。被拒绝的 basis 必须保留 Validation 与输入血缘；若输入阶段已经拒绝，则不得
+伪造 Return / Risk / Covariance 数值行。
+
+所有生产 `mu` / `Sigma` 使用 `ANNUALIZED` 尺度，Stage ⑥只通过获批 ABSOLUTE 读取端
+获得同一 Run / basis / `instrument_order` 的数值。EXCESS 保持不可消费。Plan-3B 的
+周期性 OOS 质量评估、调度和未来实现值解析延期，不在本七表之外增表。
 
 ---
 
@@ -1310,7 +1373,7 @@ PostgreSQL Architecture ACCEPTED
 | D-15 | `selection_condition_result` 可只存未通过项 | 数据量降一个数量级 |
 | D-16 | **三态三表** | 三者同时存在 |
 | D-17 | **持仓以份额为主** | 权重无法反推交易数量 |
-| D-18 | **矩阵用 JSONB + 成员用有序明细表** | 顺序可校验且数值可整体存取 |
+| D-18 | **矩阵用含顺序、完整下三角和 checksum 的 JSONB** | 数值整体存取；Repository 与逐基金行交叉校验成员完整性 |
 | D-19 | `optimization_result` 含 `INFEASIBLE` 情形 | 无决策但仍需留存 |
 | D-20 | **`decision_review.reason NOT NULL`** | 数据库能保证的 invariant 交给数据库 |
 | D-21 | `backtest_period` 与 `backtest_nav` 分离 | 两条时间线 |
@@ -1320,6 +1383,7 @@ PostgreSQL Architecture ACCEPTED
 | D-25 | **`fund` 表不设 DELETE 权限** | 从数据库层阻断历史数据的级联删除 |
 | D-26 | **业务历史数据永久保留** | 可复现性是 P0，保留成本远低于失去它 |
 | D-27 | **确定要分区的表首次建表就分区** | 后期转换需重建整表 |
+| D-28 | **Plan-3 使用七表闭合 Estimation Run** | Method / Parameter / 两种 Policy / Code 版本可追溯；双 basis、Validation、批准语义和失败事务彼此分离 |
 
 ---
 
@@ -1373,6 +1437,7 @@ PostgreSQL Architecture ACCEPTED
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.10** | 2026-09-14 | 同步迁移 0027 的 Plan-3 实际七表：更正 Method / Parameter 表名与版本闭包，移除未实现的矩阵成员明细表，记录 checksummed 下三角 JSONB、canonical float64 字符串、六态 Run、独立批准布尔、Validation 审计、事务边界、年化 Stage ⑥消费契约与 Plan-3B 延期 | `0027_plan3_estimation.py`、`2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.9** | 2026-08-27 | **第二批定案（7 项）**。`DBD-2` 条件性唯一约束采用**部分唯一索引**（PostgreSQL 原生，触发器方案无法被查询计划器利用、生成列方案的哨兵值会泄漏到查询条件）；`DBD-5` **建 `position_lot` 表**（`TC-3` 的赎回费阶梯依赖持有批次）；`DBD-6` `target_weights` **行式存储不用 JSONB**（「按基金查历史权重」需索引到基金维度）；`DBD-4` `selection_condition_result` 存全部条件并带 `condition_version`；`DBD-1`/`DBD-8`/`DBD-9` 保留期见 Policy C，回测主记录 10 年、逐期明细 2 年 + 归档。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.8** | 2026-08-27 | **Policy ⑦ 同步**。§20.2 补架构层已定案的完整验收条件表达式与「已定案 vs 待压测」对照；指出本域的分区、索引、W7 读取优化都是升级路径中第①步的具体内容，**须为框架服务而非等待压测结果**。详见 `TBD-resolution.md` Policy ⑦ | `02-architecture/06-technology-stack` v1.3 |
 | **v1.7** | 2026-08-27 | **Policy ⑥ 落库**。`factor` schema 新增表 **`factor_effectiveness`**（§9.4）—— Business Key 含 `sample_split` 与 `validation_policy_version`；§9.4.1 说明阈值版本进唯一键使阈值调整**产生新行而非覆盖**（否则历史「当时被判无效」的记录消失，依赖它的历史 Score 无从解释）；§9.4.2 说明 IS 与 OOS 必须是不同的行（合并会让「只做了 IS」与「两者都做了」结构上不可区分）。原 §9.4/§9.5 顺移为 §9.5/§9.6。详见 `TBD-resolution.md` Policy ⑥ | `11-database/03-erd` v1.1、`04-factor/07-factor-validation` v1.2 |

@@ -4,7 +4,7 @@
 > 实体语义来源：docs/03-data/02-data-domain-model.md（v1.3）及各业务域文档
 > 本域上游：docs/11-database/01-postgresql.md（v1.0）
 >
-> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.3 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -680,47 +680,87 @@ RETURN_ESTIMATE / COVARIANCE_ESTIMATE 有独立的生命周期
 
 ```mermaid
 erDiagram
+    ESTIMATION_METHOD_VERSION ||--o{ ESTIMATION_RUN : "1:N"
+    ESTIMATION_PARAMETER_VERSION ||--o{ ESTIMATION_RUN : "1:N"
+    POLICY_VERSION ||--o{ ESTIMATION_RUN : "estimation policy"
+    POLICY_VERSION ||--o{ ESTIMATION_RUN : "validation policy"
+    FUND_UNIVERSE_SNAPSHOT ||--o{ ESTIMATION_RUN : "1:N"
     ESTIMATION_RUN ||--|{ RETURN_ESTIMATE : "1:N"
     ESTIMATION_RUN ||--|{ RISK_ESTIMATE : "1:N"
-    ESTIMATION_RUN ||--o| COVARIANCE_ESTIMATE : "0..1"
+    ESTIMATION_RUN ||--o{ COVARIANCE_ESTIMATE : "0..2 basis"
+    ESTIMATION_RUN ||--|{ ESTIMATION_VALIDATION_RESULT : "1:N"
     FUND_SHARE_CLASS ||--o{ RETURN_ESTIMATE : "1:N"
     FUND_SHARE_CLASS ||--o{ RISK_ESTIMATE : "1:N"
-    COVARIANCE_ESTIMATE ||--|{ COVARIANCE_INSTRUMENT : "1:N 有序"
-    ESTIMATION_METHOD ||--o{ ESTIMATION_RUN : "1:N"
 ```
 
-### 11.1 Covariance 是集合实体，不是逐基金实体 ⚠️
+### 11.1 Plan-3 最小七表
+
+1. `estimation_method_version`
+2. `estimation_parameter_version`
+3. `estimation_run`
+4. `return_estimate`
+5. `risk_estimate`
+6. `covariance_estimate`
+7. `estimation_validation_result`
+
+`estimation_policy_version_id` 与 `validation_policy_version_id` 都引用现有
+`governance.policy_version`，不重复建 Policy 表。Method Version、Parameter Version、
+两种 Policy Version 和 `code_version` 一起闭合一次 Run 的版本身份。
+
+### 11.2 Result Basis 与粒度
 
 > **`μ` 与 `σ` 是逐基金的，`Σ` 是整个集合的。**
 
 ```
-RETURN_ESTIMATE : 一行 = 一只基金
-COVARIANCE_ESTIMATE : 一行 = 【一个 Universe 的整个矩阵】
+RETURN_ESTIMATE             : (run_id, return_basis, share_class_id)
+RISK_ESTIMATE               : (run_id, return_basis, share_class_id)
+COVARIANCE_ESTIMATE         : (run_id, return_basis)
+ESTIMATION_VALIDATION_RESULT: (run_id, return_basis, code)
 ```
 
-### 11.2 `instrument_ids` 的顺序必须建模 ⚠️
+`return_basis` 为 `ABSOLUTE` 或 `EXCESS`。两套结果分别拥有成员、日期、排除原因、矩阵
+和血缘，不得跨 basis 组合；Run 级 Validation 允许 `return_basis` 为空。
+
+### 11.3 `instrument_order` 在矩阵载荷内显式建模 ⚠️
 
 > **沿用 `07-return-risk/04` §9.1：顺序是矩阵语义的一部分，错乱不会报错。**
 
-| 方案 | 说明 |
-|---|---|
-| **`COVARIANCE_INSTRUMENT` 有序明细表（推荐）** | 显式存 `(estimate_id, ordinal, share_class_id)` |
-| 仅存 JSONB 数组 | 顺序在 JSON 内，无法用外键校验成员有效性 |
+`covariance_estimate` 一行保存同一 Run + basis 的 `covariance_payload` 与
+`correlation_payload`。两个 JSONB 载荷都必须包含：
 
-**本域采用明细表 + 矩阵 JSONB 的组合**：明细表保证成员可校验与有序，JSONB 存数值。
+```text
+shape · instrument_order · lower_triangle · numeric_encoding_version · checksum
+```
 
-### 11.3 Estimation Run 是批次实体
+完整下三角按行展开，已包含对称矩阵的全部信息；不保存冗余完整方阵，也不另建成员表。
+Repository 按 `instrument_order` 读取逐基金 Return / Risk 行，并强制成员集合、数量和
+顺序完全一致。
+
+### 11.4 Estimation Run 状态与批准语义
 
 > 与 `FACTOR_RUN` 同理 —— 使"某次估计产出了什么"可追溯，且承载幂等键。
 
-### 11.4 诊断量属于 Covariance Estimate 的属性
+Run 状态固定为 `PENDING` / `RUNNING` / `COMPLETED` /
+`COMPLETED_WITH_WARNING` / `REJECTED` / `FAILED`，不存在 `APPROVED` Run 状态。
+`approved_for_optimization` 是独立布尔语义，只表示 ABSOLUTE 是否通过 Gate 并可供
+Stage ⑥读取；EXCESS 不获得该批准。
+
+### 11.5 数值、诊断和 Validation 可审计
 
 > **沿用 `07-return-risk/04` §14.2：只存矩阵不存诊断量，等于存了结论而没存可信度。**
 
 ```
-min_eigenvalue / condition_number / t_over_n / psd_adjustment_applied
-    → 是矩阵的属性，与矩阵同生命周期
+sample/final min_eigenvalue · max_eigenvalue · condition_number
+shrinkage_intensity · observation/instrument/dropped-date counts
+excluded_instruments · input_lineage · input_fingerprint
 ```
+
+逐基金数值和下三角元素用 `FLOAT64_SHORTEST_ROUNDTRIP_V1` 十进制字符串持久化。
+每条 Validation 保存 `code`、`severity`（`REJECT` / `WARNING`）、`status`
+（`PASSED` / `FAILED`）和结构化 `detail`。所有生产 `mu` / `Sigma` 为
+`ANNUALIZED`；Stage ⑥只读取同一获批 ABSOLUTE 结果包的 `mu`、`Sigma` 和精确顺序。
+
+Plan-3B 的周期性 OOS 质量评估及未来实现值解析延期，不向此 ERD 增表。
 
 ---
 
@@ -1003,8 +1043,8 @@ erDiagram
 | D-20 | **Optimization Result 与 Investment Decision 分离（0..1）** | `INFEASIBLE` 时无决策但仍需留存 |
 | D-21 | Decision Review 独立且 1:N | 可能多次复核 |
 | D-22 | Estimate 被引用而非被包含 | 引用而非复制 |
-| D-23 | **Covariance 是集合实体**，成员用有序明细表 | 顺序是矩阵语义的一部分 |
-| D-24 | 诊断量属 Covariance Estimate 的属性 | 与矩阵同生命周期 |
+| D-23 | **Covariance 是集合实体**，成员顺序置于 checksummed 下三角载荷 | 顺序是矩阵语义的一部分；Repository 再与逐基金行校验完整性 |
+| D-24 | 诊断量与 Validation 属 Estimation 结果闭包 | 与 Run + Basis 同生命周期，拒绝结论也必须可审计 |
 | D-25 | **Backtest 与 Backtest Run 分离** | 重跑不覆盖历史 |
 | D-26 | **决策时间线与估值时间线是两个实体** | 合并则无法算日频收益与检测 Drift |
 | D-27 | **Bias Check 是一等实体** | 它是 Gate 不是报告附录 |
@@ -1028,6 +1068,7 @@ erDiagram
 | C-7 | 状态型实体同样需要 `available_at` | `02-business-requirements` §26.1 |
 | C-8 | ERD 中不存在循环依赖 | 本文档 §13.5 |
 | C-9 | 本域**不含**字段类型、索引、分区 | 提示词 §5.1 |
+| C-10 | Stage ⑥只能读取获批 ABSOLUTE Run 的年化 `mu` / `Sigma` 与精确顺序 | Plan-3 D-9 |
 
 ---
 
@@ -1059,6 +1100,7 @@ erDiagram
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.3** | 2026-09-14 | 同步 Plan-3 实际七表 ERD：Method / Parameter 独立版本、双 Policy 外键、Run + Basis 结果粒度、Validation 实体、载荷内 `instrument_order` 与完整下三角；明确六态 Run、独立批准布尔、年化 Stage ⑥契约及 Plan-3B 延期 | `2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.2** | 2026-08-27 | **第二批定案（3 项）**。`ERD-1` `PORTFOLIO_POSITION` **冗余存权重**，时点语义为收盘估值后（不冗余会使简单历史查询变成三表关联 + PIT 版本解析）；`ERD-2` Constraint / Risk Budget 归属 **Portfolio Rule Version**，组合特有约束由 `scope` + `scope_key` 表达；`ERD-3` 回测与实盘**同表 + `run_context`** —— 分表等于承认存在两条代码路径，而那正是「回测是 Runtime 不是流程步骤」原则要避免的。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.1** | 2026-08-27 | **Policy ⑥ 引入新实体**。Factor Domain ERD 新增 **`FACTOR_EFFECTIVENESS`**（IC / ICIR / 分层单调性 / 稳定性 / 冗余度 / `effectiveness_verdict`），关联 `FACTOR_VERSION` 与 `PEER_GROUP_SNAPSHOT`；新增 §8.4 及两个小节 —— 说明它为何不是 `FACTOR_VALUE` 的一列（粒度不同：横截面 vs 单基金），以及 `effectiveness_verdict` 依赖 `validation_policy_version`（同一 IC 在不同阈值下结论不同）。原 §8.4 顺移为 §8.5。详见 `TBD-resolution.md` Policy ⑥ | `04-factor/07-factor-validation` v1.2 |
 | v1.0 | 2026-08-27 | 初始版本。**§2.1 快照是一等实体**（Peer Group / Universe / Decision Snapshot 是可复现性的唯一载体）；**§5.2 Fund 与 Share Class 分离**、**§5.3 Provider Fund Identity 独立**；§5.4 共管关系建模为 N:M 区间；**§5.6 Investment Eligibility 虽派生但须持久化**；**§6.1 Benchmark 四层建模**及 §6.4 Mapping 独立于 Definition；**§6.5 `R_f` 是曲线不是单值**；**§7.1 Raw : Canonical = 1:N**、**§7.3 Audit Log 不建外键**；**§8.1–8.2 Factor Value 的五维唯一性与依赖 MAR 者的第六维**；**§9.2 Universe 必须留存未入池成员**、**§9.3 Score Attribution 用明细表**、§9.4 Ranking/Tier 基数为 0..1；**§10.1 三态是三个实体**、**§10.3 Optimization 与 Decision 分离（0..1）**；**§11.1–11.2 Covariance 是集合实体且成员有序**；**§12.1 Backtest 与 Run 分离**、**§12.2 决策与估值两条时间线**、**§12.3 Bias Check 是一等实体**；**§13.3–13.4 两处循环依赖的排除**；**§15.2 状态型实体同样需要 `available_at`**；**§16.1 逐条核对 ERD 实体与表的对应**、**§16.1.1 Correlation Matrix 不单独落表** | `03-data/02-data-domain-model.md` v1.3、各业务域 v1.0–v1.1、`11-database/01-postgresql.md` v1.0 |
