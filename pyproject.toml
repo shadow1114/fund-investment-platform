@@ -13,7 +13,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers --import-mode=importlib"
 markers = [
     "integration: 需要 PostgreSQL 测试库",
     "contract: 需要联网访问 AKShare 上游",
