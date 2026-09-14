@@ -47,7 +47,7 @@ Task 10: fix round 1/5 (1 addressed, 0 open — malformed JSONB lineage conserva
 Task 10: complete (commits a0b0085..877fe00, review clean)
 Task 11: complete (commits 877fe00..cc85326, review clean)
 Task 11: final fix wave (7 addressed, 0 open — runtime eligibility, basis-local rejection, explicit retry, version closure, D-4A gamma*T, successful EXCESS coverage, Factor details; commits 3767029..dbcf816, final review clean)
-Task 12: blocked after documentation/scope review — PostgreSQL-backed quality gates cannot execute because `127.0.0.1:5432` refuses connections and this host has no PostgreSQL runtime or container engine. Fresh local verification passes: unit, fitness, Ruff, mypy. Integration (246), reproducibility (1), and explicit migration drift (43) were invoked but stop at the shared DB fixture. Do not mark Plan-3 fully complete or push until those gates pass against PostgreSQL.
+Task 12: complete (commits cc85326..511d33d, documentation review clean; PostgreSQL-backed integration, reproducibility, migration drift, full pytest, Ruff, mypy and diff checks pass)
 Final fix wave: complete pending PostgreSQL execution (working-tree review corrections committed after this report). See `final-fix-report.md` for the LIVE fail-closed audit, basis-local numerical rejection, explicit retry lifecycle, immutable identity closure, D-4A denominator, Factor-detail, and successful EXCESS PIT/repro coverage. Focused units, Ruff, mypy, and database-test collection pass; the real database tests remain environment-blocked.
 
 Ruling: Plan-3 scope is Stage ⑤ only; Portfolio Construction, Optimization and Backtest remain downstream.
