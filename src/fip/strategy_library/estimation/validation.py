@@ -329,6 +329,11 @@ def _factor_cross_check_result(
         )
 
     observation = matches[0]
+    selected_ids = (
+        f"factor_value_id={observation.factor_value_id}, "
+        f"factor_run_id={observation.factor_run_id}, "
+        f"factor_version_id={observation.factor_version_id}"
+    )
     if (
         observation.volatility is None
         or not _float_is_finite(observation.volatility)
@@ -338,7 +343,7 @@ def _factor_cross_check_result(
             "FACTOR_RISK_CROSS_CHECK",
             "REJECT",
             False,
-            f"factor_value_id={observation.factor_value_id}, volatility values must be finite",
+            f"{selected_ids}, volatility values must be finite",
         )
     candidate_volatility = float(observation.volatility)
     bundle_volatility = float(bundle.factor_volatility)
@@ -349,7 +354,7 @@ def _factor_cross_check_result(
         "FACTOR_RISK_CROSS_CHECK",
         "REJECT",
         relative_error <= policy.relative_tolerance,
-        f"factor_value_id={observation.factor_value_id}, relative_error={relative_error}, "
+        f"{selected_ids}, relative_error={relative_error}, "
         f"tolerance={policy.relative_tolerance}",
     )
 

@@ -96,6 +96,8 @@ def test_real_pit_estimation_is_reproducible_and_idempotent(db_session):
     assert second_result.run_id == first_result.run_id
     assert second_result.status == first_result.status
     assert second_result.basis_statuses == first_result.basis_statuses
+    assert {row[0] for row in first_rows} == {"ABSOLUTE", "EXCESS"}
+    assert first_rejections == ()
     assert second_approved.instrument_order == first_approved.instrument_order == expected_order
     assert first_rows == second_rows
     assert first_rejections == second_rejections

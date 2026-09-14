@@ -97,6 +97,7 @@ class EstimationBasisRejection:
     observation_count: int
     dropped_dates_count: int
     excluded_instruments: tuple[tuple[int, str], ...]
+    validations: tuple[ValidationResult, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -573,6 +574,13 @@ class EstimationRunRepository:
                     ],
                 },
             )
+        )
+        self._session.add_all(
+            EstimationValidationResult(
+                run_id=run_id, return_basis=rejection.return_basis, code=result.code,
+                severity=result.severity, status=result.status, detail={"message": result.detail},
+            )
+            for result in rejection.validations
         )
 
     def _locked_run(self, run_id: int) -> EstimationRun:

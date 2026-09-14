@@ -13,8 +13,8 @@ def estimate_covariance(
     """Estimate an annualized covariance matrix with a constant-correlation target.
 
     The daily sample covariance uses the unbiased ``ddof=1`` convention.  The
-    Ledoit-Wolf moment estimators consequently use the effective sample size
-    ``T - 1`` after demeaning.
+    moment estimators use ``T - 1`` after demeaning. D-4A explicitly uses
+    ``gamma_hat * T`` in the shrinkage-intensity denominator.
     """
     observations = np.asarray(matrix, dtype=np.float64)
     if observations.ndim != 2:
@@ -68,7 +68,7 @@ def estimate_covariance(
         shrinkage_intensity = 1.0
     else:
         shrinkage_intensity = float(
-            np.clip((pi_hat - rho_hat) / (gamma_hat * effective_count), 0.0, 1.0)
+            np.clip((pi_hat - rho_hat) / (gamma_hat * time_count), 0.0, 1.0)
         )
 
     final_daily = shrinkage_intensity * target + (1.0 - shrinkage_intensity) * sample

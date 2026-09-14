@@ -13,7 +13,14 @@ from fip.platform.decision_data.context import (
     RuntimeMode,
     TriggerType,
 )
-from fip.services.data_service.models.fund import Fund, FundShareClass
+from fip.services.data_service.models.benchmark import (
+    BenchmarkComponent,
+    BenchmarkDefinition,
+    BenchmarkIndex,
+    BenchmarkIndexValue,
+    BenchmarkMapping,
+)
+from fip.services.data_service.models.fund import Fund, FundClassificationHistory, FundShareClass
 from fip.services.data_service.models.governance import PolicyVersion
 from fip.services.data_service.models.market import FundNav
 from fip.services.factor_service.models import FactorRun
@@ -38,6 +45,7 @@ from fip.services.portfolio_service.estimation.models import (
     RiskEstimate,
 )
 from fip.services.portfolio_service.estimation.policy import (
+    estimation_parameter_content,
     load_estimation_policy,
     load_estimation_validation_policy,
     persist_estimation_policy_version,
@@ -65,6 +73,14 @@ class MutableFactorRiskCandidates:
     def load_candidates(self, share_class_id: int, decision_id: str):
         del share_class_id, decision_id
         return self.candidates
+
+
+_METHOD_SPECIFICATION = {
+    "returns": "HISTORICAL_MEAN_JAMES_STEIN",
+    "covariance": "LEDOIT_WOLF_CONSTANT_CORRELATION",
+    "formula_version": "PLAN3_D4A_GAMMA_T_V1",
+    "instrument_order": "SHARE_CLASS_ID_ASC",
+}
 
 
 def _utc(day: dt.date) -> dt.datetime:
@@ -120,17 +136,11 @@ def seed_estimation_service(
         method_code="PLAN3_M1",
         version_label=f"method-{version_suffix}",
         implementation_path="fip.strategy_library.estimation",
-        specification={
-            "returns": "HISTORICAL_MEAN_JAMES_STEIN",
-            "covariance": "LEDOIT_WOLF_CONSTANT_CORRELATION",
-        },
+        specification=_METHOD_SPECIFICATION,
     )
     parameters = EstimationParameterVersion(
         version_label=f"params-{version_suffix}",
-        parameters={
-            "lookback_trading_days": estimation_policy.lookback_trading_days,
-            "annualization_factor": estimation_policy.annualization_factor,
-        },
+        parameters=estimation_parameter_content(estimation_policy),
     )
     db_session.add_all((method, parameters))
 
@@ -154,6 +164,22 @@ def seed_estimation_service(
     )
     db_session.add_all(shares)
     db_session.flush()
+
+    db_session.add_all(
+        FundClassificationHistory(
+            fund_id=fund.id,
+            classification_scheme="FIP_INTERNAL_L2",
+            classification_code="SERVICE",
+            valid_from=dt.date(2025, 1, 1),
+            valid_to=None,
+            available_at=_utc(dt.date(2025, 1, 1)),
+            availability_quality="INFERRED",
+            published_at=None,
+            provider_available_at=None,
+            ingested_at=_utc(dt.date(2026, 1, 30)),
+        )
+        for fund in funds
+    )
 
     days = tuple(dt.date(2026, 1, 2) + dt.timedelta(days=index) for index in range(21))
     returns = np.asarray(
@@ -185,6 +211,58 @@ def seed_estimation_service(
         )
         for share_index, share in enumerate(shares)
         for day_index, day in enumerate(days)
+    )
+
+    index = BenchmarkIndex(
+        provider_code="TEST",
+        provider_symbol=f"{decision_id}-benchmark",
+        display_name="Service benchmark",
+        currency="CNY",
+        index_type="TOTAL_RETURN",
+    )
+    db_session.add(index)
+    db_session.flush()
+    db_session.add_all(
+        BenchmarkIndexValue(
+            index_id=index.id,
+            effective_at=day,
+            version=1,
+            value=Decimal(str(100 + day_index)),
+            available_at=_utc(day + dt.timedelta(days=1)),
+            availability_quality="INFERRED",
+            published_at=None,
+            provider_available_at=None,
+            ingested_at=_utc(dt.date(2026, 1, 30)),
+        )
+        for day_index, day in enumerate(days)
+    )
+    benchmark = BenchmarkDefinition(
+        benchmark_code=f"{decision_id}-benchmark", display_name="Service benchmark"
+    )
+    db_session.add(benchmark)
+    db_session.flush()
+    db_session.add(
+        BenchmarkComponent(
+            benchmark_id=benchmark.id,
+            index_id=index.id,
+            weight=Decimal("1"),
+        )
+    )
+    db_session.add(
+        BenchmarkMapping(
+            benchmark_id=benchmark.id,
+            share_class_id=None,
+            classification_code="SERVICE",
+            mapping_source="CLASSIFICATION",
+            mapping_version="service-v1",
+            valid_from=dt.date(2025, 1, 1),
+            valid_to=None,
+            available_at=_utc(dt.date(2025, 1, 1)),
+            availability_quality="INFERRED",
+            published_at=None,
+            provider_available_at=None,
+            ingested_at=_utc(dt.date(2026, 1, 30)),
+        )
     )
 
     peer_group = PeerGroupSnapshot(
@@ -251,14 +329,19 @@ def service_fixture(db_session):
     return seed_estimation_service(db_session)
 
 
-def test_absolute_success_and_excess_input_rejection_is_warning(db_session, service_fixture):
+def test_real_pit_service_persists_independent_successful_excess_bundle(
+    db_session, service_fixture
+):
     service, context, snapshot_id, expected_order = service_fixture
 
     result = service.run(context, snapshot_id)
 
     assert result.status == "COMPLETED_WITH_WARNING"
     assert result.approved_for_optimization is True
-    assert result.basis_statuses == {"ABSOLUTE": "COMPLETED_WITH_WARNING", "EXCESS": "REJECTED"}
+    assert result.basis_statuses == {
+        "ABSOLUTE": "COMPLETED_WITH_WARNING",
+        "EXCESS": "COMPLETED_WITH_WARNING",
+    }
     approved = ApprovedEstimationProvider(db_session).load(result.run_id)
     assert approved.return_basis == "ABSOLUTE"
     assert approved.instrument_order == expected_order
@@ -266,6 +349,23 @@ def test_absolute_success_and_excess_input_rejection_is_warning(db_session, serv
     assert np.array_equal(approved.Sigma, approved.covariance)
     assert approved.mu.shape == (4,)
     assert approved.Sigma.shape == (4, 4)
+    assert {
+        row.return_basis
+        for row in db_session.scalars(
+            select(CovarianceEstimate).where(CovarianceEstimate.run_id == result.run_id)
+        )
+    } == {"ABSOLUTE", "EXCESS"}
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(EstimationValidationResult)
+            .where(
+                EstimationValidationResult.run_id == result.run_id,
+                EstimationValidationResult.code == "BASIS_INPUT_REJECTED",
+            )
+        )
+        == 0
+    )
 
 
 def test_unhandled_failure_rolls_back_results_and_marks_run_failed(

@@ -6,9 +6,10 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, cast
 
+import numpy as np
 from sqlalchemy.orm import Session
 
-from fip.platform.decision_data.context import DecisionExecutionContext
+from fip.platform.decision_data.context import DecisionExecutionContext, RuntimeMode
 from fip.services.data_service.models.governance import PolicyVersion
 from fip.services.portfolio_service.estimation.inputs import (
     EstimationBasisInput,
@@ -23,6 +24,7 @@ from fip.services.portfolio_service.estimation.models import (
 from fip.services.portfolio_service.estimation.policy import (
     EstimationPolicy,
     EstimationValidationPolicy,
+    estimation_parameter_content,
 )
 from fip.services.portfolio_service.estimation.repositories import (
     EstimationBasisRejection,
@@ -45,6 +47,16 @@ from fip.strategy_library.estimation.validation import (
 )
 
 _FACTOR_VALIDATION_CODES = frozenset({"FACTOR_RISK_CROSS_CHECK", "NOT_COMPARABLE"})
+ESTIMATION_METHOD_SPECIFICATION = {
+    "returns": "HISTORICAL_MEAN_JAMES_STEIN",
+    "covariance": "LEDOIT_WOLF_CONSTANT_CORRELATION",
+    "formula_version": "PLAN3_D4A_GAMMA_T_V1",
+    "instrument_order": "SHARE_CLASS_ID_ASC",
+}
+
+
+class _NumericalInputRejected(ValueError):
+    """A basis cannot produce a finite, defined numerical estimate."""
 
 
 class EstimationConfigurationError(ValueError):
@@ -66,6 +78,7 @@ class EstimationService:
         validation_policy_version_id: int,
         adjustment_policy_version: str,
         factor_risk_provider: FactorRiskCrossCheckProvider,
+        allow_experimental: bool = False,
     ) -> None:
         self._session = session
         self._estimation_policy = estimation_policy
@@ -76,9 +89,21 @@ class EstimationService:
         self._validation_policy_version_id = validation_policy_version_id
         self._adjustment_policy_version = adjustment_policy_version
         self._factor_risk_provider = factor_risk_provider
+        self._allow_experimental = allow_experimental
 
     def run(
         self, context: DecisionExecutionContext, universe_snapshot_id: int
+    ) -> EstimationRunResult:
+        return self._run(context, universe_snapshot_id, retry_failed=False)
+
+    def retry(
+        self, context: DecisionExecutionContext, universe_snapshot_id: int
+    ) -> EstimationRunResult:
+        """Explicitly authorize reuse of a FAILED Run under the repository row lock."""
+        return self._run(context, universe_snapshot_id, retry_failed=True)
+
+    def _run(
+        self, context: DecisionExecutionContext, universe_snapshot_id: int, *, retry_failed: bool
     ) -> EstimationRunResult:
         """Create or reproduce one immutable business Run.
 
@@ -105,11 +130,12 @@ class EstimationService:
             method_version, parameter_version = self._validated_versions()
             started = repository.start(identity)
             run_id = started.run_id
-            if started.status == "FAILED":
+            if started.status == "FAILED" and retry_failed:
                 started = repository.retry_failed(run_id)
-            elif not started.should_execute and started.status not in FINAL_BUSINESS_STATUSES:
-                raise EstimationStateError(
-                    f"run {run_id} is already in non-consumable state {started.status}"
+            if not started.should_execute and started.status not in FINAL_BUSINESS_STATUSES:
+                return EstimationRunResult(
+                    run_id=run_id, status=started.status, approved_for_optimization=False,
+                    input_lineage_fingerprint=None,
                 )
             must_mark_failed = started.should_execute
 
@@ -159,6 +185,39 @@ class EstimationService:
             raise EstimationConfigurationError("estimation method version does not exist")
         if parameters is None:
             raise EstimationConfigurationError("estimation parameter version does not exist")
+        if (
+            method.method_code != "PLAN3_M1"
+            or method.implementation_path != "fip.strategy_library.estimation"
+            or method.specification != ESTIMATION_METHOD_SPECIFICATION
+        ):
+            raise EstimationConfigurationError("estimation method version is not implemented")
+        if parameters.parameters != estimation_parameter_content(self._estimation_policy):
+            raise EstimationConfigurationError("estimation parameter version does not match policy")
+        implemented_values = {
+            "window_type": "ROLLING",
+            "forecast_horizon": "QUARTER",
+            "rebalance_frequency": "QUARTER",
+            "primary_return_basis": "ABSOLUTE",
+            "secondary_return_bases": ("EXCESS",),
+            "return_type": "SIMPLE",
+            "return_method": "HISTORICAL_MEAN_JAMES_STEIN",
+            "return_shrinkage_target": "CROSS_SECTIONAL_MEAN",
+            "return_shrinkage_intensity": "ANALYTIC",
+            "covariance_method": "LEDOIT_WOLF_CONSTANT_CORRELATION",
+            "covariance_shrinkage_target": "CONSTANT_CORRELATION",
+            "covariance_shrinkage_intensity": "ANALYTIC",
+            "observation_frequency": "DAILY",
+            "annualization_factor": 252,
+            "missing_strategy": "EXCLUDE_NO_FILL",
+            "outlier_handling": "NONE",
+            "numeric_scale": "ANNUALIZED",
+            "covariance_ddof": 1,
+            "mu_cross_section_ddof": 1,
+            "downside_threshold": 0,
+        }
+        for field, expected in implemented_values.items():
+            if getattr(self._estimation_policy, field) != expected:
+                raise EstimationConfigurationError(f"unsupported estimation parameter: {field}")
         self._require_policy_version(
             estimation_policy,
             "estimation",
@@ -203,31 +262,79 @@ class EstimationService:
         bundles: list[EstimationResultBundle] = []
         rejections: list[EstimationBasisRejection] = []
         basis_statuses: dict[str, str] = {}
+        eligibility = self._runtime_eligibility(context)
         for basis_input in inputs:
             basis_input, factor_candidates = self._with_factor_candidate_lineage(
                 context, basis_input
             )
+            lineage = {
+                **basis_input.lineage,
+                "runtime_eligibility": dataclasses.asdict(eligibility),
+            }
+            basis_input = replace(
+                basis_input, lineage=lineage, basis_fingerprint=canonical_checksum(lineage)
+            )
             if basis_input.status == "REJECTED":
-                rejection = self._input_rejection(basis_input)
+                rejection = replace(self._input_rejection(basis_input), validations=(eligibility,))
                 rejections.append(rejection)
                 basis_statuses[basis_input.return_basis] = "REJECTED"
                 continue
-            bundle = self._estimate_basis(basis_input, factor_candidates)
+            try:
+                bundle = self._estimate_basis(basis_input, factor_candidates)
+            except _NumericalInputRejected as exc:
+                lineage = {
+                    **basis_input.lineage,
+                    "numerical_rejection": {
+                        "message": str(exc),
+                        "code": "NUMERICAL_INPUT_REJECTED",
+                    },
+                }
+                rejected_input = replace(
+                    basis_input, status="REJECTED", rejection_reason="NUMERICAL_INPUT_REJECTED",
+                    lineage=lineage, basis_fingerprint=canonical_checksum(lineage),
+                )
+                rejections.append(replace(
+                    self._input_rejection(rejected_input), validations=(eligibility,)
+                ))
+                basis_statuses[basis_input.return_basis] = "REJECTED"
+                continue
+            bundle = replace(bundle, validations=bundle.validations + (eligibility,))
             bundles.append(bundle)
             basis_statuses[basis_input.return_basis] = _basis_status(bundle.validations)
         return tuple(bundles), tuple(rejections), basis_statuses
+
+    def _runtime_eligibility(self, context: DecisionExecutionContext) -> ValidationResult:
+        provisional = {
+            "estimation": list(self._estimation_policy.provisional_parameters),
+            "validation": list(self._validation_policy.provisional_parameters),
+        }
+        experimental = any(provisional.values())
+        eligible = not experimental or (
+            context.runtime_mode == RuntimeMode.BACKTEST and self._allow_experimental
+        )
+        return ValidationResult(
+            "RUNTIME_ELIGIBILITY", "REJECT", "PASSED" if eligible else "FAILED",
+            json.dumps({"runtime_mode": context.runtime_mode.value,
+                        "allow_experimental": self._allow_experimental,
+                        "provisional_parameters": provisional}, sort_keys=True),
+        )
 
     def _estimate_basis(
         self,
         basis_input: EstimationBasisInput,
         factor_candidates: Mapping[int, tuple[FactorRiskObservation, ...]],
     ) -> EstimationResultBundle:
-        returns = estimate_expected_returns(
-            basis_input.matrix, self._estimation_policy.annualization_factor
-        )
-        covariance = estimate_covariance(
-            basis_input.matrix, self._estimation_policy.annualization_factor
-        )
+        # Only the pure estimators' domain/numerical failures are basis-local.
+        # Provider, validation and persistence exceptions retain D-9 rollback semantics.
+        try:
+            returns = estimate_expected_returns(
+                basis_input.matrix, self._estimation_policy.annualization_factor
+            )
+            covariance = estimate_covariance(
+                basis_input.matrix, self._estimation_policy.annualization_factor
+            )
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            raise _NumericalInputRejected(str(exc)) from exc
         validations = self._validate_all_members(
             basis_input, returns.annualized_mu, covariance, factor_candidates
         )
@@ -356,6 +463,10 @@ def _policy_content(
 def _aggregate_factor_results(
     results: tuple[tuple[int, ValidationResult], ...],
 ) -> ValidationResult:
+    detail = json.dumps(
+        [{"share_class_id": share_class_id, **dataclasses.asdict(result)}
+         for share_class_id, result in results], sort_keys=True,
+    )
     rejected = tuple(
         (share_class_id, result)
         for share_class_id, result in results
@@ -366,7 +477,7 @@ def _aggregate_factor_results(
             "FACTOR_RISK_CROSS_CHECK",
             "REJECT",
             "FAILED",
-            "failed_share_class_ids=" + str([share_class_id for share_class_id, _ in rejected]),
+            detail,
         )
     not_comparable = tuple(
         share_class_id for share_class_id, result in results if result.code == "NOT_COMPARABLE"
@@ -376,13 +487,13 @@ def _aggregate_factor_results(
             "NOT_COMPARABLE",
             "WARNING",
             "FAILED",
-            f"share_class_ids={list(not_comparable)}",
+            detail,
         )
     return ValidationResult(
         "FACTOR_RISK_CROSS_CHECK",
         "REJECT",
         "PASSED",
-        f"share_class_ids={[share_class_id for share_class_id, _ in results]}",
+        detail,
     )
 
 

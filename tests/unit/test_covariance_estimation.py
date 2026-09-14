@@ -20,12 +20,14 @@ def test_constant_correlation_matches_frozen_reference():
 
     expected = np.array(
         [
-            [0.02772, -0.0226754594594595, 0.0029740540540541],
-            [-0.0226754594594595, 0.02772, -0.0080185945945946],
-            [0.0029740540540541, -0.0080185945945946, 0.02772],
+            [0.02772, -0.023516216216216215, 0.003738378378378378],
+            [-0.023516216216216215, 0.02772, -0.007942162162162161],
+            [0.003738378378378378, -0.007942162162162161, 0.02772],
         ]
     )
-    assert result.shrinkage_intensity == pytest.approx(0.2729729729729731)
+    # Independent exact-rational moment calculation gives delta = 101 / 444
+    # with D-4A's gamma_hat * T denominator and ddof=1 sample moments.
+    assert result.shrinkage_intensity == pytest.approx(0.22747747747747749)
     assert result.covariance == pytest.approx(expected, abs=1e-8)
     assert np.diag(result.covariance) == pytest.approx(result.variance)
 
@@ -107,8 +109,8 @@ def test_gamma_zero_uses_full_shrinkage():
     ],
 )
 def test_shrinkage_intensity_clamps_to_endpoint(matrix, expected_shrinkage):
-    # Independent moment evaluation gives unclamped values -0.04002853178271989
-    # and 2.671873855394062 respectively.
+    # Independent moment evaluation gives unclamped values -0.03002139883703992
+    # and 1.7812492369293747 respectively.
     result = estimate_covariance(matrix)
 
     assert result.shrinkage_intensity == expected_shrinkage

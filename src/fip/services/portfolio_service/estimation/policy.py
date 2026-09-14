@@ -60,6 +60,13 @@ class EstimationValidationPolicy:
     provisional_parameters: tuple[str, ...]
 
 
+def estimation_parameter_content(policy: EstimationPolicy) -> dict[str, object]:
+    """Independent version snapshot for every numerical/input parameter."""
+    content = cast(dict[str, object], json.loads(json.dumps(asdict(policy), default=str)))
+    del content["version"]
+    return content
+
+
 def load_estimation_policy(path: Path, runtime_mode: RuntimeMode) -> EstimationPolicy:
     config = load_config_file(path, runtime_mode)
     provisional = tuple(
