@@ -2,9 +2,9 @@
 
 > 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文暴露的域：**⑤ ⑥ ⑦ ⑨ ⑩**
 > 业务语义来源：docs/06-portfolio/（v1.0–v1.1，全 6 份）、docs/07-return-risk/（v1.0，全 6 份）
-> 本域上游：docs/10-api/01-api-overview.md（v1.0）
+> 本域上游：docs/10-api/01-api-overview.md（v1.3）
 >
-> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.3 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -68,12 +68,16 @@
 | 3.13 | `/api/v1/estimates/returns` | GET | Return Estimate |
 | 3.14 | `/api/v1/estimates/risk` | GET | Risk Estimate |
 | 3.15 | `/api/v1/estimates/covariance` | GET | 协方差与相关性矩阵 |
+| 3.16 | `/api/v1/portfolios/{id}/optimizations/{optimization_id}` | GET | 优化结果详情 |
+| 3.17 | `/api/v1/decisions/{decision_id}` | GET | 决策快照详情 |
 
-> 路径待接口评审确认（`<TBD-PA-1>`）。
+> M1.7 前端消费的组合、优化和决策路径已由 `06-m17-frontend-contracts.md` §2–§3 冻结；其余路径仍属 `<TBD-PA-1>`。
 
 ---
 
 ## 4. API Details
+
+> M1.7 所需的优化结果读取与决策快照读取端点，分别见 `06-m17-frontend-contracts.md` §3.2；两者是本域路径表的补充。
 
 ### 4.1 GET /portfolios/{id} — 组合详情
 
@@ -774,8 +778,8 @@ Benchmark-relative 方法产出的是 Expected Excess Return
 | 场景 | HTTP | Code（建议） | 类别 |
 |---|---|---|---|
 | 组合不存在 | 404 | `PORTFOLIO_NOT_FOUND` | — |
-| **优化不可行** | **422** | `OPTIMIZATION_INFEASIBLE` | **Business Rule Violation** |
-| **优化未收敛** | **500** | `OPTIMIZATION_NOT_CONVERGED` | **Processing Error** |
+| **异步优化不可行** | **200（优化结果查询）** | `optimization_status = INFEASIBLE` | **Business Rule Violation** |
+| **异步优化未收敛** | **200（Operation 查询）** | `failure.code = OPTIMIZATION_NOT_CONVERGED` | **Processing Error** |
 | `Σ` 病态或不可逆 | 500 | `COVARIANCE_ILL_CONDITIONED` | Processing Error |
 | **估计未通过 Gate** | 422 | `ESTIMATE_NOT_APPROVED` | Business Rule Violation |
 | **估计已过期** | 422 | `ESTIMATE_STALE` | Business Rule Violation |
@@ -785,32 +789,36 @@ Benchmark-relative 方法产出的是 Expected Excess Return
 | 非 PM 执行复核 | 403 | `FORBIDDEN` | Authorization |
 | `μ` / `Σ` 维度不一致 | 500 | `DIMENSION_MISMATCH` | Processing Error |
 
-### 6.1 `INFEASIBLE` 用 422，`NOT_CONVERGED` 用 500 ⚠️
+### 6.1 异步优化区分 `INFEASIBLE` 与 `NOT_CONVERGED` ⚠️
 
 > **这是 §4.6.5 在错误码上的落实。**
 
 ```
-422 → 请求合法但业务不允许 → 【不应重试】，需调整约束
-500 → 处理过程失败       → 可能通过调整求解参数解决
+Operation COMPLETED + optimization_status = INFEASIBLE
+    → 任务正常结束但无可行解 → 【不应重试】，需调整约束
+Operation FAILED + failure.code = OPTIMIZATION_NOT_CONVERGED
+    → 处理过程未收敛 → 可能通过调整求解参数解决
 ```
 
-> **若两者用同一状态码，客户端会对不可行的优化反复重试。**
+> **若客户端不能区分这两种业务状态，可能对不可行的优化反复重试。**
 
-### 6.2 不可行错误必须携带诊断
+### 6.2 不可行优化结果必须携带诊断
 
 ```json
 {
-  "error": {
-    "code": "OPTIMIZATION_INFEASIBLE",
-    "message": "No feasible solution under current constraints",
-    "details": {
-      "conflicting_constraints": [
-        { "constraint_id": "...", "type": "MIN_HOLDINGS", "value": 20 },
-        { "constraint_id": "...", "type": "MAX_FUND_WEIGHT", "value": 0.04 }
-      ],
-      "diagnosis": "min_holdings * max_fund_weight = 0.80 < 1.00"
-    }
-  }
+  "data": {
+    "optimization_id": "OPT-1042",
+    "optimization_status": "INFEASIBLE",
+    "target_weights": null,
+    "binding_constraints": ["MAX_FUND_WEIGHT:F001"],
+    "conflicting_constraints": [
+      { "constraint_id": "...", "type": "MIN_HOLDINGS", "value": 20 },
+      { "constraint_id": "...", "type": "MAX_FUND_WEIGHT", "value": 0.04 }
+    ],
+    "diagnosis": "min_holdings * max_fund_weight = 0.80 < 1.00"
+  },
+  "meta": { "request_id": "..." },
+  "error": null
 }
 ```
 
@@ -865,21 +873,16 @@ GET /api/v1/operations/OP-8f3c
   "data": {
     "operation_id": "OP-8f3c",
     "status": "COMPLETED",
-    "result": {
-      "optimization_id": "OPT-1042",
-      "optimization_status": "INFEASIBLE",
-      "target_weights": null,
-      "conflicting_constraints": [
-        { "constraint_type": "MIN_HOLDINGS", "scope": "PORTFOLIO", "value": 20 },
-        { "constraint_type": "MAX_FUND_WEIGHT", "scope": "FUND", "value": 0.04 }
-      ],
-      "diagnosis": "20 × 4% = 80% < 100%，无法凑满权重"
-    }
+    "progress": { "completed": 10, "total": 10, "unit": "steps" },
+    "result_ref": "/api/v1/portfolios/P001/optimizations/OPT-1042",
+    "failure": null
   },
-  "meta": { "portfolio_rule_version": "v2" },
+  "meta": { "request_id": "..." },
   "error": null
 }
 ```
+
+随后以 `GET result_ref` 读取优化结果，其中 `optimization_status = INFEASIBLE`、`target_weights = null`，并返回约束诊断。Operation 完成只表示计算执行已结束。
 
 #### 7.2.1 Operation 成功但业务失败时用 200 而非 4xx
 
@@ -893,7 +896,7 @@ Operation 的 status = COMPLETED（任务执行完了）
 → 业务失败体现在 result 内部
 ```
 
-**若同步调用优化端点，则直接返回 422**（§6）。**两种形态下业务语义一致，HTTP 语义不同** —— API 文档须明确告知。
+优化端点在 M1.7 固定为异步，因此其 `INFEASIBLE` 结果由优化结果资源表达，不作为 Operation 执行错误，也不将 HTTP 422 用作轮询结果。
 
 ### 7.3 决策复核（Override）
 
@@ -1008,7 +1011,7 @@ Idempotency-Key: 3f2a...
 | D-12 | **`scope` + `scope_key` 是约束的必备字段** | 缺失则无法校验与解释 |
 | D-13 | **`is_binding` 必须返回** | `PASS+BINDING` 与 `PASS+余量` 是不同状态 |
 | D-14 | 冻结引起的 Breach 标 `is_unresolvable` | 避免无效重试 |
-| D-15 | **`INFEASIBLE` 用 422，`NOT_CONVERGED` 用 500** | 前者不应重试 |
+| D-15 | **异步优化中 `INFEASIBLE` 作为优化结果，`NOT_CONVERGED` 作为 Operation 失败** | 二者均不可被客户端误作可用权重；见 §6.1 |
 | D-16 | **不可行时不返回权重，但必须返回诊断** | 严禁"差不多的解" |
 | D-17 | **`solve_path` 必须返回** | 不同路径结果不同 |
 | D-18 | **`turnover_convention` 必须随 `turnover` 返回** | 两种口径相差一倍 |
@@ -1044,9 +1047,9 @@ Idempotency-Key: 3f2a...
 
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
-| PA-1 | 本域各端点的最终路径与参数名 | 契约 | 接口评审 |
+| PA-1 | 本域未纳入 M1.7 前端范围的端点路径与参数名 | 契约 | 接口评审 |
 | ~~PA-2~~ | ~~大规模协方差矩阵的传输格式~~ —— **已定案**：协方差矩阵传输 = **完整下三角 + `instrument_order` 顺序数组**，不做稀疏 | — | ✅ 2026-08-27 |
-| PA-3 | 优化的异步阈值（何时同步、何时 202） | 响应模式 | 产品 + 运维 |
+| ~~PA-3~~ | ~~优化的异步阈值~~ —— **M1.7 定案**：组合优化始终返回 `202 Accepted` 并使用统一 Operation 查询；生产响应时间目标仍由 `API-8` 定案 | — | ✅ 2026-09-16 |
 | PA-4 | 组合的资源级可见性规则（= `TBD-API-7`） | 授权 | 产品 + 治理 |
 | PA-5 | 是否暴露 Constraint 与 Risk Budget 的**写**接口 | 配置管理 | 产品 + 治理 |
 
@@ -1060,7 +1063,7 @@ Idempotency-Key: 3f2a...
 
 | 关系 | 文档 |
 |---|---|
-| **本域总纲** | `10-api/01-api-overview.md` v1.0 |
+| **本域总纲** | `10-api/01-api-overview.md` v1.3 |
 | **业务语义来源** | `06-portfolio/`（全 6 份 v1.0–v1.1）、`07-return-risk/`（全 6 份 v1.0） |
 | **上游约束** | `01-product/01-product-overview.md` v2.5（§4.2 ⑤⑥⑦⑨⑩、⑨-S、§5.3、§7.1.1）、`05-non-functional-requirements.md` v1.0（`NFR-SEC-001`） |
 | **相关 API** | `02-fund-api`（Universe）、`03-factor-api`、`05-backtest-api` |
@@ -1071,6 +1074,7 @@ Idempotency-Key: 3f2a...
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.3** | 2026-09-16 | 冻结 M1.7 组合/优化/决策路径与读取模型；统一优化结果通过 Operation 的 `result_ref` 导航；补充当前会话角色契约参见 `06-m17-frontend-contracts.md` | `06-m17-frontend-contracts.md` |
 | **v1.2** | 2026-09-14 | 同步 Plan-3 已实现的估计查询契约：逐基金字段统一为 `mu`；Run 生命周期与 API 派生批准语义分离；Stage ⑥只消费 ABSOLUTE 年化同包数据；协方差和相关矩阵只返回带顺序、编码版本与 checksum 的完整下三角载荷 | `2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.1** | 2026-08-27 | **第二批定案（1 项）**。`PA-2` 协方差矩阵传输 = **完整下三角 + `instrument_ids` 顺序数组**，不做稀疏化（收缩估计后矩阵稠密）；`instrument_ids` 必须一并返回且顺序严格对应 —— 它是矩阵语义的一部分，容易被当作元数据而遗漏。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | v1.0 | 2026-08-27 | 初始版本。**§4.1.2 `portfolio_version` 与 `portfolio_rule_version` 的区分**；**§4.2 三态持仓端点**及不得以 Target 冒充 Actual、§4.2.3 份额为主权重为导出、§4.2.4 冻结持仓标注；**§4.3.1 `weight_basis` 必备**、§4.3.2 `euler_check` 暴露、**§4.3.4 风险端点不返回"预期最大回撤"**；**§4.4.2 `NOT_AVAILABLE` 不等于 `WITHIN_LIMIT`**；**§4.5.1–4.5.4 约束的 `scope`/`is_binding`/`is_unresolvable`/`mode`**；**§4.6.1 请求体传版本引用而非估计值**（否则服务端无法强制 PIT）、**§4.6.5 `INFEASIBLE` 与 `NOT_CONVERGED` 区别对待**并落到 422/500、§4.6.7 `solve_path` 必须返回；**§4.7.3 `turnover_convention`**、**§4.7.4 `gap_disposition`**、**§4.7.5 `Pending` 期间 409**（与幂等是两回事）；**§4.8.2 `reason` 必填**、§4.8.3 职责分离；**§4.9.1–4.9.2 `return_basis` 与两个窗口参数必须返回**；**§4.10.1 `instrument_ids` 顺序是矩阵语义的一部分**、§4.10.2 `diagnostics` 必备；**§7.2.1 异步下业务失败用 200** | `06-portfolio` v1.0–v1.1、`07-return-risk` v1.0、`10-api/01-api-overview.md` v1.0 |

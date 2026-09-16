@@ -2,9 +2,9 @@
 
 > 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文暴露的域：**③ Fund Score · ④ Fund Universe**
 > 业务语义来源：docs/05-fund-evaluation/（v1.0，全 5 份）、docs/03-data/（v1.0–v2.2）
-> 本域上游：docs/10-api/01-api-overview.md（v1.0）
+> 本域上游：docs/10-api/01-api-overview.md（v1.3）
 >
-> **文档版本**：v1.4 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.6 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -71,7 +71,7 @@
 | 3.9 | `/api/v1/fund-universes/{universe_id}` | GET | 候选池详情（含入池/未入池原因） |
 | 3.10 | `/api/v1/peer-groups/{peer_group_id}` | GET | Peer Group 构成与组内水平 |
 
-> **具体路径待接口评审确认**（`<TBD-FA-1>`），本文档定义的是**能力与契约**，路径为建议。
+> M1.7 前端消费的基金与候选池路径已由 `06-m17-frontend-contracts.md` §2 冻结；其余路径仍属 `<TBD-FA-1>`。
 
 ---
 
@@ -983,7 +983,7 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
-| FA-1 | **本域各端点的最终路径与参数名** | 契约 | 接口评审 |
+| FA-1 | **未纳入 M1.7 消费范围的本域端点最终路径与参数名** | 契约 | 接口评审 |
 | FA-2 | `fund_name` 模糊匹配的规则（前缀 / 全文 / 拼音） | 检索体验 | 产品 |
 | FA-3 | 是否需要产品级（跨 Share Class）聚合视图 | 粒度扩展 | 产品 + 投研 |
 | FA-4 | Universe 的资源级可见性规则（= `TBD-API-7`） | 授权 | 产品 + 治理 |
@@ -1006,6 +1006,7 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.6** | 2026-09-16 | 冻结 M1.7 基金检索/详情、净值、评价/评分与候选池端点路径；保留未纳入前端范围的路径待定 | `06-m17-frontend-contracts.md` |
 | **v1.5** | 2026-09-08 | `weight_source` 第一版枚举改为 `PROFILE_FIXED_V1`；保留 `VALIDATION_PENDING`，明确 OOS 检验决定使用资格而非权重 | Plan-2 设计 v1.0、`05-fund-evaluation/02` v1.3 |
 | **v1.4** | 2026-08-27 | **Policy ⑥ 同步（后由 2026-09-08 决策替代权重来源）**。§4.5 归因新增 `weight_source` 与 `effectiveness_verdict`，示例补一条 `EXCLUDED` 因子；新增 §4.5.3 —— `INVALID` 因子须在归因中留痕，`EXCLUDED`（因子无效，全体一致）与 `UNAVAILABLE`（该基金缺数据）是不同状态；新增 §4.5.4 —— 检验未产出时 `score_status = VALIDATION_PENDING` 且不返回分数。M1 当前 `weight_source` 固定为 `PROFILE_FIXED_V1`。 | `05-fund-evaluation/02` v1.1 |
 | **v1.3** | 2026-08-27 | **Policy ⑤ 同步**。§6.1 改写 —— 样本量不足（`n_effective < 30`）返回 200 但**横截面派生量为 `null`**，附 `*_status = INSUFFICIENT_SAMPLE` 与 `n_effective`；原始因子值照常返回；`confidence_flag` 不再承担样本量不足的表达。D-17 同步。详见 `TBD-resolution.md` Policy ⑤ | `05-fund-evaluation/03` v1.1、`05-fund-evaluation/04` v1.1 |

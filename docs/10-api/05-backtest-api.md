@@ -2,9 +2,9 @@
 
 > 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文暴露的域：**⑧ Backtest**
 > 业务语义来源：docs/08-backtest/（v1.0，全 6 份）
-> 本域上游：docs/10-api/01-api-overview.md（v1.0）
+> 本域上游：docs/10-api/01-api-overview.md（v1.3）
 >
-> **文档版本**：v1.5 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.6 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -65,7 +65,7 @@
 | 3.12 | **`/api/v1/backtests/{id}/bias-check`** | GET | **偏差检查** |
 | 3.13 | `/api/v1/backtests/{id}/report` | GET | 完整报告 |
 
-> 路径待接口评审确认（`<TBD-BA-1>`）。
+> M1.7 前端消费的回测端点路径已由 `06-m17-frontend-contracts.md` §2 冻结；未纳入范围的路径仍属 `<TBD-BA-1>`。
 
 ---
 
@@ -994,7 +994,7 @@ GET /api/v1/backtests/BT-2026-0827-003/result
 
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
-| BA-1 | 本域各端点的最终路径与参数名 | 契约 | 接口评审 |
+| BA-1 | 本域未纳入 M1.7 前端范围的端点路径与参数名 | 契约 | 接口评审 |
 | BA-2 | 是否提供报告文件导出及格式 | 产品能力 | 产品 |
 | ~~BA-3~~ | ~~`INVALID` 回测的绩效字段是否置空~~ —— **已定案**：`INVALID` 回测的绩效字段**照常返回**，但 `validation_status` 置顶且报告标 `INVALID` | — | ✅ 2026-08-27 |
 | BA-4 | 回测结果的保留期限与归档策略 | 存储 | 运维 + 合规 |
@@ -1017,6 +1017,7 @@ GET /api/v1/backtests/BT-2026-0827-003/result
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.6** | 2026-09-16 | 冻结 M1.7 回测工作流消费的端点路径与统一 Operation 轮询规则；报告导出等仍未定 | `06-m17-frontend-contracts.md` |
 | **v1.5** | 2026-08-27 | **第二批定案（1 项）**。`BA-3` `INVALID` 回测的绩效字段**照常返回**但 `validation_status` 置顶 —— 置空会让使用方只知道「不行」而不知道差在哪；风险由「状态先于绩效字段出现」与导出报告首页标识来控制。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.4** | 2026-08-27 | **Policy ⑨ 同步**。§4.5 响应新增 `significance_verdict` 四层结构；新增 §4.5.3 —— 阈值未校准时 `passed` 为 **`null`**（不是 `false`）且 `overall` 取 `NOT_SIGNIFICANT`（不是 `CANNOT_DETERMINE`，后者留给数据不足的情形，且中性值会被误当作放行）；各判据须分别给出对 Benchmark 与对 Equal Weight 两个值；API 不得以字段形式重新引入「接近显著」。原 §4.5.3 顺移为 §4.5.4。详见 `TBD-resolution.md` Policy ⑨ | `08-backtest/02` v1.1、`08-backtest/06` v1.1 |
 | **v1.3** | 2026-08-27 | **Policy ⑩ 同步**。§4.9 响应新增 `excluded_costs` 并把 `cost_by_type` 的省略值改为完整数值；新增 §4.9.1 —— 区分 `INCLUDED_IN_NAV`（已扣过，无影响）与 `INCLUSION_UNKNOWN`（可能没扣，成本被低估）两种排除原因，并厘清 `excluded_costs` 与 `unmodeled_costs` 的分工。详见 `TBD-resolution.md` Policy ⑩ | `08-backtest/05-transaction-cost` v1.1 |

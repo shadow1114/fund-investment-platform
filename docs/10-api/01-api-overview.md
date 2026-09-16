@@ -4,7 +4,7 @@
 > 非功能需求：docs/01-product/05-non-functional-requirements.md（v1.0）§3.1、§3.5
 > 架构依赖：docs/02-architecture/02-service-architecture.md（v1.3）、04-integration-architecture.md（v1.2）
 >
-> **文档版本**：v1.2 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.3 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -80,6 +80,7 @@ API 框架选型 = TBD-TECH-2（技术评审）
 
 | 类别 | 文档 | 回答的问题 |
 |---|---|---|
+| **Common API** | `06-m17-frontend-contracts.md` | 当前用户与异步操作如何表达？ |
 | **Fund API** | `02-fund-api` | 有哪些基金？它们被如何评价与筛选？ |
 | **Factor API** | `03-factor-api` | 有哪些因子？它们的值与定义是什么？ |
 | **Portfolio API** | `04-portfolio-api` | 可以做出、评估与管理哪些组合决策？ |
@@ -688,6 +689,8 @@ Authentication Mechanism = TBD
 
 `<TBD-API-6: 认证机制（Bearer Token / OAuth2 / mTLS）— 属 `02-architecture`，本域待其定案后同步>`
 
+M1.7 前端读取当前用户与角色的跨机制接口固定为 `GET /api/v1/session`，响应结构见 `06-m17-frontend-contracts.md` §3.1。该端点不决定认证协议。
+
 ### 15.2 Authorization 沿用五类角色
 
 > **不新增角色**（`NFR-SEC-001`）：
@@ -746,6 +749,8 @@ POST /api/v1/backtests/{id}/runs
 GET /api/v1/operations/{operation_id}
     → 200 { "data": { "status": "...", "progress": ..., "result_ref": "..." } }
 ```
+
+M1.7 使用的 Operation 状态、进度、结果引用和失败结构见 `06-m17-frontend-contracts.md` §3.3。
 
 ### 16.3 Async 阈值
 
@@ -1139,6 +1144,7 @@ API 层**只暴露能力，不定义能力** —— 全部业务语义引用各�
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.3** | 2026-09-16 | 增加 M1.7 session 与 Operation 前端契约引用；明确 API-6 认证协议仍待架构定案 | `06-m17-frontend-contracts.md` |
 | **v1.2** | 2026-08-27 | **第二批定案（6 项）**。`API-3` **UTC 存储 + ISO 8601 带偏移返回**，并明确**时刻与业务日期必须分开**（把业务日期当时刻会产生日界错误）；`API-4` 金额 `NUMERIC(20,4)`、比率一律小数 `NUMERIC(12,8)`；`API-5` **URL 路径版本**、并存上限 2（路径版本对调试与缓存友好，Header 协商在日志中看不出版本）；`API-2` 默认 50 上限 500（更高会与 W2 的 P95 目标冲突）；`API-9`/`API-10` 推荐默认。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.1** | 2026-08-27 | **上游 `TBD-17` 关闭后的定案**。§10.3 改写 —— `available_at` 确定为 `TIMESTAMPTZ`（ISO 8601 带时区、秒级精度），并澄清它与请求参数 `as_of_date`（日期粒度）粒度不同不是不一致；新增 §10.3.1 —— `availability_quality` 与 `available_at` **成对出现**，带 `as_of_date` 的列表端点须在 `meta` 中给出 quality 分布。详见 `TBD-resolution.md` Policy ④ | `03-data/01-data-source` v2.3、`01-product-overview` v2.6 |
 | v1.0 | 2026-08-27 | 初始版本。确立**API 只暴露能力不定义能力**与契约独立于框架选型；**§4.3 不得重命名业务枚举**；**§5.2 `meta` 必须携带版本引用**；**§6.3 Validation Error 与 Business Rule Violation 的区分**；**§7.2 分页必须有确定性排序**；**§9.2 API Filtering 不等于 Eligibility Rules**；**§11.2 `as_of_date` 定为 PIT 语义**并与业务日期语义分离；**§12.1 百分比统一用小数**、**§12.4 `null` 必须附 status 与原因**；**§14.4 修改字段语义比删除更危险**、**§14.5 新增枚举的兼容性取决于客户端**；§16.4 Operation 作为独立资源；**§17.3 API 幂等键与业务幂等键并存不可互替**；§20.1 历史结果引用快照；**§23 回应 `INT-4`** 外部执行系统对接的 API 侧契约要求 | `01-product-overview.md` v2.5、`05-non-functional-requirements.md` v1.0、`02-architecture` v1.2–v2.3 |
