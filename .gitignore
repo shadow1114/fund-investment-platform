@@ -10,3 +10,9 @@ __pycache__/
 htmlcov/
 *.egg-info/
 .env
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vitest.config.js
