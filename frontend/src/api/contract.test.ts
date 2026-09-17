@@ -7,7 +7,10 @@ import { parse } from "yaml";
 import * as generatedClient from "./generated/m17";
 import { getGetBacktestPerformanceUrl, getListFundsUrl } from "./generated/m17";
 import type {
+  BacktestCreatedStatus,
+  BacktestRunStatus,
   BacktestStatusStatus,
+  FactorResultDirection,
   OperationStatus,
   OptimizationOptimizationStatus,
 } from "./generated/m17.schemas";
@@ -92,8 +95,11 @@ const frozenOperations = [
 const generatedUnknownStatuses: [
   OperationStatus,
   OptimizationOptimizationStatus,
+  BacktestCreatedStatus,
+  BacktestRunStatus,
   BacktestStatusStatus,
-] = ["UNKNOWN", "UNKNOWN", "UNKNOWN"];
+  FactorResultDirection,
+] = ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"];
 
 function loadOpenApi(path: string): OpenApiProjection {
   return parse(
@@ -296,13 +302,27 @@ describe("frozen M1.7 OpenAPI projection", () => {
 
     expect(schemas.MetricStatus.enum).toContain("UNKNOWN");
     expect(schemas.Operation.properties?.status?.enum).toContain("UNKNOWN");
+    expect(schemas.FactorResult.properties?.direction?.enum).toContain(
+      "UNKNOWN",
+    );
     expect(
       schemas.Optimization.properties?.optimization_status?.enum,
     ).toContain("UNKNOWN");
     expect(schemas.BacktestStatus.properties?.status?.enum).toContain(
       "UNKNOWN",
     );
+    expect(schemas.BacktestCreated.properties?.status?.enum).toContain(
+      "UNKNOWN",
+    );
+    expect(schemas.BacktestRun.properties?.status?.enum).toContain("UNKNOWN");
     expect(schemas.BiasStatus.enum).toContain("UNKNOWN");
-    expect(generatedUnknownStatuses).toEqual(["UNKNOWN", "UNKNOWN", "UNKNOWN"]);
+    expect(generatedUnknownStatuses).toEqual([
+      "UNKNOWN",
+      "UNKNOWN",
+      "UNKNOWN",
+      "UNKNOWN",
+      "UNKNOWN",
+      "UNKNOWN",
+    ]);
   });
 });

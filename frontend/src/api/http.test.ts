@@ -70,6 +70,50 @@ describe("API response handling", () => {
     expect(data).toEqual({ optimization_status: "UNKNOWN" });
   });
 
+  it("does not accept a value merely because it belongs to another enum", () => {
+    const data = unwrapResponse({
+      status: 200,
+      data: {
+        data: {
+          invalid: { optimization_status: "COMPLETED" },
+          valid: { optimization_status: "OPTIMAL" },
+        },
+        meta: {},
+        error: null,
+      },
+      headers: new Headers(),
+    });
+
+    expect(data).toEqual({
+      invalid: { optimization_status: "UNKNOWN" },
+      valid: { optimization_status: "OPTIMAL" },
+    });
+  });
+
+  it("normalizes direction with its own generated enum", () => {
+    const data = unwrapResponse({
+      status: 200,
+      data: {
+        data: {
+          factor_results: [
+            { direction: "HIGHER_IS_BETTER" },
+            { direction: "SIDEWAYS_IS_BETTER" },
+          ],
+        },
+        meta: {},
+        error: null,
+      },
+      headers: new Headers(),
+    });
+
+    expect(data).toEqual({
+      factor_results: [
+        { direction: "HIGHER_IS_BETTER" },
+        { direction: "UNKNOWN" },
+      ],
+    });
+  });
+
   it("throws a contract error when required metadata is absent", () => {
     expect(() =>
       unwrapResponse(

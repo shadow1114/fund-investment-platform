@@ -274,6 +274,7 @@ export type NavSeriesMetaAllOfNavType =
 export const NavSeriesMetaAllOfNavType = {
   ADJUSTED: "ADJUSTED",
   RAW: "RAW",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type NavSeriesMetaAllOf = {
@@ -309,6 +310,7 @@ export type FactorResultDirection =
 export const FactorResultDirection = {
   HIGHER_IS_BETTER: "HIGHER_IS_BETTER",
   LOWER_IS_BETTER: "LOWER_IS_BETTER",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface FactorResult {
@@ -402,6 +404,16 @@ export type ScoreAttributionRawValue = number | null;
 
 export type ScoreAttributionNormalizedValue = number | null;
 
+export type ScoreAttributionDirection =
+  (typeof ScoreAttributionDirection)[keyof typeof ScoreAttributionDirection];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ScoreAttributionDirection = {
+  HIGHER_IS_BETTER: "HIGHER_IS_BETTER",
+  LOWER_IS_BETTER: "LOWER_IS_BETTER",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
 export type ScoreAttributionReasonCode = string | null;
 
 export type ScoreAttributionExclusionReason = string | null;
@@ -413,6 +425,7 @@ export type ScoreAttributionEffectivenessVerdict =
 export const ScoreAttributionEffectivenessVerdict = {
   VALID: "VALID",
   INVALID: "INVALID",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type ScoreAttributionWeightSource =
@@ -422,6 +435,7 @@ export type ScoreAttributionWeightSource =
 export const ScoreAttributionWeightSource = {
   PROFILE_FIXED_V1: "PROFILE_FIXED_V1",
   OPTIMIZED: "OPTIMIZED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type ScoreAttributionReallocatedToItem = {
@@ -434,7 +448,7 @@ export interface ScoreAttribution {
   window?: string;
   raw_value: ScoreAttributionRawValue;
   normalized_value?: ScoreAttributionNormalizedValue;
-  direction?: string;
+  direction?: ScoreAttributionDirection;
   status: MetricStatus;
   reason_code: ScoreAttributionReasonCode;
   exclusion_reason?: ScoreAttributionExclusionReason;
@@ -500,6 +514,7 @@ export type UniverseSummaryUniverseStrategy =
 export const UniverseSummaryUniverseStrategy = {
   A: "A",
   B: "B",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type UniverseSummaryScoringPolicyVersion = string | null;
@@ -521,6 +536,7 @@ export type UniverseConditionResult =
 export const UniverseConditionResult = {
   PASS: "PASS",
   FAIL: "FAIL",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface UniverseCondition {
@@ -579,6 +595,7 @@ export type UniverseUniverseStrategy =
 export const UniverseUniverseStrategy = {
   A: "A",
   B: "B",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface Universe {
@@ -810,6 +827,7 @@ export const DecisionReviewAction = {
   APPROVED: "APPROVED",
   REJECTED: "REJECTED",
   OVERRIDDEN: "OVERRIDDEN",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface DecisionReview {
@@ -925,9 +943,18 @@ export interface BacktestCreateRequest {
   infeasible_handling: BacktestCreateRequestInfeasibleHandling;
 }
 
+export type BacktestCreatedStatus =
+  (typeof BacktestCreatedStatus)[keyof typeof BacktestCreatedStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const BacktestCreatedStatus = {
+  CREATED: "CREATED",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
 export interface BacktestCreated {
   backtest_id: string;
-  status: "CREATED";
+  status: BacktestCreatedStatus;
   created_at: string;
 }
 
@@ -952,6 +979,7 @@ export type BacktestValidationValidationResult =
 export const BacktestValidationValidationResult = {
   PASS: "PASS",
   PASS_WITH_WARNINGS: "PASS_WITH_WARNINGS",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestValidationEffectivePeriod = {
@@ -975,10 +1003,19 @@ export interface BacktestValidationEnvelope {
   error: EmptyError;
 }
 
+export type BacktestRunStatus =
+  (typeof BacktestRunStatus)[keyof typeof BacktestRunStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const BacktestRunStatus = {
+  RUNNING: "RUNNING",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
 export interface BacktestRun {
   operation_id: string;
   backtest_id: string;
-  status: "RUNNING";
+  status: BacktestRunStatus;
 }
 
 export interface BacktestRunEnvelope {
@@ -1224,6 +1261,7 @@ export const BacktestResultValidationStatus = {
   VALID: "VALID",
   WARNING: "WARNING",
   INVALID: "INVALID",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestResultBacktestMode =
@@ -1233,6 +1271,7 @@ export type BacktestResultBacktestMode =
 export const BacktestResultBacktestMode = {
   HISTORICAL_FIDELITY: "HISTORICAL_FIDELITY",
   CURRENT_RULE: "CURRENT_RULE",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestResultPeriod = {
@@ -1249,6 +1288,7 @@ export const BacktestResultSignificanceVerdictOverall = {
   SIGNIFICANT: "SIGNIFICANT",
   NOT_SIGNIFICANT: "NOT_SIGNIFICANT",
   CANNOT_DETERMINE: "CANNOT_DETERMINE",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestResultSignificanceVerdictThresholdsStatus =
@@ -1258,6 +1298,7 @@ export type BacktestResultSignificanceVerdictThresholdsStatus =
 export const BacktestResultSignificanceVerdictThresholdsStatus = {
   CALIBRATED: "CALIBRATED",
   PENDING_CALIBRATION: "PENDING_CALIBRATION",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestResultSignificanceVerdictLayers = {
@@ -1361,6 +1402,7 @@ export const BacktestPerformanceSegment = {
   FULL: "FULL",
   IN_SAMPLE: "IN_SAMPLE",
   OUT_OF_SAMPLE: "OUT_OF_SAMPLE",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface BacktestPerformance {

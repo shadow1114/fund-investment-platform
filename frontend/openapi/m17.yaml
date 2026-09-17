@@ -907,7 +907,7 @@ components:
               unavailable_count,
             ]
           properties:
-            nav_type: { type: string, enum: [ADJUSTED, RAW] }
+            nav_type: { type: string, enum: [ADJUSTED, RAW, UNKNOWN] }
             adjustment_convention: { type: string, const: BACKWARD }
             adjustment_rule_version: { type: string }
             unavailable_count: { type: integer }
@@ -943,7 +943,8 @@ components:
         normalized_value: { type: [number, "null"] }
         status: { $ref: "#/components/schemas/MetricStatus" }
         reason_code: { type: [string, "null"] }
-        direction: { type: string, enum: [HIGHER_IS_BETTER, LOWER_IS_BETTER] }
+        direction:
+          { type: string, enum: [HIGHER_IS_BETTER, LOWER_IS_BETTER, UNKNOWN] }
     FundEvaluation:
       type: object
       required:
@@ -1051,14 +1052,16 @@ components:
         window: { type: string }
         raw_value: { type: [number, "null"] }
         normalized_value: { type: [number, "null"] }
-        direction: { type: string }
+        direction:
+          { type: string, enum: [HIGHER_IS_BETTER, LOWER_IS_BETTER, UNKNOWN] }
         status: { $ref: "#/components/schemas/MetricStatus" }
         reason_code: { type: [string, "null"] }
         exclusion_reason: { type: [string, "null"] }
-        effectiveness_verdict: { type: string, enum: [VALID, INVALID] }
+        effectiveness_verdict: { type: string, enum: [VALID, INVALID, UNKNOWN] }
         weight: { type: number }
         original_weight: { type: number }
-        weight_source: { type: string, enum: [PROFILE_FIXED_V1, OPTIMIZED] }
+        weight_source:
+          { type: string, enum: [PROFILE_FIXED_V1, OPTIMIZED, UNKNOWN] }
         weighted_contribution: { type: number }
         sub_score: { type: string }
         reallocated_to:
@@ -1155,7 +1158,7 @@ components:
         universe_id: { type: string }
         strategy_id: { type: string }
         decision_at: { type: string, format: date }
-        universe_strategy: { type: string, enum: [A, B] }
+        universe_strategy: { type: string, enum: [A, B, UNKNOWN] }
         member_count: { type: integer }
         eligibility_rules_version: { type: string }
         scoring_policy_version: { type: [string, "null"] }
@@ -1165,7 +1168,7 @@ components:
       properties:
         condition: { type: string }
         actual: {}
-        result: { type: string, enum: [PASS, FAIL] }
+        result: { type: string, enum: [PASS, FAIL, UNKNOWN] }
         gap: { type: number }
     UniverseMember:
       type: object
@@ -1216,7 +1219,7 @@ components:
       properties:
         universe_id: { type: string }
         decision_at: { type: string, format: date }
-        universe_strategy: { type: string, enum: [A, B] }
+        universe_strategy: { type: string, enum: [A, B, UNKNOWN] }
         members:
           {
             type: array,
@@ -1454,7 +1457,8 @@ components:
       type: object
       required: [action, reason, reviewed_by, reviewed_at]
       properties:
-        action: { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN] }
+        action:
+          { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN, UNKNOWN] }
         reason: { type: string }
         reviewed_by: { type: string }
         reviewed_at: { type: string, format: date-time }
@@ -1578,7 +1582,7 @@ components:
       required: [backtest_id, status, created_at]
       properties:
         backtest_id: { type: string }
-        status: { type: string, const: CREATED }
+        status: { type: string, enum: [CREATED, UNKNOWN] }
         created_at: { type: string, format: date-time }
     BacktestCreatedEnvelope:
       type: object
@@ -1607,7 +1611,8 @@ components:
           blocking_issues,
         ]
       properties:
-        validation_result: { type: string, enum: [PASS, PASS_WITH_WARNINGS] }
+        validation_result:
+          { type: string, enum: [PASS, PASS_WITH_WARNINGS, UNKNOWN] }
         warm_up_end_date: { type: string, format: date }
         effective_period:
           type: object
@@ -1640,7 +1645,7 @@ components:
       properties:
         operation_id: { type: string }
         backtest_id: { type: string }
-        status: { type: string, const: RUNNING }
+        status: { type: string, enum: [RUNNING, UNKNOWN] }
     BacktestRunEnvelope:
       type: object
       required: [data, meta, error]
@@ -1904,9 +1909,10 @@ components:
       properties:
         backtest_id: { type: string }
         status: { type: string }
-        validation_status: { type: string, enum: [VALID, WARNING, INVALID] }
+        validation_status:
+          { type: string, enum: [VALID, WARNING, INVALID, UNKNOWN] }
         backtest_mode:
-          { type: string, enum: [HISTORICAL_FIDELITY, CURRENT_RULE] }
+          { type: string, enum: [HISTORICAL_FIDELITY, CURRENT_RULE, UNKNOWN] }
         period:
           type: object
           required: [start_date, end_date, warm_up_end_date]
@@ -1925,10 +1931,10 @@ components:
             overall:
               {
                 type: string,
-                enum: [SIGNIFICANT, NOT_SIGNIFICANT, CANNOT_DETERMINE],
+                enum: [SIGNIFICANT, NOT_SIGNIFICANT, CANNOT_DETERMINE, UNKNOWN],
               }
             thresholds_status:
-              { type: string, enum: [CALIBRATED, PENDING_CALIBRATION] }
+              { type: string, enum: [CALIBRATED, PENDING_CALIBRATION, UNKNOWN] }
             layers:
               type: object
               required: [statistical, effect_size, robustness, economic]
@@ -2055,7 +2061,8 @@ components:
       type: object
       required: [segment, series]
       properties:
-        segment: { type: string, enum: [FULL, IN_SAMPLE, OUT_OF_SAMPLE] }
+        segment:
+          { type: string, enum: [FULL, IN_SAMPLE, OUT_OF_SAMPLE, UNKNOWN] }
         series: { $ref: "#/components/schemas/BacktestSeries" }
     BacktestPerformanceEnvelope:
       type: object
