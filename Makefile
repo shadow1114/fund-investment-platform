@@ -36,6 +36,9 @@ frontend-install:
 frontend-dev:
 	cd frontend && npm run dev
 
+frontend-api:
+	cd frontend && npm run api:generate
+
 frontend-build:
 	cd frontend && npm run build
 
@@ -44,3 +47,6 @@ frontend-test:
 
 frontend-lint:
 	cd frontend && npm run lint
+
+frontend-check:
+	cd frontend && npm run check
