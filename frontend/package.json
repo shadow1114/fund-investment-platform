@@ -9,7 +9,7 @@
     "test": "vitest",
     "lint": "eslint .",
     "format:check": "prettier --check .",
-    "api:generate": "echo 'API generation is not configured yet'",
+    "api:generate": "orval --input ./openapi/m17.yaml --output ./src/api/generated/m17.ts --client fetch --mode split --clean ./src/api/generated --prettier",
     "check": "npm run format:check && npm run lint && npm run test -- --run && npm run build"
   },
   "dependencies": {
@@ -29,10 +29,12 @@
     "eslint": "^9.15.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "jsdom": "^25.0.1",
+    "orval": "^7.17.0",
     "prettier": "^3.4.1",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.16.0",
     "vite": "^6.0.1",
-    "vitest": "^2.1.5"
+    "vitest": "^2.1.5",
+    "yaml": "^2.8.1"
   }
 }
