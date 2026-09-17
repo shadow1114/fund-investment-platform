@@ -29,7 +29,7 @@ import type {
   ListPortfoliosParams,
   ListUniversesParams,
 } from "./generated/m17.schemas";
-import { unwrapResponse } from "./http";
+import { normalizeOptimization, unwrapResponse } from "./http";
 
 export const queryKeys = {
   all: ["api"] as const,
@@ -83,7 +83,17 @@ export const getSessionQueryOptions = () =>
 export const listFundsQueryOptions = (params?: ListFundsParams) =>
   queryOptions({
     queryKey: queryKeys.funds(params),
-    queryFn: async () => unwrapResponse(await listFunds(params)),
+    queryFn: async () =>
+      unwrapResponse(await listFunds(params), {
+        requiredMeta: [
+          "as_of_date",
+          "data_version",
+          "versions",
+          "is_point_in_time",
+          "pagination",
+          "availability_quality_distribution",
+        ],
+      }),
   });
 
 export const getFundQueryOptions = (fundId: string, params?: GetFundParams) =>
@@ -135,7 +145,10 @@ export const getUniverseQueryOptions = (universeId: string) =>
 export const listPortfoliosQueryOptions = (params?: ListPortfoliosParams) =>
   queryOptions({
     queryKey: queryKeys.portfolios(params),
-    queryFn: async () => unwrapResponse(await listPortfolios(params)),
+    queryFn: async () =>
+      unwrapResponse(await listPortfolios(params), {
+        requiredMeta: ["versions", "is_point_in_time", "pagination"],
+      }),
   });
 
 export const getPortfolioQueryOptions = (portfolioId: string) =>
@@ -151,7 +164,9 @@ export const getOptimizationQueryOptions = (
   queryOptions({
     queryKey: queryKeys.optimization(portfolioId, optimizationId),
     queryFn: async () =>
-      unwrapResponse(await getOptimization(portfolioId, optimizationId)),
+      normalizeOptimization(
+        unwrapResponse(await getOptimization(portfolioId, optimizationId)),
+      ),
   });
 
 export const getDecisionQueryOptions = (decisionId: string) =>

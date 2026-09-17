@@ -192,19 +192,6 @@ export const getListFundsUrl = (params?: ListFundsParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
-    const explodeParameters = [
-      "fund_type",
-      "lifecycle_status",
-      "investment_eligibility",
-    ];
-
-    if (Array.isArray(value) && explodeParameters.includes(key)) {
-      value.forEach((v) => {
-        normalizedParams.append(key, v === null ? "null" : v.toString());
-      });
-      return;
-    }
-
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : value.toString());
     }
@@ -1091,15 +1078,6 @@ export const getGetBacktestPerformanceUrl = (
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
-    const explodeParameters = ["include_series"];
-
-    if (Array.isArray(value) && explodeParameters.includes(key)) {
-      value.forEach((v) => {
-        normalizedParams.append(key, v === null ? "null" : v.toString());
-      });
-      return;
-    }
-
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : value.toString());
     }

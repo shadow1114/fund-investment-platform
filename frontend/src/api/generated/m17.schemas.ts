@@ -56,6 +56,7 @@ export const MetricStatus = {
   VALID: "VALID",
   UNAVAILABLE: "UNAVAILABLE",
   EXCLUDED: "EXCLUDED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type NullableMetricValue = number | null;
@@ -109,6 +110,7 @@ export const OperationStatus = {
   BLOCKED: "BLOCKED",
   FAILED: "FAILED",
   CANCELLED: "CANCELLED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type OperationProgressAnyOfTotal = number | null;
@@ -154,6 +156,7 @@ export const LifecycleStatus = {
   LIQUIDATED: "LIQUIDATED",
   MERGED: "MERGED",
   TRANSFORMED: "TRANSFORMED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type InvestmentEligibility =
@@ -166,6 +169,7 @@ export const InvestmentEligibility = {
   LIMITED: "LIMITED",
   EXIT_ONLY: "EXIT_ONLY",
   NOT_TRADABLE: "NOT_TRADABLE",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface FundSummary {
@@ -221,9 +225,20 @@ export type FundAllOf = {
 
 export type Fund = FundSummary & FundAllOf;
 
+export type FundListMetaAllOf = {
+  as_of_date: string;
+  data_version: string;
+  versions: VersionReferences;
+  is_point_in_time: boolean;
+  pagination: Pagination;
+  availability_quality_distribution: AvailabilityQualityDistribution;
+};
+
+export type FundListMeta = ResponseMeta & FundListMetaAllOf;
+
 export interface FundListEnvelope {
   data: FundSummary[];
-  meta: ResponseMeta;
+  meta: FundListMeta;
   error: EmptyError;
 }
 
@@ -315,6 +330,7 @@ export const FundEvaluationEvaluationStatus = {
   COMPLETED: "COMPLETED",
   PARTIAL: "PARTIAL",
   FAILED: "FAILED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface FundEvaluation {
@@ -366,20 +382,20 @@ export type SubScoresRelativePerformanceScoreReason = string | null;
 
 export interface SubScores {
   return_score: SubScoresReturnScore;
-  return_score_status?: MetricStatus;
-  return_score_reason?: SubScoresReturnScoreReason;
+  return_score_status: MetricStatus;
+  return_score_reason: SubScoresReturnScoreReason;
   risk_score: SubScoresRiskScore;
-  risk_score_status?: MetricStatus;
-  risk_score_reason?: SubScoresRiskScoreReason;
+  risk_score_status: MetricStatus;
+  risk_score_reason: SubScoresRiskScoreReason;
   risk_adjusted_score: SubScoresRiskAdjustedScore;
-  risk_adjusted_score_status?: MetricStatus;
-  risk_adjusted_score_reason?: SubScoresRiskAdjustedScoreReason;
+  risk_adjusted_score_status: MetricStatus;
+  risk_adjusted_score_reason: SubScoresRiskAdjustedScoreReason;
   stability_score: SubScoresStabilityScore;
-  stability_score_status?: MetricStatus;
-  stability_score_reason?: SubScoresStabilityScoreReason;
+  stability_score_status: MetricStatus;
+  stability_score_reason: SubScoresStabilityScoreReason;
   relative_performance_score: SubScoresRelativePerformanceScore;
-  relative_performance_score_status?: MetricStatus;
-  relative_performance_score_reason?: SubScoresRelativePerformanceScoreReason;
+  relative_performance_score_status: MetricStatus;
+  relative_performance_score_reason: SubScoresRelativePerformanceScoreReason;
 }
 
 export type ScoreAttributionRawValue = number | null;
@@ -420,7 +436,7 @@ export interface ScoreAttribution {
   normalized_value?: ScoreAttributionNormalizedValue;
   direction?: string;
   status: MetricStatus;
-  reason_code?: ScoreAttributionReasonCode;
+  reason_code: ScoreAttributionReasonCode;
   exclusion_reason?: ScoreAttributionExclusionReason;
   effectiveness_verdict?: ScoreAttributionEffectivenessVerdict;
   weight: number;
@@ -444,6 +460,7 @@ export const FundScoreScoreStatus = {
   PARTIAL: "PARTIAL",
   VALIDATION_PENDING: "VALIDATION_PENDING",
   FAILED: "FAILED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface FundScore {
@@ -451,8 +468,8 @@ export interface FundScore {
   evaluation_period: string;
   as_of_date: string;
   total_score: FundScoreTotalScore;
-  total_score_status?: MetricStatus;
-  total_score_reason?: FundScoreTotalScoreReason;
+  total_score_status: MetricStatus;
+  total_score_reason: FundScoreTotalScoreReason;
   sub_scores: SubScores;
   attribution: ScoreAttribution[];
   data_completeness: DataCompleteness;
@@ -520,22 +537,35 @@ export type UniverseMemberSelectionStatus =
 export const UniverseMemberSelectionStatus = {
   SELECTED: "SELECTED",
   REJECTED: "REJECTED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type UniverseMemberTotalScore = number | null;
 
+export type UniverseMemberTotalScoreReason = string | null;
+
 export type UniverseMemberRank = number | null;
 
+export type UniverseMemberRankReason = string | null;
+
 export type UniverseMemberPercentile = number | null;
+
+export type UniverseMemberPercentileReason = string | null;
 
 export type UniverseMemberFundTier = string | null;
 
 export interface UniverseMember {
   fund_id: string;
   selection_status: UniverseMemberSelectionStatus;
-  total_score?: UniverseMemberTotalScore;
-  rank?: UniverseMemberRank;
-  percentile?: UniverseMemberPercentile;
+  total_score: UniverseMemberTotalScore;
+  total_score_status: MetricStatus;
+  total_score_reason: UniverseMemberTotalScoreReason;
+  rank: UniverseMemberRank;
+  rank_status: MetricStatus;
+  rank_reason: UniverseMemberRankReason;
+  percentile: UniverseMemberPercentile;
+  percentile_status: MetricStatus;
+  percentile_reason: UniverseMemberPercentileReason;
   fund_tier?: UniverseMemberFundTier;
   investment_eligibility?: InvestmentEligibility;
   passed_conditions: UniverseCondition[];
@@ -589,6 +619,7 @@ export const PortfolioSummaryStatus = {
   ACTIVE: "ACTIVE",
   SUSPENDED: "SUSPENDED",
   CLOSED: "CLOSED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface PortfolioSummary {
@@ -608,9 +639,17 @@ export type PortfolioAllOf = {
 
 export type Portfolio = PortfolioSummary & PortfolioAllOf;
 
+export type PortfolioListMetaAllOf = {
+  versions: VersionReferences;
+  is_point_in_time: boolean;
+  pagination: Pagination;
+};
+
+export type PortfolioListMeta = ResponseMeta & PortfolioListMetaAllOf;
+
 export interface PortfolioListEnvelope {
   data: PortfolioSummary[];
-  meta: ResponseMeta;
+  meta: PortfolioListMeta;
   error: EmptyError;
 }
 
@@ -672,6 +711,7 @@ export const OptimizationOptimizationStatus = {
   UNBOUNDED: "UNBOUNDED",
   NOT_CONVERGED: "NOT_CONVERGED",
   NUMERICAL_ERROR: "NUMERICAL_ERROR",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 /**
@@ -681,18 +721,9 @@ export type OptimizationTargetWeights = Weight[] | null;
 
 export type OptimizationObjectiveValue = number | null;
 
+export type OptimizationObjectiveValueReason = string | null;
+
 export type OptimizationShadowPrices = { [key: string]: number };
-
-export type OptimizationPostOptimizationRiskPortfolioVolatility = number | null;
-
-export type OptimizationPostOptimizationRiskPortfolioVolatilityReason =
-  string | null;
-
-export type OptimizationPostOptimizationRisk = {
-  portfolio_volatility: OptimizationPostOptimizationRiskPortfolioVolatility;
-  portfolio_volatility_status?: MetricStatus;
-  portfolio_volatility_reason?: OptimizationPostOptimizationRiskPortfolioVolatilityReason;
-};
 
 export type OptimizationExcludedCandidatesItem = {
   fund_id: string;
@@ -705,10 +736,12 @@ export type Optimization = unknown & {
   /** Null for every non-OPTIMAL result. */
   target_weights: OptimizationTargetWeights;
   objective_value: OptimizationObjectiveValue;
+  objective_value_status: MetricStatus;
+  objective_value_reason: OptimizationObjectiveValueReason;
   binding_constraints: string[];
   conflicting_constraints: string[];
   shadow_prices: OptimizationShadowPrices;
-  post_optimization_risk: OptimizationPostOptimizationRisk;
+  post_optimization_risk: PostOptimizationRisk;
   excluded_candidates: OptimizationExcludedCandidatesItem[];
   solve_path: string;
 } & Required<
@@ -719,10 +752,12 @@ export type Optimization = unknown & {
         /** Null for every non-OPTIMAL result. */
         target_weights: OptimizationTargetWeights;
         objective_value: OptimizationObjectiveValue;
+        objective_value_status: MetricStatus;
+        objective_value_reason: OptimizationObjectiveValueReason;
         binding_constraints: string[];
         conflicting_constraints: string[];
         shadow_prices: OptimizationShadowPrices;
-        post_optimization_risk: OptimizationPostOptimizationRisk;
+        post_optimization_risk: PostOptimizationRisk;
         excluded_candidates: OptimizationExcludedCandidatesItem[];
         solve_path: string;
       },
@@ -730,6 +765,8 @@ export type Optimization = unknown & {
       | "optimization_status"
       | "target_weights"
       | "objective_value"
+      | "objective_value_status"
+      | "objective_value_reason"
       | "binding_constraints"
       | "conflicting_constraints"
       | "shadow_prices"
@@ -738,6 +775,16 @@ export type Optimization = unknown & {
       | "solve_path"
     >
   >;
+
+export type PostOptimizationRiskPortfolioVolatility = number | null;
+
+export type PostOptimizationRiskPortfolioVolatilityReason = string | null;
+
+export interface PostOptimizationRisk {
+  portfolio_volatility: PostOptimizationRiskPortfolioVolatility;
+  portfolio_volatility_status: MetricStatus;
+  portfolio_volatility_reason: PostOptimizationRiskPortfolioVolatilityReason;
+}
 
 export type OptimizationMetaAllOf = {
   portfolio_rule_version: string;
@@ -783,6 +830,7 @@ export const DecisionDecisionStatus = {
   OVERRIDDEN: "OVERRIDDEN",
   EXPIRED: "EXPIRED",
   SUPERSEDED: "SUPERSEDED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type DecisionReviewProperty = DecisionReview | null;
@@ -953,10 +1001,11 @@ export const BacktestStatusStatus = {
   INVALID: "INVALID",
   CANCELLED: "CANCELLED",
   ABORTED: "ABORTED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export type BacktestStatusValidationStatus =
-  "VALID" | "WARNING" | "INVALID" | null;
+  "VALID" | "WARNING" | "INVALID" | "UNKNOWN" | null;
 
 export type BacktestStatusProgressCurrentDecisionDate = string | null;
 
@@ -995,54 +1044,177 @@ export interface PerformanceMetrics {
   volatility: number;
   max_drawdown: number;
   sharpe_ratio: PerformanceMetricsSharpeRatio;
-  sharpe_ratio_status?: MetricStatus;
-  sharpe_ratio_reason?: PerformanceMetricsSharpeRatioReason;
+  sharpe_ratio_status: MetricStatus;
+  sharpe_ratio_reason: PerformanceMetricsSharpeRatioReason;
 }
 
-export type SignificanceLayerPassed = boolean | null;
+export type BacktestSummaryEqualWeightBaseline = PerformanceMetrics | null;
 
-export type SignificanceLayerBootstrapCiLowerVsBenchmark = number | null;
+export type BacktestSummaryEqualWeightBaselineReason = string | null;
 
-export type SignificanceLayerBootstrapCiLowerVsEqualWeight = number | null;
-
-export type SignificanceLayerIrVsBenchmark = number | null;
-
-export type SignificanceLayerIrVsEqualWeight = number | null;
-
-export type SignificanceLayerDeltaSharpeVsBenchmark = number | null;
-
-export type SignificanceLayerDeltaSharpeVsEqualWeight = number | null;
-
-export type SignificanceLayerOutperformRatioVsBenchmark = number | null;
-
-export type SignificanceLayerOutperformRatioVsEqualWeight = number | null;
-
-export type SignificanceLayerAnnualizedReturnImprovementVsBenchmark =
-  number | null;
-
-export type SignificanceLayerAnnualizedReturnImprovementVsEqualWeight =
-  number | null;
-
-export type SignificanceLayerMaxDrawdownImprovementVsBenchmark = number | null;
-
-export type SignificanceLayerMaxDrawdownImprovementVsEqualWeight =
-  number | null;
-
-export interface SignificanceLayer {
-  passed: SignificanceLayerPassed;
-  bootstrap_ci_lower_vs_benchmark?: SignificanceLayerBootstrapCiLowerVsBenchmark;
-  bootstrap_ci_lower_vs_equal_weight?: SignificanceLayerBootstrapCiLowerVsEqualWeight;
-  ir_vs_benchmark?: SignificanceLayerIrVsBenchmark;
-  ir_vs_equal_weight?: SignificanceLayerIrVsEqualWeight;
-  delta_sharpe_vs_benchmark?: SignificanceLayerDeltaSharpeVsBenchmark;
-  delta_sharpe_vs_equal_weight?: SignificanceLayerDeltaSharpeVsEqualWeight;
-  outperform_ratio_vs_benchmark?: SignificanceLayerOutperformRatioVsBenchmark;
-  outperform_ratio_vs_equal_weight?: SignificanceLayerOutperformRatioVsEqualWeight;
-  annualized_return_improvement_vs_benchmark?: SignificanceLayerAnnualizedReturnImprovementVsBenchmark;
-  annualized_return_improvement_vs_equal_weight?: SignificanceLayerAnnualizedReturnImprovementVsEqualWeight;
-  max_drawdown_improvement_vs_benchmark?: SignificanceLayerMaxDrawdownImprovementVsBenchmark;
-  max_drawdown_improvement_vs_equal_weight?: SignificanceLayerMaxDrawdownImprovementVsEqualWeight;
+export interface BacktestSummary {
+  portfolio: PerformanceMetrics;
+  benchmark: PerformanceMetrics;
+  equal_weight_baseline: BacktestSummaryEqualWeightBaseline;
+  equal_weight_baseline_status: MetricStatus;
+  equal_weight_baseline_reason: BacktestSummaryEqualWeightBaselineReason;
 }
+
+export type ExcessReturnVsBenchmark = number | null;
+
+export type ExcessReturnVsBenchmarkReason = string | null;
+
+export type ExcessReturnVsEqualWeight = number | null;
+
+export type ExcessReturnVsEqualWeightReason = string | null;
+
+export interface ExcessReturn {
+  vs_benchmark: ExcessReturnVsBenchmark;
+  vs_benchmark_status: MetricStatus;
+  vs_benchmark_reason: ExcessReturnVsBenchmarkReason;
+  vs_equal_weight: ExcessReturnVsEqualWeight;
+  vs_equal_weight_status: MetricStatus;
+  vs_equal_weight_reason: ExcessReturnVsEqualWeightReason;
+}
+
+export type SignificanceLayerBasePassed = boolean | null;
+
+export type SignificanceLayerBasePassedReason = string | null;
+
+export interface SignificanceLayerBase {
+  passed: SignificanceLayerBasePassed;
+  passed_status: MetricStatus;
+  passed_reason: SignificanceLayerBasePassedReason;
+}
+
+export type StatisticalSignificanceLayerAllOfBootstrapCiLowerVsBenchmark =
+  number | null;
+
+export type StatisticalSignificanceLayerAllOfBootstrapCiLowerVsBenchmarkReason =
+  string | null;
+
+export type StatisticalSignificanceLayerAllOfBootstrapCiLowerVsEqualWeight =
+  number | null;
+
+export type StatisticalSignificanceLayerAllOfBootstrapCiLowerVsEqualWeightReason =
+  string | null;
+
+export type StatisticalSignificanceLayerAllOf = {
+  bootstrap_ci_lower_vs_benchmark: StatisticalSignificanceLayerAllOfBootstrapCiLowerVsBenchmark;
+  bootstrap_ci_lower_vs_benchmark_status: MetricStatus;
+  bootstrap_ci_lower_vs_benchmark_reason: StatisticalSignificanceLayerAllOfBootstrapCiLowerVsBenchmarkReason;
+  bootstrap_ci_lower_vs_equal_weight: StatisticalSignificanceLayerAllOfBootstrapCiLowerVsEqualWeight;
+  bootstrap_ci_lower_vs_equal_weight_status: MetricStatus;
+  bootstrap_ci_lower_vs_equal_weight_reason: StatisticalSignificanceLayerAllOfBootstrapCiLowerVsEqualWeightReason;
+};
+
+export type StatisticalSignificanceLayer = SignificanceLayerBase &
+  StatisticalSignificanceLayerAllOf;
+
+export type EffectSizeSignificanceLayerAllOfIrVsBenchmark = number | null;
+
+export type EffectSizeSignificanceLayerAllOfIrVsBenchmarkReason = string | null;
+
+export type EffectSizeSignificanceLayerAllOfIrVsEqualWeight = number | null;
+
+export type EffectSizeSignificanceLayerAllOfIrVsEqualWeightReason =
+  string | null;
+
+export type EffectSizeSignificanceLayerAllOfDeltaSharpeVsBenchmark =
+  number | null;
+
+export type EffectSizeSignificanceLayerAllOfDeltaSharpeVsBenchmarkReason =
+  string | null;
+
+export type EffectSizeSignificanceLayerAllOfDeltaSharpeVsEqualWeight =
+  number | null;
+
+export type EffectSizeSignificanceLayerAllOfDeltaSharpeVsEqualWeightReason =
+  string | null;
+
+export type EffectSizeSignificanceLayerAllOf = {
+  ir_vs_benchmark: EffectSizeSignificanceLayerAllOfIrVsBenchmark;
+  ir_vs_benchmark_status: MetricStatus;
+  ir_vs_benchmark_reason: EffectSizeSignificanceLayerAllOfIrVsBenchmarkReason;
+  ir_vs_equal_weight: EffectSizeSignificanceLayerAllOfIrVsEqualWeight;
+  ir_vs_equal_weight_status: MetricStatus;
+  ir_vs_equal_weight_reason: EffectSizeSignificanceLayerAllOfIrVsEqualWeightReason;
+  delta_sharpe_vs_benchmark: EffectSizeSignificanceLayerAllOfDeltaSharpeVsBenchmark;
+  delta_sharpe_vs_benchmark_status: MetricStatus;
+  delta_sharpe_vs_benchmark_reason: EffectSizeSignificanceLayerAllOfDeltaSharpeVsBenchmarkReason;
+  delta_sharpe_vs_equal_weight: EffectSizeSignificanceLayerAllOfDeltaSharpeVsEqualWeight;
+  delta_sharpe_vs_equal_weight_status: MetricStatus;
+  delta_sharpe_vs_equal_weight_reason: EffectSizeSignificanceLayerAllOfDeltaSharpeVsEqualWeightReason;
+};
+
+export type EffectSizeSignificanceLayer = SignificanceLayerBase &
+  EffectSizeSignificanceLayerAllOf;
+
+export type RobustnessSignificanceLayerAllOfOutperformRatioVsBenchmark =
+  number | null;
+
+export type RobustnessSignificanceLayerAllOfOutperformRatioVsBenchmarkReason =
+  string | null;
+
+export type RobustnessSignificanceLayerAllOfOutperformRatioVsEqualWeight =
+  number | null;
+
+export type RobustnessSignificanceLayerAllOfOutperformRatioVsEqualWeightReason =
+  string | null;
+
+export type RobustnessSignificanceLayerAllOf = {
+  outperform_ratio_vs_benchmark: RobustnessSignificanceLayerAllOfOutperformRatioVsBenchmark;
+  outperform_ratio_vs_benchmark_status: MetricStatus;
+  outperform_ratio_vs_benchmark_reason: RobustnessSignificanceLayerAllOfOutperformRatioVsBenchmarkReason;
+  outperform_ratio_vs_equal_weight: RobustnessSignificanceLayerAllOfOutperformRatioVsEqualWeight;
+  outperform_ratio_vs_equal_weight_status: MetricStatus;
+  outperform_ratio_vs_equal_weight_reason: RobustnessSignificanceLayerAllOfOutperformRatioVsEqualWeightReason;
+};
+
+export type RobustnessSignificanceLayer = SignificanceLayerBase &
+  RobustnessSignificanceLayerAllOf;
+
+export type EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsBenchmark =
+  number | null;
+
+export type EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsBenchmarkReason =
+  string | null;
+
+export type EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsEqualWeight =
+  number | null;
+
+export type EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsEqualWeightReason =
+  string | null;
+
+export type EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsBenchmark =
+  number | null;
+
+export type EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsBenchmarkReason =
+  string | null;
+
+export type EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsEqualWeight =
+  number | null;
+
+export type EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsEqualWeightReason =
+  string | null;
+
+export type EconomicSignificanceLayerAllOf = {
+  annualized_return_improvement_vs_benchmark: EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsBenchmark;
+  annualized_return_improvement_vs_benchmark_status: MetricStatus;
+  annualized_return_improvement_vs_benchmark_reason: EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsBenchmarkReason;
+  annualized_return_improvement_vs_equal_weight: EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsEqualWeight;
+  annualized_return_improvement_vs_equal_weight_status: MetricStatus;
+  annualized_return_improvement_vs_equal_weight_reason: EconomicSignificanceLayerAllOfAnnualizedReturnImprovementVsEqualWeightReason;
+  max_drawdown_improvement_vs_benchmark: EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsBenchmark;
+  max_drawdown_improvement_vs_benchmark_status: MetricStatus;
+  max_drawdown_improvement_vs_benchmark_reason: EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsBenchmarkReason;
+  max_drawdown_improvement_vs_equal_weight: EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsEqualWeight;
+  max_drawdown_improvement_vs_equal_weight_status: MetricStatus;
+  max_drawdown_improvement_vs_equal_weight_reason: EconomicSignificanceLayerAllOfMaxDrawdownImprovementVsEqualWeightReason;
+};
+
+export type EconomicSignificanceLayer = SignificanceLayerBase &
+  EconomicSignificanceLayerAllOf;
 
 export type BacktestResultValidationStatus =
   (typeof BacktestResultValidationStatus)[keyof typeof BacktestResultValidationStatus];
@@ -1069,17 +1241,6 @@ export type BacktestResultPeriod = {
   warm_up_end_date: string;
 };
 
-export type BacktestResultSummary = {
-  portfolio: PerformanceMetrics;
-  benchmark: PerformanceMetrics;
-  equal_weight_baseline: PerformanceMetrics;
-};
-
-export type BacktestResultExcessReturn = {
-  vs_benchmark: number;
-  vs_equal_weight: number;
-};
-
 export type BacktestResultSignificanceVerdictOverall =
   (typeof BacktestResultSignificanceVerdictOverall)[keyof typeof BacktestResultSignificanceVerdictOverall];
 
@@ -1100,10 +1261,10 @@ export const BacktestResultSignificanceVerdictThresholdsStatus = {
 } as const;
 
 export type BacktestResultSignificanceVerdictLayers = {
-  statistical: SignificanceLayer;
-  effect_size: SignificanceLayer;
-  robustness: SignificanceLayer;
-  economic: SignificanceLayer;
+  statistical: StatisticalSignificanceLayer;
+  effect_size: EffectSizeSignificanceLayer;
+  robustness: RobustnessSignificanceLayer;
+  economic: EconomicSignificanceLayer;
 };
 
 export type BacktestResultSignificanceVerdict = {
@@ -1125,8 +1286,8 @@ export interface BacktestResult {
   period: BacktestResultPeriod;
   initial_capital: Money;
   final_value: Money;
-  summary: BacktestResultSummary;
-  excess_return: BacktestResultExcessReturn;
+  summary: BacktestSummary;
+  excess_return: ExcessReturn;
   significance_verdict: BacktestResultSignificanceVerdict;
   validation_summary: BacktestResultValidationSummary;
 }
@@ -1168,8 +1329,28 @@ export type SeriesPointValueReason = string | null;
 export interface SeriesPoint {
   date: string;
   value: SeriesPointValue;
-  value_status?: MetricStatus;
-  value_reason?: SeriesPointValueReason;
+  value_status: MetricStatus;
+  value_reason: SeriesPointValueReason;
+}
+
+export type CumulativeReturnSeriesEqualWeightBaseline = SeriesPoint[] | null;
+
+export type CumulativeReturnSeriesEqualWeightBaselineReason = string | null;
+
+export interface CumulativeReturnSeries {
+  portfolio: SeriesPoint[];
+  benchmark: SeriesPoint[];
+  equal_weight_baseline: CumulativeReturnSeriesEqualWeightBaseline;
+  equal_weight_baseline_status: MetricStatus;
+  equal_weight_baseline_reason: CumulativeReturnSeriesEqualWeightBaselineReason;
+}
+
+export interface BacktestSeries {
+  portfolio_value: SeriesPoint[];
+  cumulative_return: CumulativeReturnSeries;
+  drawdown: SeriesPoint[];
+  rolling_sharpe: SeriesPoint[];
+  rolling_excess_return: SeriesPoint[];
 }
 
 export type BacktestPerformanceSegment =
@@ -1182,23 +1363,9 @@ export const BacktestPerformanceSegment = {
   OUT_OF_SAMPLE: "OUT_OF_SAMPLE",
 } as const;
 
-export type BacktestPerformanceSeriesCumulativeReturn = {
-  portfolio: SeriesPoint[];
-  benchmark: SeriesPoint[];
-  equal_weight_baseline: SeriesPoint[];
-};
-
-export type BacktestPerformanceSeries = {
-  portfolio_value: SeriesPoint[];
-  cumulative_return: BacktestPerformanceSeriesCumulativeReturn;
-  drawdown: SeriesPoint[];
-  rolling_sharpe: SeriesPoint[];
-  rolling_excess_return: SeriesPoint[];
-};
-
 export interface BacktestPerformance {
   segment: BacktestPerformanceSegment;
-  series: BacktestPerformanceSeries;
+  series: BacktestSeries;
 }
 
 export type BacktestPerformanceEnvelopeMetaAllOf = {
@@ -1223,6 +1390,7 @@ export const BiasStatus = {
   NOT_VERIFIED: "NOT_VERIFIED",
   PARTIALLY_MODELED: "PARTIALLY_MODELED",
   NOT_MODELED: "NOT_MODELED",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface BiasCheck {
@@ -1234,12 +1402,27 @@ export interface BiasCheck {
   unmodeled_costs?: string[];
 }
 
+export type PointInTimeBiasCheckAllOf = {
+  status: BiasStatus;
+  availability_quality_distribution: AvailabilityQualityDistribution;
+};
+
+export type PointInTimeBiasCheck = BiasCheck & PointInTimeBiasCheckAllOf;
+
+export type TransactionCostBiasCheckAllOf = {
+  status: BiasStatus;
+  unmodeled_costs: string[];
+};
+
+export type TransactionCostBiasCheck = BiasCheck &
+  TransactionCostBiasCheckAllOf;
+
 export type BacktestBiasCheckChecks = {
   look_ahead_bias: BiasCheck;
   survivorship_bias: BiasCheck;
   tradability_bias: BiasCheck;
-  point_in_time: BiasCheck;
-  transaction_cost: BiasCheck;
+  point_in_time: PointInTimeBiasCheck;
+  transaction_cost: TransactionCostBiasCheck;
   subscription_redemption_lag: BiasCheck;
 };
 

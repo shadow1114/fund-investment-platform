@@ -9,7 +9,7 @@
     "test": "vitest",
     "lint": "eslint .",
     "format:check": "prettier --check .",
-    "api:generate": "orval --input ./openapi/m17.yaml --output ./src/api/generated/m17.ts --client fetch --mode split --clean ./src/api/generated --prettier",
+    "api:generate": "orval --config ./orval.config.ts",
     "check": "npm run format:check && npm run lint && npm run test -- --run && npm run build"
   },
   "dependencies": {

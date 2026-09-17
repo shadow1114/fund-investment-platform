@@ -37,6 +37,8 @@ paths:
         - {
             name: fund_type,
             in: query,
+            style: form,
+            explode: false,
             schema: { type: array, items: { type: string } },
           }
         - { name: management_company_id, in: query, schema: { type: string } }
@@ -44,6 +46,8 @@ paths:
         - {
             name: lifecycle_status,
             in: query,
+            style: form,
+            explode: false,
             schema:
               {
                 type: array,
@@ -53,6 +57,8 @@ paths:
         - {
             name: investment_eligibility,
             in: query,
+            style: form,
+            explode: false,
             schema:
               {
                 type: array,
@@ -312,6 +318,8 @@ paths:
         - {
             name: include_series,
             in: query,
+            style: form,
+            explode: false,
             schema: { type: array, items: { type: string } },
           }
       responses:
@@ -650,7 +658,7 @@ components:
     EmptyError: { type: "null" }
     MetricStatus:
       type: string
-      enum: [VALID, UNAVAILABLE, EXCLUDED]
+      enum: [VALID, UNAVAILABLE, EXCLUDED, UNKNOWN]
     NullableMetric:
       description: A numeric metric whose unavailable state is never represented as zero.
       type: object
@@ -698,7 +706,7 @@ components:
         status:
           {
             type: string,
-            enum: [RUNNING, COMPLETED, BLOCKED, FAILED, CANCELLED],
+            enum: [RUNNING, COMPLETED, BLOCKED, FAILED, CANCELLED, UNKNOWN],
           }
         progress:
           anyOf:
@@ -728,12 +736,28 @@ components:
     LifecycleStatus:
       {
         type: string,
-        enum: [NORMAL, SUSPENDED_SUBSCRIPTION, LIQUIDATED, MERGED, TRANSFORMED],
+        enum:
+          [
+            NORMAL,
+            SUSPENDED_SUBSCRIPTION,
+            LIQUIDATED,
+            MERGED,
+            TRANSFORMED,
+            UNKNOWN,
+          ],
       }
     InvestmentEligibility:
       {
         type: string,
-        enum: [FULLY_ELIGIBLE, HOLD_ONLY, LIMITED, EXIT_ONLY, NOT_TRADABLE],
+        enum:
+          [
+            FULLY_ELIGIBLE,
+            HOLD_ONLY,
+            LIMITED,
+            EXIT_ONLY,
+            NOT_TRADABLE,
+            UNKNOWN,
+          ],
       }
     FundSummary:
       type: object
@@ -810,13 +834,43 @@ components:
             benchmark: { $ref: "#/components/schemas/Benchmark" }
             fee_structure:
               { type: array, items: { $ref: "#/components/schemas/Fee" } }
+    FundListMeta:
+      required:
+        [
+          as_of_date,
+          data_version,
+          versions,
+          is_point_in_time,
+          pagination,
+          availability_quality_distribution,
+        ]
+      allOf:
+        - { $ref: "#/components/schemas/ResponseMeta" }
+        - type: object
+          required:
+            [
+              as_of_date,
+              data_version,
+              versions,
+              is_point_in_time,
+              pagination,
+              availability_quality_distribution,
+            ]
+          properties:
+            as_of_date: { type: string, format: date }
+            data_version: { type: string }
+            versions: { $ref: "#/components/schemas/VersionReferences" }
+            is_point_in_time: { type: boolean }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+            availability_quality_distribution:
+              { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
     FundListEnvelope:
       type: object
       required: [data, meta, error]
       properties:
         data:
           { type: array, items: { $ref: "#/components/schemas/FundSummary" } }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        meta: { $ref: "#/components/schemas/FundListMeta" }
         error: { $ref: "#/components/schemas/EmptyError" }
     FundEnvelope:
       type: object
@@ -907,7 +961,10 @@ components:
         evaluation_period: { type: string }
         as_of_date: { type: string, format: date }
         evaluation_status:
-          { type: string, enum: [NOT_ELIGIBLE, COMPLETED, PARTIAL, FAILED] }
+          {
+            type: string,
+            enum: [NOT_ELIGIBLE, COMPLETED, PARTIAL, FAILED, UNKNOWN],
+          }
         evaluation_profile: { type: string }
         data_completeness: { $ref: "#/components/schemas/DataCompleteness" }
         factor_results:
@@ -953,10 +1010,20 @@ components:
       required:
         [
           return_score,
+          return_score_status,
+          return_score_reason,
           risk_score,
+          risk_score_status,
+          risk_score_reason,
           risk_adjusted_score,
+          risk_adjusted_score_status,
+          risk_adjusted_score_reason,
           stability_score,
+          stability_score_status,
+          stability_score_reason,
           relative_performance_score,
+          relative_performance_score_status,
+          relative_performance_score_reason,
         ]
       properties:
         return_score: { type: [number, "null"] }
@@ -978,7 +1045,7 @@ components:
         relative_performance_score_reason: { type: [string, "null"] }
     ScoreAttribution:
       type: object
-      required: [factor_id, status, raw_value, weight]
+      required: [factor_id, status, raw_value, reason_code, weight]
       properties:
         factor_id: { type: string }
         window: { type: string }
@@ -1010,6 +1077,8 @@ components:
           evaluation_period,
           as_of_date,
           total_score,
+          total_score_status,
+          total_score_reason,
           sub_scores,
           attribution,
           data_completeness,
@@ -1032,7 +1101,7 @@ components:
         score_status:
           {
             type: string,
-            enum: [COMPLETED, PARTIAL, VALIDATION_PENDING, FAILED],
+            enum: [COMPLETED, PARTIAL, VALIDATION_PENDING, FAILED, UNKNOWN],
           }
     FundScoreMeta:
       required:
@@ -1101,13 +1170,33 @@ components:
     UniverseMember:
       type: object
       required:
-        [fund_id, selection_status, passed_conditions, failed_conditions]
+        [
+          fund_id,
+          selection_status,
+          total_score,
+          total_score_status,
+          total_score_reason,
+          rank,
+          rank_status,
+          rank_reason,
+          percentile,
+          percentile_status,
+          percentile_reason,
+          passed_conditions,
+          failed_conditions,
+        ]
       properties:
         fund_id: { type: string }
-        selection_status: { type: string, enum: [SELECTED, REJECTED] }
+        selection_status: { type: string, enum: [SELECTED, REJECTED, UNKNOWN] }
         total_score: { type: [number, "null"] }
+        total_score_status: { $ref: "#/components/schemas/MetricStatus" }
+        total_score_reason: { type: [string, "null"] }
         rank: { type: [integer, "null"] }
+        rank_status: { $ref: "#/components/schemas/MetricStatus" }
+        rank_reason: { type: [string, "null"] }
         percentile: { type: [number, "null"] }
+        percentile_status: { $ref: "#/components/schemas/MetricStatus" }
+        percentile_reason: { type: [string, "null"] }
         fund_tier: { type: [string, "null"] }
         investment_eligibility:
           { $ref: "#/components/schemas/InvestmentEligibility" }
@@ -1180,7 +1269,8 @@ components:
         portfolio_id: { type: string }
         portfolio_name: { type: string }
         portfolio_type: { type: string }
-        status: { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, CLOSED] }
+        status:
+          { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, CLOSED, UNKNOWN] }
         base_currency: { type: string }
         portfolio_version: { type: string }
     Portfolio:
@@ -1192,6 +1282,16 @@ components:
             risk_profile: { type: string }
             portfolio_benchmark: { $ref: "#/components/schemas/Benchmark" }
             portfolio_rule_version: { type: string }
+    PortfolioListMeta:
+      required: [versions, is_point_in_time, pagination]
+      allOf:
+        - { $ref: "#/components/schemas/ResponseMeta" }
+        - type: object
+          required: [versions, is_point_in_time, pagination]
+          properties:
+            versions: { $ref: "#/components/schemas/VersionReferences" }
+            is_point_in_time: { type: boolean }
+            pagination: { $ref: "#/components/schemas/Pagination" }
     PortfolioListEnvelope:
       type: object
       required: [data, meta, error]
@@ -1201,7 +1301,7 @@ components:
             type: array,
             items: { $ref: "#/components/schemas/PortfolioSummary" },
           }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        meta: { $ref: "#/components/schemas/PortfolioListMeta" }
         error: { $ref: "#/components/schemas/EmptyError" }
     PortfolioEnvelope:
       type: object
@@ -1256,6 +1356,8 @@ components:
           optimization_status,
           target_weights,
           objective_value,
+          objective_value_status,
+          objective_value_reason,
           binding_constraints,
           conflicting_constraints,
           shadow_prices,
@@ -1269,24 +1371,27 @@ components:
           {
             type: string,
             enum:
-              [OPTIMAL, INFEASIBLE, UNBOUNDED, NOT_CONVERGED, NUMERICAL_ERROR],
+              [
+                OPTIMAL,
+                INFEASIBLE,
+                UNBOUNDED,
+                NOT_CONVERGED,
+                NUMERICAL_ERROR,
+                UNKNOWN,
+              ],
           }
         target_weights:
           description: Null for every non-OPTIMAL result.
           type: [array, "null"]
           items: { $ref: "#/components/schemas/Weight" }
         objective_value: { type: [number, "null"] }
+        objective_value_status: { $ref: "#/components/schemas/MetricStatus" }
+        objective_value_reason: { type: [string, "null"] }
         binding_constraints: { type: array, items: { type: string } }
         conflicting_constraints: { type: array, items: { type: string } }
         shadow_prices: { type: object, additionalProperties: { type: number } }
         post_optimization_risk:
-          type: object
-          required: [portfolio_volatility]
-          properties:
-            portfolio_volatility: { type: [number, "null"] }
-            portfolio_volatility_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            portfolio_volatility_reason: { type: [string, "null"] }
+          { $ref: "#/components/schemas/PostOptimizationRisk" }
         excluded_candidates:
           type: array
           items:
@@ -1308,6 +1413,19 @@ components:
           else:
             properties:
               target_weights: { type: "null" }
+    PostOptimizationRisk:
+      type: object
+      required:
+        [
+          portfolio_volatility,
+          portfolio_volatility_status,
+          portfolio_volatility_reason,
+        ]
+      properties:
+        portfolio_volatility: { type: [number, "null"] }
+        portfolio_volatility_status:
+          { $ref: "#/components/schemas/MetricStatus" }
+        portfolio_volatility_reason: { type: [string, "null"] }
     OptimizationMeta:
       allOf:
         - { $ref: "#/components/schemas/ResponseMeta" }
@@ -1360,7 +1478,15 @@ components:
           {
             type: string,
             enum:
-              [PROPOSED, APPROVED, REJECTED, OVERRIDDEN, EXPIRED, SUPERSEDED],
+              [
+                PROPOSED,
+                APPROVED,
+                REJECTED,
+                OVERRIDDEN,
+                EXPIRED,
+                SUPERSEDED,
+                UNKNOWN,
+              ],
           }
         proposed_weights:
           { type: array, items: { $ref: "#/components/schemas/Weight" } }
@@ -1541,10 +1667,14 @@ components:
                 INVALID,
                 CANCELLED,
                 ABORTED,
+                UNKNOWN,
               ],
           }
         validation_status:
-          { type: [string, "null"], enum: [VALID, WARNING, INVALID, null] }
+          {
+            type: [string, "null"],
+            enum: [VALID, WARNING, INVALID, UNKNOWN, null],
+          }
         progress:
           type: object
           required:
@@ -1576,6 +1706,8 @@ components:
           volatility,
           max_drawdown,
           sharpe_ratio,
+          sharpe_ratio_status,
+          sharpe_ratio_reason,
         ]
       properties:
         total_return: { type: number }
@@ -1585,24 +1717,174 @@ components:
         sharpe_ratio: { type: [number, "null"] }
         sharpe_ratio_status: { $ref: "#/components/schemas/MetricStatus" }
         sharpe_ratio_reason: { type: [string, "null"] }
-    SignificanceLayer:
+    BacktestSummary:
       type: object
-      required: [passed]
+      required:
+        [
+          portfolio,
+          benchmark,
+          equal_weight_baseline,
+          equal_weight_baseline_status,
+          equal_weight_baseline_reason,
+        ]
+      properties:
+        portfolio: { $ref: "#/components/schemas/PerformanceMetrics" }
+        benchmark: { $ref: "#/components/schemas/PerformanceMetrics" }
+        equal_weight_baseline:
+          anyOf:
+            - { $ref: "#/components/schemas/PerformanceMetrics" }
+            - { type: "null" }
+        equal_weight_baseline_status:
+          { $ref: "#/components/schemas/MetricStatus" }
+        equal_weight_baseline_reason: { type: [string, "null"] }
+    ExcessReturn:
+      type: object
+      required:
+        [
+          vs_benchmark,
+          vs_benchmark_status,
+          vs_benchmark_reason,
+          vs_equal_weight,
+          vs_equal_weight_status,
+          vs_equal_weight_reason,
+        ]
+      properties:
+        vs_benchmark: { type: [number, "null"] }
+        vs_benchmark_status: { $ref: "#/components/schemas/MetricStatus" }
+        vs_benchmark_reason: { type: [string, "null"] }
+        vs_equal_weight: { type: [number, "null"] }
+        vs_equal_weight_status: { $ref: "#/components/schemas/MetricStatus" }
+        vs_equal_weight_reason: { type: [string, "null"] }
+    SignificanceLayerBase:
+      type: object
+      required: [passed, passed_status, passed_reason]
       properties:
         passed: { type: [boolean, "null"] }
-        bootstrap_ci_lower_vs_benchmark: { type: [number, "null"] }
-        bootstrap_ci_lower_vs_equal_weight: { type: [number, "null"] }
-        ir_vs_benchmark: { type: [number, "null"] }
-        ir_vs_equal_weight: { type: [number, "null"] }
-        delta_sharpe_vs_benchmark: { type: [number, "null"] }
-        delta_sharpe_vs_equal_weight: { type: [number, "null"] }
-        outperform_ratio_vs_benchmark: { type: [number, "null"] }
-        outperform_ratio_vs_equal_weight: { type: [number, "null"] }
-        annualized_return_improvement_vs_benchmark: { type: [number, "null"] }
-        annualized_return_improvement_vs_equal_weight:
-          { type: [number, "null"] }
-        max_drawdown_improvement_vs_benchmark: { type: [number, "null"] }
-        max_drawdown_improvement_vs_equal_weight: { type: [number, "null"] }
+        passed_status: { $ref: "#/components/schemas/MetricStatus" }
+        passed_reason: { type: [string, "null"] }
+    StatisticalSignificanceLayer:
+      allOf:
+        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - type: object
+          required:
+            [
+              bootstrap_ci_lower_vs_benchmark,
+              bootstrap_ci_lower_vs_benchmark_status,
+              bootstrap_ci_lower_vs_benchmark_reason,
+              bootstrap_ci_lower_vs_equal_weight,
+              bootstrap_ci_lower_vs_equal_weight_status,
+              bootstrap_ci_lower_vs_equal_weight_reason,
+            ]
+          properties:
+            bootstrap_ci_lower_vs_benchmark: { type: [number, "null"] }
+            bootstrap_ci_lower_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            bootstrap_ci_lower_vs_benchmark_reason: { type: [string, "null"] }
+            bootstrap_ci_lower_vs_equal_weight: { type: [number, "null"] }
+            bootstrap_ci_lower_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            bootstrap_ci_lower_vs_equal_weight_reason:
+              { type: [string, "null"] }
+    EffectSizeSignificanceLayer:
+      allOf:
+        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - type: object
+          required:
+            [
+              ir_vs_benchmark,
+              ir_vs_benchmark_status,
+              ir_vs_benchmark_reason,
+              ir_vs_equal_weight,
+              ir_vs_equal_weight_status,
+              ir_vs_equal_weight_reason,
+              delta_sharpe_vs_benchmark,
+              delta_sharpe_vs_benchmark_status,
+              delta_sharpe_vs_benchmark_reason,
+              delta_sharpe_vs_equal_weight,
+              delta_sharpe_vs_equal_weight_status,
+              delta_sharpe_vs_equal_weight_reason,
+            ]
+          properties:
+            ir_vs_benchmark: { type: [number, "null"] }
+            ir_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            ir_vs_benchmark_reason: { type: [string, "null"] }
+            ir_vs_equal_weight: { type: [number, "null"] }
+            ir_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            ir_vs_equal_weight_reason: { type: [string, "null"] }
+            delta_sharpe_vs_benchmark: { type: [number, "null"] }
+            delta_sharpe_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            delta_sharpe_vs_benchmark_reason: { type: [string, "null"] }
+            delta_sharpe_vs_equal_weight: { type: [number, "null"] }
+            delta_sharpe_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            delta_sharpe_vs_equal_weight_reason: { type: [string, "null"] }
+    RobustnessSignificanceLayer:
+      allOf:
+        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - type: object
+          required:
+            [
+              outperform_ratio_vs_benchmark,
+              outperform_ratio_vs_benchmark_status,
+              outperform_ratio_vs_benchmark_reason,
+              outperform_ratio_vs_equal_weight,
+              outperform_ratio_vs_equal_weight_status,
+              outperform_ratio_vs_equal_weight_reason,
+            ]
+          properties:
+            outperform_ratio_vs_benchmark: { type: [number, "null"] }
+            outperform_ratio_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            outperform_ratio_vs_benchmark_reason: { type: [string, "null"] }
+            outperform_ratio_vs_equal_weight: { type: [number, "null"] }
+            outperform_ratio_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            outperform_ratio_vs_equal_weight_reason: { type: [string, "null"] }
+    EconomicSignificanceLayer:
+      allOf:
+        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - type: object
+          required:
+            [
+              annualized_return_improvement_vs_benchmark,
+              annualized_return_improvement_vs_benchmark_status,
+              annualized_return_improvement_vs_benchmark_reason,
+              annualized_return_improvement_vs_equal_weight,
+              annualized_return_improvement_vs_equal_weight_status,
+              annualized_return_improvement_vs_equal_weight_reason,
+              max_drawdown_improvement_vs_benchmark,
+              max_drawdown_improvement_vs_benchmark_status,
+              max_drawdown_improvement_vs_benchmark_reason,
+              max_drawdown_improvement_vs_equal_weight,
+              max_drawdown_improvement_vs_equal_weight_status,
+              max_drawdown_improvement_vs_equal_weight_reason,
+            ]
+          properties:
+            annualized_return_improvement_vs_benchmark:
+              { type: [number, "null"] }
+            annualized_return_improvement_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            annualized_return_improvement_vs_benchmark_reason:
+              { type: [string, "null"] }
+            annualized_return_improvement_vs_equal_weight:
+              { type: [number, "null"] }
+            annualized_return_improvement_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            annualized_return_improvement_vs_equal_weight_reason:
+              { type: [string, "null"] }
+            max_drawdown_improvement_vs_benchmark: { type: [number, "null"] }
+            max_drawdown_improvement_vs_benchmark_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            max_drawdown_improvement_vs_benchmark_reason:
+              { type: [string, "null"] }
+            max_drawdown_improvement_vs_equal_weight: { type: [number, "null"] }
+            max_drawdown_improvement_vs_equal_weight_status:
+              { $ref: "#/components/schemas/MetricStatus" }
+            max_drawdown_improvement_vs_equal_weight_reason:
+              { type: [string, "null"] }
     BacktestResult:
       type: object
       required:
@@ -1634,20 +1916,8 @@ components:
             warm_up_end_date: { type: string, format: date }
         initial_capital: { $ref: "#/components/schemas/Money" }
         final_value: { $ref: "#/components/schemas/Money" }
-        summary:
-          type: object
-          required: [portfolio, benchmark, equal_weight_baseline]
-          properties:
-            portfolio: { $ref: "#/components/schemas/PerformanceMetrics" }
-            benchmark: { $ref: "#/components/schemas/PerformanceMetrics" }
-            equal_weight_baseline:
-              { $ref: "#/components/schemas/PerformanceMetrics" }
-        excess_return:
-          type: object
-          required: [vs_benchmark, vs_equal_weight]
-          properties:
-            vs_benchmark: { type: number }
-            vs_equal_weight: { type: number }
+        summary: { $ref: "#/components/schemas/BacktestSummary" }
+        excess_return: { $ref: "#/components/schemas/ExcessReturn" }
         significance_verdict:
           type: object
           required: [overall, thresholds_status, layers]
@@ -1663,10 +1933,14 @@ components:
               type: object
               required: [statistical, effect_size, robustness, economic]
               properties:
-                statistical: { $ref: "#/components/schemas/SignificanceLayer" }
-                effect_size: { $ref: "#/components/schemas/SignificanceLayer" }
-                robustness: { $ref: "#/components/schemas/SignificanceLayer" }
-                economic: { $ref: "#/components/schemas/SignificanceLayer" }
+                statistical:
+                  { $ref: "#/components/schemas/StatisticalSignificanceLayer" }
+                effect_size:
+                  { $ref: "#/components/schemas/EffectSizeSignificanceLayer" }
+                robustness:
+                  { $ref: "#/components/schemas/RobustnessSignificanceLayer" }
+                economic:
+                  { $ref: "#/components/schemas/EconomicSignificanceLayer" }
         validation_summary:
           type: object
           required: [warnings, invalid_reasons]
@@ -1727,67 +2001,62 @@ components:
         error: { $ref: "#/components/schemas/EmptyError" }
     SeriesPoint:
       type: object
-      required: [date, value]
+      required: [date, value, value_status, value_reason]
       properties:
         date: { type: string, format: date }
         value: { type: [number, string, "null"] }
         value_status: { $ref: "#/components/schemas/MetricStatus" }
         value_reason: { type: [string, "null"] }
+    CumulativeReturnSeries:
+      type: object
+      required:
+        [
+          portfolio,
+          benchmark,
+          equal_weight_baseline,
+          equal_weight_baseline_status,
+          equal_weight_baseline_reason,
+        ]
+      properties:
+        portfolio:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+        benchmark:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+        equal_weight_baseline:
+          anyOf:
+            - type: array
+              items: { $ref: "#/components/schemas/SeriesPoint" }
+            - type: "null"
+        equal_weight_baseline_status:
+          { $ref: "#/components/schemas/MetricStatus" }
+        equal_weight_baseline_reason: { type: [string, "null"] }
+    BacktestSeries:
+      type: object
+      required:
+        [
+          portfolio_value,
+          cumulative_return,
+          drawdown,
+          rolling_sharpe,
+          rolling_excess_return,
+        ]
+      properties:
+        portfolio_value:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+        cumulative_return:
+          { $ref: "#/components/schemas/CumulativeReturnSeries" }
+        drawdown:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+        rolling_sharpe:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+        rolling_excess_return:
+          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
     BacktestPerformance:
       type: object
       required: [segment, series]
       properties:
         segment: { type: string, enum: [FULL, IN_SAMPLE, OUT_OF_SAMPLE] }
-        series:
-          type: object
-          required:
-            [
-              portfolio_value,
-              cumulative_return,
-              drawdown,
-              rolling_sharpe,
-              rolling_excess_return,
-            ]
-          properties:
-            portfolio_value:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/SeriesPoint" },
-              }
-            cumulative_return:
-              type: object
-              required: [portfolio, benchmark, equal_weight_baseline]
-              properties:
-                portfolio:
-                  {
-                    type: array,
-                    items: { $ref: "#/components/schemas/SeriesPoint" },
-                  }
-                benchmark:
-                  {
-                    type: array,
-                    items: { $ref: "#/components/schemas/SeriesPoint" },
-                  }
-                equal_weight_baseline:
-                  {
-                    type: array,
-                    items: { $ref: "#/components/schemas/SeriesPoint" },
-                  }
-            drawdown:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/SeriesPoint" },
-              }
-            rolling_sharpe:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/SeriesPoint" },
-              }
-            rolling_excess_return:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/SeriesPoint" },
-              }
+        series: { $ref: "#/components/schemas/BacktestSeries" }
     BacktestPerformanceEnvelope:
       type: object
       required: [data, meta, error]
@@ -1804,7 +2073,8 @@ components:
     BiasStatus:
       {
         type: string,
-        enum: [PASS, FAIL, NOT_VERIFIED, PARTIALLY_MODELED, NOT_MODELED],
+        enum:
+          [PASS, FAIL, NOT_VERIFIED, PARTIALLY_MODELED, NOT_MODELED, UNKNOWN],
       }
     BiasCheck:
       type: object
@@ -1817,6 +2087,25 @@ components:
         availability_quality_distribution:
           { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
         unmodeled_costs: { type: array, items: { type: string } }
+    PointInTimeBiasCheck:
+      allOf:
+        - { $ref: "#/components/schemas/BiasCheck" }
+        - type: object
+          required: [status, availability_quality_distribution]
+          properties:
+            status: { $ref: "#/components/schemas/BiasStatus" }
+            availability_quality_distribution:
+              { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
+      required: [status, availability_quality_distribution]
+    TransactionCostBiasCheck:
+      allOf:
+        - { $ref: "#/components/schemas/BiasCheck" }
+        - type: object
+          required: [status, unmodeled_costs]
+          properties:
+            status: { $ref: "#/components/schemas/BiasStatus" }
+            unmodeled_costs: { type: array, items: { type: string } }
+      required: [status, unmodeled_costs]
     BacktestBiasCheck:
       type: object
       required: [backtest_id, checks, snapshot_summary, data_limitations]
@@ -1837,8 +2126,9 @@ components:
             look_ahead_bias: { $ref: "#/components/schemas/BiasCheck" }
             survivorship_bias: { $ref: "#/components/schemas/BiasCheck" }
             tradability_bias: { $ref: "#/components/schemas/BiasCheck" }
-            point_in_time: { $ref: "#/components/schemas/BiasCheck" }
-            transaction_cost: { $ref: "#/components/schemas/BiasCheck" }
+            point_in_time: { $ref: "#/components/schemas/PointInTimeBiasCheck" }
+            transaction_cost:
+              { $ref: "#/components/schemas/TransactionCostBiasCheck" }
             subscription_redemption_lag:
               { $ref: "#/components/schemas/BiasCheck" }
         snapshot_summary:
