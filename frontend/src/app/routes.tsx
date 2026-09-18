@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 
 import { FundDetailPage } from "../pages/FundDetailPage";
 import { FundResearchPage } from "../pages/FundResearchPage";
+import { PortfolioDecisionPage } from "../pages/PortfolioDecisionPage";
 import { UniverseSnapshotPage } from "../pages/UniverseSnapshotPage";
 
 const Page = ({ title }: { title: string }) => (
@@ -17,6 +18,7 @@ export const routes: { path: string; element: ReactNode }[] = [
   { path: "/funds/:fundId", element: <FundDetailPage /> },
   { path: "/universes", element: <UniverseSnapshotPage /> },
   { path: "/universes/:universeId", element: <UniverseSnapshotPage /> },
-  { path: "/portfolios", element: <Page title="组合决策" /> },
+  { path: "/portfolios", element: <PortfolioDecisionPage /> },
+  { path: "/portfolios/:portfolioId", element: <PortfolioDecisionPage /> },
   { path: "/backtests", element: <Page title="回测" /> },
 ];
