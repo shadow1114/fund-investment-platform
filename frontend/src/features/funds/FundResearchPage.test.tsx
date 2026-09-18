@@ -112,6 +112,30 @@ describe("FundResearchPage", () => {
     expect(requests[1].searchParams.get("fund_name")).toBe("Alpha");
   });
 
+  it("submits combined lifecycle and eligibility filters as comma-separated values", async () => {
+    const user = userEvent.setup();
+    renderPage("/funds");
+
+    expect(await screen.findByText("Alpha 稳健基金")).toBeVisible();
+    await user.type(
+      screen.getByRole("textbox", { name: "生命周期状态（逗号分隔）" }),
+      "NORMAL,LIQUIDATED",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "投资资格（逗号分隔）" }),
+      "FULLY_ELIGIBLE,HOLD_ONLY",
+    );
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].searchParams.get("lifecycle_status")).toBe(
+      "NORMAL,LIQUIDATED",
+    );
+    expect(requests[1].searchParams.get("investment_eligibility")).toBe(
+      "FULLY_ELIGIBLE,HOLD_ONLY",
+    );
+  });
+
   it("renders empty and API error states explicitly", async () => {
     server.use(
       http.get("/api/v1/funds", () =>

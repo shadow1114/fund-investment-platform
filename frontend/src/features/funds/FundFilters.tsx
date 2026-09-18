@@ -45,38 +45,24 @@ export const FundFilters = ({
         />
       </label>
       <label>
-        生命周期状态
-        <select
+        生命周期状态（逗号分隔）
+        <input
           value={values.lifecycle_status}
           onChange={(event) => update("lifecycle_status", event.target.value)}
           name="lifecycle_status"
-        >
-          <option value="">全部</option>
-          <option value="NORMAL">NORMAL</option>
-          <option value="SUSPENDED_SUBSCRIPTION">SUSPENDED_SUBSCRIPTION</option>
-          <option value="LIQUIDATED">LIQUIDATED</option>
-          <option value="MERGED">MERGED</option>
-          <option value="TRANSFORMED">TRANSFORMED</option>
-          <option value="UNKNOWN">UNKNOWN</option>
-        </select>
+          placeholder="NORMAL,LIQUIDATED"
+        />
       </label>
       <label>
-        投资资格
-        <select
+        投资资格（逗号分隔）
+        <input
           value={values.investment_eligibility}
           onChange={(event) =>
             update("investment_eligibility", event.target.value)
           }
           name="investment_eligibility"
-        >
-          <option value="">全部</option>
-          <option value="FULLY_ELIGIBLE">FULLY_ELIGIBLE</option>
-          <option value="HOLD_ONLY">HOLD_ONLY</option>
-          <option value="LIMITED">LIMITED</option>
-          <option value="EXIT_ONLY">EXIT_ONLY</option>
-          <option value="NOT_TRADABLE">NOT_TRADABLE</option>
-          <option value="UNKNOWN">UNKNOWN</option>
-        </select>
+          placeholder="FULLY_ELIGIBLE,HOLD_ONLY"
+        />
       </label>
       <label>
         数据截止日
