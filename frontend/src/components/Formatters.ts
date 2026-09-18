@@ -1,5 +1,4 @@
-export const formatPercent = (value: number | null | undefined) =>
-  value == null ? "" : `${(value * 100).toFixed(2)}%`;
+export const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
 export const formatMoney = (
   amount: number | string | null | undefined,
   currency = "CNY",

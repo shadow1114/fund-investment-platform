@@ -1,33 +1,40 @@
+import type { Decision } from "../api/generated/m17.schemas";
+import { formatDate } from "./Formatters";
 import { formatPercent } from "./Formatters";
-type Weight = { fund_id: string; weight: number };
-type Review = {
-  action: string;
-  reason?: string;
-  reviewed_by?: string;
-  reviewed_at?: string;
-};
+
 export const WeightExplainChain = ({
   proposedWeights,
   finalWeights,
   review,
 }: {
-  proposedWeights: Weight[];
-  finalWeights: Weight[];
-  review?: Review;
+  proposedWeights: Decision["proposed_weights"];
+  finalWeights: Decision["final_weights"];
+  review: Decision["review"];
 }) => (
   <div>
-    <section>
+    <section aria-label="原始建议权重">
       <h3>原始建议权重</h3>
       {proposedWeights.map((w) => (
         <div key={w.fund_id}>{`${w.fund_id} ${formatPercent(w.weight)}`}</div>
       ))}
     </section>
-    <section>
+    <section aria-label="最终权重">
       <h3>最终权重</h3>
-      {finalWeights.map((w) => (
-        <div key={w.fund_id}>{`${w.fund_id} ${formatPercent(w.weight)}`}</div>
-      ))}
+      {finalWeights === null ? (
+        <div>尚未复核，无最终权重</div>
+      ) : (
+        finalWeights.map((w) => (
+          <div key={w.fund_id}>{`${w.fund_id} ${formatPercent(w.weight)}`}</div>
+        ))
+      )}
     </section>
-    {review?.reason && <div>复核原因：{review.reason}</div>}
+    {review && (
+      <section aria-label="PM 复核记录">
+        <div>复核动作：{review.action}</div>
+        <div>复核原因：{review.reason}</div>
+        <div>复核人：{review.reviewed_by}</div>
+        <div>复核时间：{formatDate(review.reviewed_at)}</div>
+      </section>
+    )}
   </div>
 );

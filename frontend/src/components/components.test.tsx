@@ -1,9 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Operation } from "../api/generated/m17.schemas";
+import type { Decision, Operation } from "../api/generated/m17.schemas";
 import { ApiError } from "../api/http";
 import { ErrorState } from "./ErrorState";
 import { formatDate, formatMoney, formatPercent } from "./Formatters";
@@ -39,6 +45,7 @@ const withQueryClient = (children: ReactNode) => {
 
 describe("cross-page semantics", () => {
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     getOperationMock.mockReset();
   });
@@ -60,6 +67,8 @@ describe("cross-page semantics", () => {
   it("formats decimal percentages only at display time", () => {
     expect(formatPercent(0.0742)).toBe("7.42%");
     expect(formatPercent(-0.01)).toBe("-1.00%");
+    // @ts-expect-error null metrics must be handled by MetricValue first
+    formatPercent(null);
   });
 
   it("formats money and dates without changing their transport values", () => {
@@ -93,8 +102,14 @@ describe("cross-page semantics", () => {
     expect(screen.getByText("推断 1")).toBeVisible();
   });
 
+  it("reports missing provenance fields as a contract error", () => {
+    render(<ProvenanceBar meta={{}} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("数据溯源契约错误");
+    expect(screen.getByText("点时数据：未知")).toBeVisible();
+  });
+
   it("polls a running operation and stops after completion", async () => {
-    vi.useFakeTimers();
     getOperationMock
       .mockImplementationOnce(() =>
         responseFor({
@@ -119,25 +134,37 @@ describe("cross-page semantics", () => {
       <OperationProgress
         operationId="OP-1"
         resultRef={null}
-        pollIntervalMs={50}
+        pollIntervalMs={10}
       />,
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
     expect(await screen.findByText("运行中")).toBeVisible();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(50);
-    });
     expect(await screen.findByText("已完成")).toBeVisible();
     expect(screen.getByText("/api/v1/backtests/BT-1/status")).toBeVisible();
+    await waitFor(() => expect(getOperationMock).toHaveBeenCalledTimes(2));
+  });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(200);
+  it("renders operation API envelopes through ErrorState", async () => {
+    getOperationMock.mockResolvedValue({
+      status: 422,
+      data: {
+        data: null,
+        meta: {},
+        error: {
+          code: "INVALID_OPERATION",
+          message: "Operation cannot be read",
+          details: {},
+        },
+      },
+      headers: new Headers(),
     });
-    expect(getOperationMock).toHaveBeenCalledTimes(2);
+
+    withQueryClient(<OperationProgress operationId="OP-ERR" />);
+
+    expect(
+      await screen.findByText("HTTP 422 · INVALID_OPERATION"),
+    ).toBeVisible();
+    expect(screen.getByText("Operation cannot be read")).toBeVisible();
   });
 
   it("renders terminal operation failures with stable diagnostics", async () => {
@@ -195,24 +222,45 @@ describe("cross-page semantics", () => {
     expect(screen.getByText("25.00%")).toBeVisible();
   });
 
-  it("shows proposed and final weights separately for PM overrides", () => {
+  it("shows proposed and final weights with complete PM review details", () => {
+    const decision = {
+      proposed_weights: [{ fund_id: "000001", weight: 0.15 }],
+      final_weights: [{ fund_id: "000001", weight: 0.08 }],
+      review: {
+        action: "OVERRIDDEN",
+        reason: "流动性收紧",
+        reviewed_by: "PM-1",
+        reviewed_at: "2026-09-17T08:00:00Z",
+      },
+    } satisfies Pick<Decision, "proposed_weights" | "final_weights" | "review">;
+
     render(
       <WeightExplainChain
-        proposedWeights={[{ fund_id: "000001", weight: 0.15 }]}
-        finalWeights={[{ fund_id: "000001", weight: 0.08 }]}
-        review={{
-          action: "OVERRIDDEN",
-          reason: "流动性收紧",
-          reviewed_by: "PM-1",
-          reviewed_at: "2026-09-17T08:00:00Z",
-        }}
+        proposedWeights={decision.proposed_weights}
+        finalWeights={decision.final_weights}
+        review={decision.review}
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "原始建议权重" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "最终权重" })).toBeVisible();
-    expect(screen.getByText("15.00%")).toBeVisible();
-    expect(screen.getByText("8.00%")).toBeVisible();
+    const proposed = screen.getByRole("region", { name: "原始建议权重" });
+    const final = screen.getByRole("region", { name: "最终权重" });
+    expect(within(proposed).getByText("000001 15.00%")).toBeVisible();
+    expect(within(final).getByText("000001 8.00%")).toBeVisible();
+    expect(screen.getByText("复核动作：OVERRIDDEN")).toBeVisible();
     expect(screen.getByText("复核原因：流动性收紧")).toBeVisible();
+    expect(screen.getByText("复核人：PM-1")).toBeVisible();
+    expect(screen.getByText("复核时间：2026/09/17")).toBeVisible();
+  });
+
+  it("renders an unreviewed decision without inventing final weights", () => {
+    render(
+      <WeightExplainChain
+        proposedWeights={[{ fund_id: "000001", weight: 0.15 }]}
+        finalWeights={null}
+        review={null}
+      />,
+    );
+
+    expect(screen.getByText("尚未复核，无最终权重")).toBeVisible();
   });
 });

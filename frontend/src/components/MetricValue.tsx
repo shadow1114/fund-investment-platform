@@ -17,7 +17,9 @@ export const MetricValue = ({
     typeof format === "function"
       ? format(value)
       : format === "percent"
-        ? formatPercent(Number(value))
+        ? typeof value === "number"
+          ? formatPercent(value)
+          : `不可用（INVALID_NUMERIC_VALUE）`
         : String(value);
   return <span>{output}</span>;
 };

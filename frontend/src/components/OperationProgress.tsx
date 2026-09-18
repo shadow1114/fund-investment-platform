@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { getOperation } from "../api/generated/m17";
-import type { Operation } from "../api/generated/m17.schemas";
+import { getOperationQueryOptions } from "../api/queries";
+import { ErrorState } from "./ErrorState";
 type Props = {
   operationId: string;
   resultRef?: string | null;
@@ -19,14 +19,13 @@ export const OperationProgress = ({
   pollIntervalMs = 1000,
 }: Props) => {
   const q = useQuery({
-    queryKey: ["operation", operationId],
-    queryFn: async () => (await getOperation(operationId)).data.data,
+    ...getOperationQueryOptions(operationId),
     refetchInterval: (query) =>
       query.state.data?.status === "RUNNING" ? pollIntervalMs : false,
   });
-  const op = q.data as Operation | undefined;
+  const op = q.data;
   if (q.isLoading) return <div>加载中</div>;
-  if (q.error) return <div>操作查询失败</div>;
+  if (q.error) return <ErrorState error={q.error} />;
   if (!op) return null;
   return (
     <section aria-label="操作进度">
