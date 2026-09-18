@@ -12,6 +12,7 @@ import type {
   BacktestStatusStatus,
   FactorResultDirection,
   OperationStatus,
+  OptimizationSubmissionStatus,
   OptimizationOptimizationStatus,
 } from "./generated/m17.schemas";
 
@@ -94,12 +95,21 @@ const frozenOperations = [
 
 const generatedUnknownStatuses: [
   OperationStatus,
+  OptimizationSubmissionStatus,
   OptimizationOptimizationStatus,
   BacktestCreatedStatus,
   BacktestRunStatus,
   BacktestStatusStatus,
   FactorResultDirection,
-] = ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"];
+] = [
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN",
+];
 
 function loadOpenApi(path: string): OpenApiProjection {
   return parse(
@@ -302,6 +312,9 @@ describe("frozen M1.7 OpenAPI projection", () => {
 
     expect(schemas.MetricStatus.enum).toContain("UNKNOWN");
     expect(schemas.Operation.properties?.status?.enum).toContain("UNKNOWN");
+    expect(schemas.OptimizationSubmission.properties?.status?.enum).toContain(
+      "UNKNOWN",
+    );
     expect(schemas.FactorResult.properties?.direction?.enum).toContain(
       "UNKNOWN",
     );
@@ -317,6 +330,7 @@ describe("frozen M1.7 OpenAPI projection", () => {
     expect(schemas.BacktestRun.properties?.status?.enum).toContain("UNKNOWN");
     expect(schemas.BiasStatus.enum).toContain("UNKNOWN");
     expect(generatedUnknownStatuses).toEqual([
+      "UNKNOWN",
       "UNKNOWN",
       "UNKNOWN",
       "UNKNOWN",

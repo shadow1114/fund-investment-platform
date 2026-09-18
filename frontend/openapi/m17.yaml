@@ -1342,7 +1342,7 @@ components:
       required: [operation_id, status, optimization_id]
       properties:
         operation_id: { type: string }
-        status: { type: string, enum: [RUNNING] }
+        status: { type: string, enum: [RUNNING, UNKNOWN] }
         optimization_id: { type: string }
     OptimizationSubmissionEnvelope:
       type: object

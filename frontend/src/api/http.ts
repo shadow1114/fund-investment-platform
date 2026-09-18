@@ -158,6 +158,9 @@ function statusValues(
   if ("backtest_id" in record && "created_at" in record) {
     return values("CREATED", "UNKNOWN");
   }
+  if ("operation_id" in record && "optimization_id" in record) {
+    return values("RUNNING", "UNKNOWN");
+  }
   if ("operation_id" in record) {
     return values(
       "RUNNING",

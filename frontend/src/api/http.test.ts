@@ -90,6 +90,42 @@ describe("API response handling", () => {
     });
   });
 
+  it("normalizes an optimization submission with a cross-enum status", () => {
+    const data = unwrapResponse({
+      status: 202,
+      data: {
+        data: {
+          invalid: {
+            operation_id: "OP-001",
+            optimization_id: "OPT-001",
+            status: "COMPLETED",
+          },
+          valid: {
+            operation_id: "OP-002",
+            optimization_id: "OPT-002",
+            status: "RUNNING",
+          },
+        },
+        meta: {},
+        error: null,
+      },
+      headers: new Headers(),
+    });
+
+    expect(data).toEqual({
+      invalid: {
+        operation_id: "OP-001",
+        optimization_id: "OPT-001",
+        status: "UNKNOWN",
+      },
+      valid: {
+        operation_id: "OP-002",
+        optimization_id: "OPT-002",
+        status: "RUNNING",
+      },
+    });
+  });
+
   it("normalizes direction with its own generated enum", () => {
     const data = unwrapResponse({
       status: 200,

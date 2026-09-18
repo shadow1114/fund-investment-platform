@@ -704,6 +704,7 @@ export type OptimizationSubmissionStatus =
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export const OptimizationSubmissionStatus = {
   RUNNING: "RUNNING",
+  UNKNOWN: "UNKNOWN",
 } as const;
 
 export interface OptimizationSubmission {
