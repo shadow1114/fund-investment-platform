@@ -33,7 +33,7 @@ export const UniverseFilters = ({ initialValues, onSubmit }: Props) => {
       <label>
         决策时间
         <input
-          type="datetime-local"
+          type="date"
           value={values.decision_at}
           onChange={(event) => update("decision_at", event.target.value)}
         />

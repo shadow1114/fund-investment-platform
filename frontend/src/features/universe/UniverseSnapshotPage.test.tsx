@@ -180,24 +180,23 @@ describe("UniverseSnapshotPage", () => {
   });
 
   it("sends the frozen list filters and links to the returned snapshot", async () => {
-    const user = userEvent.setup();
-    renderPage("/universes");
+    renderPage(
+      "/universes?strategy_id=low-volatility&decision_at=2026-09-16&eligibility_rules_version=eligibility-v4",
+    );
 
-    await user.type(
-      screen.getByRole("textbox", { name: "策略 ID" }),
+    expect(screen.getByRole("textbox", { name: "策略 ID" })).toHaveValue(
       "low-volatility",
     );
-    await user.type(screen.getByLabelText("决策时间"), "2026-09-16T08:30");
-    await user.type(
-      screen.getByRole("textbox", { name: "资格规则版本" }),
+    expect(screen.getByLabelText("决策时间")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("决策时间")).toHaveValue("2026-09-16");
+    expect(screen.getByRole("textbox", { name: "资格规则版本" })).toHaveValue(
       "eligibility-v4",
     );
-    await user.click(screen.getByRole("button", { name: "查询快照" }));
 
-    await waitFor(() => expect(requests).toHaveLength(2));
-    expect(Object.fromEntries(requests[1].searchParams)).toEqual({
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(Object.fromEntries(requests[0].searchParams)).toEqual({
       strategy_id: "low-volatility",
-      decision_at: "2026-09-16T08:30",
+      decision_at: "2026-09-16",
       eligibility_rules_version: "eligibility-v4",
     });
     expect(
