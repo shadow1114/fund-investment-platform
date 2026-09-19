@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -67,6 +68,20 @@ def create_app(*, persistent_operations: bool = False) -> FastAPI:
             meta=ResponseMeta(request_id=getattr(request.state, "request_id", None)),
         )
         return JSONResponse(status_code=exc.status_code, content=body.model_dump(mode="json"))
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        body = ErrorEnvelope(
+            error=ErrorBody(
+                code="VALIDATION_ERROR",
+                message="Request validation failed",
+                details={"errors": exc.errors()},
+            ),
+            meta=ResponseMeta(request_id=getattr(request.state, "request_id", None)),
+        )
+        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     app.include_router(reads.router, prefix="/api/v1")
     app.include_router(commands.router, prefix="/api/v1")
