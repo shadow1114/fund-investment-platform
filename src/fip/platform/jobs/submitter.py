@@ -40,6 +40,7 @@ class JobSubmitter:
         idempotency_key: str,
         decision_id: str | None = None,
         resource_id: str | None = None,
+        result_ref: str | None = None,
     ) -> CalculationJob:
         """提交任务。相同幂等键的重复提交返回既有任务，不产生第二条记录。
 
@@ -62,6 +63,7 @@ class JobSubmitter:
             job_type=job_type,
             decision_id=decision_id,
             resource_id=resource_id,
+            result_ref=result_ref,
             status=ExecutionStatus.RUNNING.value,
             progress=0,
         )

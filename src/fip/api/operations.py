@@ -56,13 +56,20 @@ class PersistentOperationService:
         self._session = session
 
     def submit(
-        self, kind: str, resource_id: str, idempotency_key: str, *, decision_id: str | None = None
+        self,
+        kind: str,
+        resource_id: str,
+        idempotency_key: str,
+        *,
+        decision_id: str | None = None,
+        result_ref: str | None = None,
     ) -> OperationRecord:
         job = JobSubmitter(self._session).submit(
             job_type=kind,
             idempotency_key=idempotency_key,
             decision_id=decision_id,
             resource_id=resource_id,
+            result_ref=result_ref,
         )
         self._session.commit()
         return self._record(job, job.resource_id or resource_id)

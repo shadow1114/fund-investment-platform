@@ -11,7 +11,7 @@ class _FakeService:
     def __init__(self, _session: object) -> None:
         pass
 
-    def submit(self, kind: str, resource_id: str, key: str):
+    def submit(self, kind: str, resource_id: str, key: str, **_: object):
         return SimpleNamespace(
             operation_id=f"OP-{key}",
             kind=kind,

@@ -29,10 +29,17 @@ def get_operation(operation_id: str, request: Request) -> dict[str, object]:
         "status": record.status,
         "progress": {
             "completed": getattr(record, "progress", 0),
-            "total": 100,
-            "unit": "percent",
+            "total": None,
+            "unit": "operation",
         },
         "result_ref": getattr(record, "result_ref", None),
-        "failure": record.error,
+        "failure": (
+            {
+                "code": record.error.get("code", "OPERATION_FAILED"),
+                "message": record.error.get("message") or "Operation did not complete successfully",
+            }
+            if record.error
+            else None
+        ),
     }
     return success(data, request_id=getattr(request.state, "request_id", None))

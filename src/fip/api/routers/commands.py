@@ -23,11 +23,14 @@ def _submit_operation(
     kind: str,
     resource_id: str,
     idempotency_key: str,
+    result_ref: str,
 ) -> Any:
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         try:
-            return PersistentOperationService(session).submit(kind, resource_id, idempotency_key)
+            return PersistentOperationService(session).submit(
+                kind, resource_id, idempotency_key, result_ref=result_ref
+            )
         finally:
             session.close()
     return registry.submit(kind, resource_id, idempotency_key)
@@ -50,7 +53,13 @@ def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
-    record = _submit_operation(request, "optimization", optimization_id, _key(request))
+    record = _submit_operation(
+        request,
+        "optimization",
+        optimization_id,
+        _key(request),
+        f"/api/v1/portfolios/{id}/optimizations/{optimization_id}",
+    )
     return success(
         {
             "operation_id": record.operation_id,
@@ -82,7 +91,9 @@ def validate_backtest(
     "/backtests/{id}/runs", operation_id="runBacktest", status_code=status.HTTP_202_ACCEPTED
 )
 def run_backtest(id: str, request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    record = _submit_operation(request, "backtest", id, _key(request))
+    record = _submit_operation(
+        request, "backtest", id, _key(request), f"/api/v1/backtests/{id}/result"
+    )
     return success(
         {"operation_id": record.operation_id, "backtest_id": id, "status": record.status},
         request_id=_request_id(request),
