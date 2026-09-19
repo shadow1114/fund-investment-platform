@@ -6,9 +6,10 @@ from typing import Any
 from fastapi import APIRouter, Body, Request, status
 from sqlalchemy.orm import Session
 
+from fip.api.command_services import DecisionCommandService, validate_backtest_configuration
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
-from fip.api.errors import ApiError, ForbiddenError
+from fip.api.errors import ForbiddenError
 from fip.api.operations import OperationRegistry, PersistentOperationService
 
 # FastAPI's dependency/body declarations intentionally live in signatures.
@@ -82,9 +83,8 @@ def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> di
 def validate_backtest(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
-    return success(
-        {"backtest_id": id, "validation_status": "PASS"}, request_id=_request_id(request)
-    )
+    result = validate_backtest_configuration(payload)
+    return success({"backtest_id": id, **result}, request_id=_request_id(request))
 
 
 @router.post(
@@ -109,22 +109,25 @@ def review_decision(
     principal = principal_from_request(request)
     if not principal.can_review_decisions:
         raise ForbiddenError()
-    decision_status = payload.get("decision_status")
-    if decision_status not in {"APPROVED", "REJECTED", "OVERRIDDEN"}:
-        raise ApiError(
-            422, "VALIDATION_ERROR", "decision_status must be APPROVED, REJECTED, or OVERRIDDEN"
-        )
-    if decision_status == "OVERRIDDEN" and not payload.get("reason"):
-        raise ApiError(422, "VALIDATION_ERROR", "reason is required for OVERRIDDEN reviews")
-    return success(
-        {
-            "decision_id": decision_id,
-            "decision_status": decision_status,
-            "reviewed_by": principal.user_id,
-            "reason": payload.get("reason"),
-            "original_weights": payload.get("original_weights", {}),
-            "final_weights": payload.get("final_weights", {}),
-        },
-        request_id=_request_id(request),
-        audit_id=f"AUD-{uuid.uuid4().hex[:12].upper()}",
+    session = (
+        Session(request.app.state.api_engine, future=True)
+        if getattr(request.app.state, "persistent_operations", False)
+        else None
     )
+    try:
+        result = DecisionCommandService(session).review(
+            decision_id,
+            str(payload.get("decision_status")),
+            payload.get("reason"),
+            principal.user_id,
+            payload.get("original_weights", {}),
+            payload.get("final_weights", {}),
+            _request_id(request),
+        )
+        if session is not None:
+            session.commit()
+    finally:
+        if session is not None:
+            session.close()
+    audit_id = result.pop("audit_id")
+    return success(result, request_id=_request_id(request), audit_id=audit_id)
