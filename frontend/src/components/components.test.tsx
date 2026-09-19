@@ -65,6 +65,13 @@ describe("cross-page semantics", () => {
     expect(screen.queryByText("-")).not.toBeInTheDocument();
   });
 
+  it("does not render a numeric value as valid when metric status is UNKNOWN", () => {
+    render(<MetricValue value={42} status="UNKNOWN" reason="SOURCE_MISSING" />);
+
+    expect(screen.getByText("不可用（SOURCE_MISSING）")).toBeVisible();
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
+  });
+
   it("formats decimal percentages only at display time", () => {
     expect(formatPercent(0.0742)).toBe("7.42%");
     expect(formatPercent(-0.01)).toBe("-1.00%");

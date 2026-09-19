@@ -11,7 +11,12 @@ export const MetricValue = ({
   reason,
   format = "number",
 }: Props) => {
-  if (value == null || status === "UNAVAILABLE" || status === "EXCLUDED")
+  if (
+    value == null ||
+    status === "UNKNOWN" ||
+    status === "UNAVAILABLE" ||
+    status === "EXCLUDED"
+  )
     return <span>不可用（{reason ?? status ?? "UNKNOWN"}）</span>;
   const output =
     typeof format === "function"
