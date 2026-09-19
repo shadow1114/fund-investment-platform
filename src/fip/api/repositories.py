@@ -20,7 +20,7 @@ from fip.services.data_service.models.fund import (
 from fip.services.data_service.models.market import FundNav
 from fip.services.data_service.repositories.classification import SqlClassificationPitRepository
 from fip.services.data_service.repositories.nav import SqlNavPitRepository
-from fip.services.factor_service.models import FactorValue
+from fip.services.factor_service.models import FactorRun, FactorValue
 from fip.services.fund_service.models import (
     FundEvaluation,
     FundRanking,
@@ -172,6 +172,17 @@ class FundRepository(RepositoryAdapter):
                 }
                 for point_date, row in sorted(latest.items())
             ]
+        if frequency != "DAILY":
+            buckets: dict[tuple[int, int], dict[str, object]] = {}
+            for point in data:
+                point_date = date.fromisoformat(str(point["date"]))
+                key = (
+                    (point_date.isocalendar().year, point_date.isocalendar().week)
+                    if frequency == "WEEKLY"
+                    else (point_date.year, point_date.month)
+                )
+                buckets[key] = point
+            data = list(buckets.values())
         return {
             "data": {"fund_id": identifier, "points": data},
             "meta": {"adjustment_rule_version": "UNKNOWN", "unavailable_count": 0},
@@ -384,11 +395,15 @@ class FundRepository(RepositoryAdapter):
     def _factor_values(
         self, factor_run_id: int, share_class_id: int, period: str | None, view_date: date
     ) -> list[FactorValue]:
-        statement = select(FactorValue).where(
-            FactorValue.factor_run_id == factor_run_id,
-            FactorValue.share_class_id == share_class_id,
-            FactorValue.effective_at <= view_date,
-            FactorValue.available_at <= resolve_visible_until(view_date),  # type: ignore[attr-defined]
+        statement = (
+            select(FactorValue)
+            .join(FactorRun, FactorRun.id == FactorValue.factor_run_id)
+            .where(
+                FactorValue.factor_run_id == factor_run_id,
+                FactorValue.share_class_id == share_class_id,
+                FactorValue.effective_at <= view_date,
+                FactorRun.created_at <= resolve_visible_until(view_date),
+            )
         )
         if period is not None:
             statement = statement.where(FactorValue.window == period)
