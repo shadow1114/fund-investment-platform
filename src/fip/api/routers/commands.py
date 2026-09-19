@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from fip.api.command_services import DecisionCommandService, validate_backtest_configuration
@@ -67,6 +67,9 @@ def submit_optimization(
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         try:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": request_key}
+            )
             if session.get(PortfolioRecord, id) is None:
                 raise NotFoundError("portfolio", id)
             existing_job = session.execute(
@@ -82,7 +85,22 @@ def submit_optimization(
                         payload={"optimization_status": "UNKNOWN", "request": payload},
                     )
                 )
+                record = PersistentOperationService(session).submit(
+                    "optimization",
+                    optimization_id,
+                    request_key,
+                    result_ref=f"/api/v1/portfolios/{id}/optimizations/{optimization_id}",
+                    commit=False,
+                )
                 session.commit()
+                return success(
+                    {
+                        "operation_id": record.operation_id,
+                        "optimization_id": record.resource_id,
+                        "status": record.status,
+                    },
+                    request_id=_request_id(request),
+                )
         finally:
             session.close()
     record = _submit_operation(

@@ -35,7 +35,7 @@ class _FakeSession:
     def get(self, _model, _identifier):
         return object()
 
-    def execute(self, _statement):
+    def execute(self, _statement, *_args):
         return SimpleNamespace(scalar_one_or_none=lambda: None)
 
     def add(self, _item):

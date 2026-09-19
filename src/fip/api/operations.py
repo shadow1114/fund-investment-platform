@@ -63,6 +63,7 @@ class PersistentOperationService:
         *,
         decision_id: str | None = None,
         result_ref: str | None = None,
+        commit: bool = True,
     ) -> OperationRecord:
         job = JobSubmitter(self._session).submit(
             job_type=kind,
@@ -71,7 +72,8 @@ class PersistentOperationService:
             resource_id=resource_id,
             result_ref=result_ref,
         )
-        self._session.commit()
+        if commit:
+            self._session.commit()
         return self._record(job, job.resource_id or resource_id)
 
     def get(self, operation_id: str) -> OperationRecord | None:
