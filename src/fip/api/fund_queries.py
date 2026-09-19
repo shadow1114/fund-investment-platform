@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
+from fip.api.errors import NotFoundError
 from fip.api.repositories import FundRepository
 
 
@@ -193,7 +194,9 @@ class FundQueries:
             nav_type=nav_type,
             as_of_date=_as_iso(as_of_date),
         )
-        result = _response({"fund_id": fund_id, "points": []} if value is None else value)
+        if value is None:
+            raise NotFoundError("fund NAV series", fund_id)
+        result = _response(value)
         return QueryResult(
             result.data,
             {
@@ -216,7 +219,9 @@ class FundQueries:
             evaluation_period=evaluation_period,
             as_of_date=_as_iso(as_of_date),
         )
-        result = _response({} if value is None else value)
+        if value is None:
+            raise NotFoundError("fund evaluation", fund_id)
+        result = _response(value)
         return QueryResult(result.data, {**result.meta, **self._pit_meta(as_of_date)})
 
     def scores(
@@ -229,7 +234,9 @@ class FundQueries:
             evaluation_period=evaluation_period,
             as_of_date=_as_iso(as_of_date),
         )
-        result = _response({} if value is None else value)
+        if value is None:
+            raise NotFoundError("fund score", fund_id)
+        result = _response(value)
         return QueryResult(result.data, {**result.meta, **self._pit_meta(as_of_date)})
 
     def _optional_read(self, name: str, fund_id: str, **filters: object) -> object | None:

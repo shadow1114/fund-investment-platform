@@ -113,3 +113,14 @@ def test_universe_routes_reject_invalid_dates_and_missing_ids() -> None:
         == 422
     )
     assert client.get("/api/v1/fund-universes/missing").status_code == 404
+
+
+def test_universe_detail_does_not_succeed_without_member_materialization() -> None:
+    """A snapshot summary is not the frozen detail resource without its members."""
+
+    class _SummaryOnlyUniverseRepository(_SeededUniverseRepository):
+        read_members = None  # type: ignore[assignment]
+
+    response = _client(_SummaryOnlyUniverseRepository()).get("/api/v1/fund-universes/universe-1")
+
+    assert response.status_code == 404

@@ -34,11 +34,24 @@ wiring were added, the focused suites passed.
 
 ## Scope note
 
-Task 1's canonical `FundRepository` and `UniverseRepository` supply generic
-`list` / `get` hooks only.  The query adapters therefore provide the required
-HTTP query seams and use repository-provided related-read methods when a
-concrete implementation supplies them.  There is not yet a typed, concrete
-SQL port for NAV, factor/evaluation, score, or universe-member materialization
-on those Task 1 adapters.  Adding one would require expanding the frozen Task
-1 repository interface (or a later explicit plan ruling); this task does not
-invent direct SQL or duplicate domain calculation/eligibility rules.
+Review changes completed in the follow-up commit:
+
+- `FundRepository` now materializes fund/share-class summaries from the
+  persisted models, resolves interval/versioned facts at the requested PIT
+  visibility boundary, delegates adjusted NAV to `SqlNavPitRepository`, and
+  reads persisted factor/evaluation/score rows.
+- `UniverseRepository` now reads persisted snapshots, members, ranking/tier/
+  score rows, and recorded selection-condition results.
+- Missing NAV/evaluation/score/member materialization is a contract-shaped
+  `404`; it is no longer replaced by placeholder success payloads.
+- `style=form, explode=false` multi-value query strings are parsed as comma
+  lists, and invalid sorts or contradictory ranges return `422`.
+- Added a PostgreSQL-backed integration test that seeds the existing domain
+  models and proves the concrete fund and universe repositories see those
+  persisted rows.
+
+The available data model does not associate a management company with `Fund`,
+nor does it persist an API-level universe strategy or all detail presentation
+fields.  The concrete adapter exposes `UNKNOWN` for those explicitly absent
+facts rather than fabricating a business value.  Strict response-model work
+remains Task 6 as planned.

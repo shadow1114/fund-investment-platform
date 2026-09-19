@@ -1,6 +1,6 @@
 # M1.7 前端交接
 
-本目录是基金研究、候选池快照、组合决策和回测的 Vite/React 客户端。接口依据 [M1.7 冻结契约](../docs/10-api/06-m17-frontend-contracts.md)，机器可读投影为 [`openapi/m17.yaml`](openapi/m17.yaml)。当前仓库没有实现这些 `/api/v1` HTTP 路由的 Web server；要查看真实数据，需另行提供符合冻结契约的 API 服务。
+本目录是基金研究、候选池快照、组合决策和回测的 Vite/React 客户端。接口依据 [M1.7 冻结契约](../docs/10-api/06-m17-frontend-contracts.md)，机器可读投影为 [`openapi/m17.yaml`](openapi/m17.yaml)。仓库根目录的 FastAPI server 通过 `make api-dev` 提供这些 `/api/v1` 路由。
 
 ## 本地启动与校验
 
@@ -22,7 +22,7 @@ Vite 启动后打开终端显示的本地地址。首次执行浏览器测试时
 
 生成的客户端目前请求同源相对路径 `/api/v1/...`。实时模式要求页面所在 origin 提供冻结的 `/api/v1` 路由（可由同源反向代理转发到 API 服务）；Vite 当前没有 `/api` 代理。`VITE_API_BASE_URL` 尚未接入客户端，设置它不会改变请求地址。独立运行 `npm run dev` 可以打开页面，但在没有上述 API 服务时数据请求会显示错误。
 
-`src/test/contractFixtures.ts` 和 MSW handlers 只在 Vitest 测试中使用；Playwright 烟测在浏览器测试里拦截请求并返回同一组契约 fixtures。开发服务器没有 mock/live 切换，也不会自动加载这些 fixtures。测试通过不表示真实 API server 已实现或已做前后端集成验收。
+`src/test/contractFixtures.ts` 和 MSW handlers 只在 Vitest 测试中使用；Playwright 烟测在浏览器测试里拦截请求并返回同一组契约 fixtures。API server 的实时契约由仓库根目录 `make api-check` 单独验收。
 
 ## 页面和接口对应
 

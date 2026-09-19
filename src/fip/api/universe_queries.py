@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import date
 from typing import Any, cast
 
+from fip.api.errors import NotFoundError
 from fip.api.fund_queries import QueryResult
 from fip.api.repositories import UniverseRepository
 
@@ -16,8 +17,7 @@ def _as_iso(value: date | None) -> str | None:
 
 def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
     return all(
-        expected is None or row.get(field) == expected
-        for field, expected in filters.items()
+        expected is None or row.get(field) == expected for field, expected in filters.items()
     )
 
 
@@ -53,15 +53,7 @@ class UniverseQueries:
         summary = dict(self._repository.get(universe_id))
         read = getattr(self._repository, "read_members", None)
         if not callable(read):
-            return QueryResult(
-                summary,
-                {
-                    "eligibility_rules_version": summary.get(
-                        "eligibility_rules_version", "unknown"
-                    ),
-                    "scoring_policy_version": summary.get("scoring_policy_version"),
-                },
-            )
+            raise NotFoundError("fund universe members", universe_id)
         members = cast(Callable[[str], Mapping[str, Any]], read)(universe_id)
         meta = dict(cast(Mapping[str, object], members.get("meta", {})))
         summary.update(

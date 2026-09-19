@@ -2,7 +2,12 @@
 name = "fund-investment-platform"
 version = "0.1.0"
 requires-python = "==3.12.*"
-dependencies = ["numpy>=2.1,<3"]
+dependencies = [
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "numpy>=2.1,<3",
+    "uvicorn>=0.34,<1",
+]
 
 [build-system]
 requires = ["setuptools>=69"]

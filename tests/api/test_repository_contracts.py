@@ -191,28 +191,29 @@ def test_fund_detail_route_uses_the_injected_canonical_repository() -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "resource", "identifier"),
+    ("path", "resource", "identifier", "expected_status"),
     [
-        ("/api/v1/funds/fund-1", "fund", "fund-1"),
-        ("/api/v1/funds/fund-1/nav-series", "fund", "fund-1"),
-        ("/api/v1/funds/fund-1/evaluations", "fund", "fund-1"),
-        ("/api/v1/funds/fund-1/scores", "fund", "fund-1"),
-        ("/api/v1/fund-universes/universe-1", "fund universe", "universe-1"),
-        ("/api/v1/portfolios/portfolio-1", "portfolio", "portfolio-1"),
+        ("/api/v1/funds/fund-1", "fund", "fund-1", 200),
+        ("/api/v1/funds/fund-1/nav-series", "fund", "fund-1", 404),
+        ("/api/v1/funds/fund-1/evaluations", "fund", "fund-1", 404),
+        ("/api/v1/funds/fund-1/scores", "fund", "fund-1", 404),
+        ("/api/v1/fund-universes/universe-1", "fund universe", "universe-1", 404),
+        ("/api/v1/portfolios/portfolio-1", "portfolio", "portfolio-1", 200),
         (
             "/api/v1/portfolios/portfolio-1/optimizations/optimization-1",
             "optimization",
             "optimization-1",
+            200,
         ),
-        ("/api/v1/decisions/decision-1", "decision", "decision-1"),
-        ("/api/v1/backtests/backtest-1/status", "backtest", "backtest-1"),
-        ("/api/v1/backtests/backtest-1/result", "backtest", "backtest-1"),
-        ("/api/v1/backtests/backtest-1/performance", "backtest", "backtest-1"),
-        ("/api/v1/backtests/backtest-1/bias-check", "backtest", "backtest-1"),
+        ("/api/v1/decisions/decision-1", "decision", "decision-1", 200),
+        ("/api/v1/backtests/backtest-1/status", "backtest", "backtest-1", 200),
+        ("/api/v1/backtests/backtest-1/result", "backtest", "backtest-1", 200),
+        ("/api/v1/backtests/backtest-1/performance", "backtest", "backtest-1", 200),
+        ("/api/v1/backtests/backtest-1/bias-check", "backtest", "backtest-1", 200),
     ],
 )
 def test_detail_routes_use_the_request_scoped_repository_override(
-    path: str, resource: str, identifier: str
+    path: str, resource: str, identifier: str, expected_status: int
 ) -> None:
     """A direct NotFoundError bypass would make every case below return 404."""
     app = api_app.create_app()
@@ -223,4 +224,4 @@ def test_detail_routes_use_the_request_scoped_repository_override(
     with TestClient(app) as client:
         response = client.get(path)
 
-    assert response.status_code == 200
+    assert response.status_code == expected_status

@@ -2,7 +2,7 @@ PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 export PATH := .venv/bin:$(PATH)
 
-.PHONY: test test-unit test-integration test-fitness test-contract lint typecheck check migrate frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
+.PHONY: test test-unit test-integration test-fitness test-contract lint typecheck check migrate api-dev api-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
 
 test-unit:
 	$(PYTEST) tests/unit -v
@@ -21,6 +21,12 @@ test:
 
 migrate:
 	.venv/bin/alembic -x db=dev upgrade head
+
+api-dev:
+	PYTHONPATH=src .venv/bin/uvicorn fip.api.app:app --reload
+
+api-check:
+	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/api -q
 
 lint:
 	.venv/bin/ruff check src tests

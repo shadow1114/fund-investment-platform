@@ -70,6 +70,10 @@ class _SeededFundRepository(FundRepository):
                 }
         return super().get(identifier)
 
+    def read_detail(self, identifier: str, **filters: object) -> Mapping[str, object]:
+        assert filters in ({"as_of_date": "2025-01-31"}, {"as_of_date": None})
+        return self.get(identifier)
+
     def read_nav_series(self, identifier: str, **filters: object) -> Mapping[str, object]:
         assert identifier == "fund-1"
         assert filters == {
@@ -104,9 +108,7 @@ class _SeededFundRepository(FundRepository):
 def _client(repository: FundRepository) -> TestClient:
     app = create_app()
     repositories = ApiRepositories.from_session(object())
-    app.dependency_overrides[get_api_repositories] = lambda: replace(
-        repositories, funds=repository
-    )
+    app.dependency_overrides[get_api_repositories] = lambda: replace(repositories, funds=repository)
     return TestClient(app)
 
 
@@ -159,6 +161,18 @@ def test_fund_list_filters_paginates_and_breaks_name_ties_by_fund_id() -> None:
     }
 
 
+def test_fund_list_parses_comma_delimited_multi_value_filters() -> None:
+    """Treating an explode=false value as one enum would discard valid fund types."""
+    repository = _SeededFundRepository()
+
+    response = _client(repository).get("/api/v1/funds?fund_type=EQUITY%2CBOND")
+
+    assert response.status_code == 200
+    assert [row["fund_id"] for row in response.json()["data"]] == ["fund-1", "fund-2", "fund-3"]
+    assert repository.list_filters is not None
+    assert repository.list_filters["fund_type"] == ("EQUITY", "BOND")
+
+
 def test_fund_detail_and_related_reads_delegate_to_seeded_repository() -> None:
     """Replacing repository reads with placeholder payloads would lose its versions and data."""
     client = _client(_SeededFundRepository())
@@ -196,11 +210,25 @@ def test_fund_routes_reject_invalid_dates_and_enums_and_not_found_ids() -> None:
 
     assert client.get("/api/v1/funds", params={"as_of_date": "not-a-date"}).status_code == 422
     assert (
-        client.get("/api/v1/funds", params={"lifecycle_status": "NOT_A_STATUS"}).status_code
-        == 422
+        client.get("/api/v1/funds", params={"lifecycle_status": "NOT_A_STATUS"}).status_code == 422
     )
     assert (
         client.get("/api/v1/funds/fund-1/nav-series", params={"nav_type": "LATEST"}).status_code
         == 422
     )
     assert client.get("/api/v1/funds/missing").status_code == 404
+
+
+def test_fund_list_rejects_unsupported_sort_and_impossible_ranges() -> None:
+    """Silently changing an invalid query to a name sort makes pagination non-reproducible."""
+    client = _client(_SeededFundRepository())
+
+    assert client.get("/api/v1/funds", params={"sort": "total_score"}).status_code == 422
+    assert (
+        client.get(
+            "/api/v1/funds",
+            params={"inception_date_from": "2021-01-01", "inception_date_to": "2020-01-01"},
+        ).status_code
+        == 422
+    )
+    assert client.get("/api/v1/funds", params={"aum_min": 3, "aum_max": 2}).status_code == 422

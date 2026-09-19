@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
+from fip.api.errors import InvalidQueryError
 from fip.api.fund_queries import FundQueries
 from fip.api.repositories import ApiRepositories
 from fip.api.universe_queries import UniverseQueries
@@ -41,6 +42,17 @@ def _page_meta(page: int, page_size: int, total: int) -> dict[str, Any]:
     }
 
 
+def _multi_values(
+    values: list[str] | None, *, name: str, allowed: set[str] | None = None
+) -> tuple[str, ...] | None:
+    if values is None:
+        return None
+    parsed = tuple(item for value in values for item in value.split(",") if item)
+    if not parsed or (allowed is not None and not set(parsed) <= allowed):
+        raise InvalidQueryError(f"Invalid {name}")
+    return parsed
+
+
 @router.get("/session", operation_id="getSession")
 def get_session(request: Request) -> dict[str, Any]:
     principal = principal_from_request(request)
@@ -59,39 +71,58 @@ def list_funds(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    sort: str | None = None,
+    sort: Literal["fund_name", "inception_date", "aum"] | None = None,
     order: Literal["asc", "desc"] = "asc",
     as_of_date: date | None = None,
     fund_name: str | None = None,
     fund_type: list[str] | None = Query(None),
     management_company_id: str | None = None,
     manager_id: str | None = None,
-    lifecycle_status: list[
-        Literal[
-            "NORMAL",
-            "SUSPENDED_SUBSCRIPTION",
-            "LIQUIDATED",
-            "MERGED",
-            "TRANSFORMED",
-            "UNKNOWN",
-        ]
-    ] | None = Query(None),
-    investment_eligibility: list[
-        Literal["FULLY_ELIGIBLE", "HOLD_ONLY", "LIMITED", "EXIT_ONLY", "NOT_TRADABLE", "UNKNOWN"]
-    ] | None = Query(None),
+    lifecycle_status: list[str] | None = Query(None),
+    investment_eligibility: list[str] | None = Query(None),
     inception_date_from: date | None = None,
     inception_date_to: date | None = None,
     aum_min: float | None = None,
     aum_max: float | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
+    if (
+        inception_date_from is not None
+        and inception_date_to is not None
+        and inception_date_from > inception_date_to
+    ):
+        raise InvalidQueryError("inception_date_from must not be after inception_date_to")
+    if aum_min is not None and aum_max is not None and aum_min > aum_max:
+        raise InvalidQueryError("aum_min must not be greater than aum_max")
     result = FundQueries(repository.funds).list(
         fund_name=fund_name,
-        fund_type=fund_type,
+        fund_type=_multi_values(fund_type, name="fund_type"),
         management_company_id=management_company_id,
         manager_id=manager_id,
-        lifecycle_status=lifecycle_status,
-        investment_eligibility=investment_eligibility,
+        lifecycle_status=_multi_values(
+            lifecycle_status,
+            name="lifecycle_status",
+            allowed={
+                "NORMAL",
+                "SUSPENDED_SUBSCRIPTION",
+                "LIQUIDATED",
+                "MERGED",
+                "TRANSFORMED",
+                "UNKNOWN",
+            },
+        ),
+        investment_eligibility=_multi_values(
+            investment_eligibility,
+            name="investment_eligibility",
+            allowed={
+                "FULLY_ELIGIBLE",
+                "HOLD_ONLY",
+                "LIMITED",
+                "EXIT_ONLY",
+                "NOT_TRADABLE",
+                "UNKNOWN",
+            },
+        ),
         inception_date_from=inception_date_from,
         inception_date_to=inception_date_to,
         aum_min=aum_min,
