@@ -59,7 +59,11 @@ def create_app(*, persistent_operations: bool = False) -> FastAPI:
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
         body = ErrorEnvelope(
-            error=ErrorBody(code=exc.code, message=exc.message, details=exc.details),
+            error=ErrorBody(
+                code=exc.code,
+                message=exc.message,
+                details=exc.details if isinstance(exc.details, dict) else {},
+            ),
             meta=ResponseMeta(request_id=getattr(request.state, "request_id", None)),
         )
         return JSONResponse(status_code=exc.status_code, content=body.model_dump(mode="json"))

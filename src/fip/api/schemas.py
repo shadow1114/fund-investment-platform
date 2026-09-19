@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,7 +26,14 @@ class ResponseMetaModel(BaseModel):
     versions: dict[str, str]
     is_point_in_time: bool
     availability_quality_distribution: dict[str, float]
-    pagination: dict[str, int] | None = None
+    pagination: PaginationModel | None = None
+
+
+class PaginationModel(StrictModel):
+    page: int
+    page_size: int
+    total_items: int
+    total_pages: int
 
 
 class EmptyErrorModel(BaseModel):
@@ -96,7 +103,7 @@ class DataCompleteness(StrictModel):
 class SuccessEnvelopeModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: Any
+    data: dict[str, object] | list[dict[str, object]]
     meta: ResponseMetaModel
     error: None = None
 

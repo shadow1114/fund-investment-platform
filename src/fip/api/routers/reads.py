@@ -7,10 +7,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from fip.api.context import principal_from_request
+from fip.api.auth import get_principal
+from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
-from fip.api.errors import ConflictError, InvalidQueryError
+from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError
 from fip.api.fund_queries import FundQueries
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
@@ -59,7 +60,7 @@ def _multi_values(
 
 @router.get("/session", operation_id="getSession", response_model=ReadEnvelopeModel)
 def get_session(request: Request) -> dict[str, Any]:
-    principal = principal_from_request(request)
+    principal = get_principal(request)
     return success(
         {
             "user_id": principal.user_id,
@@ -164,8 +165,8 @@ def list_portfolios(
     sort: Literal["portfolio_name"] | None = None,
     order: Literal["asc", "desc"] = "asc",
     repository: ApiRepositories = Depends(get_repository),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
-    principal = principal_from_request(request)
     rows, meta = PortfolioQueries(repository.portfolios).list(
         principal=principal, page=page, page_size=page_size, sort=sort, order=order
     )
@@ -258,10 +259,11 @@ def get_portfolio(
     id: str,
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     return success(
         PortfolioQueries(repository.portfolios).detail(
-            id, principal=principal_from_request(request)
+            id, principal=principal
         ),
         request_id=_request_id(request),
     )
@@ -298,8 +300,12 @@ def get_decision(
     decision_id: str,
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     data = DecisionQueries(repository.decisions).detail(decision_id)
+    owner_id = data.get("owner_id") if isinstance(data, Mapping) else None
+    if owner_id and owner_id != principal.user_id and "Administrator" not in principal.roles:
+        raise ForbiddenError()
     provenance = data.pop("_meta", {})
     provenance_map = provenance if isinstance(provenance, Mapping) else {}
     return success(

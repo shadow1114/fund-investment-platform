@@ -4,16 +4,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Body, Request, status
+from fastapi import APIRouter, Body, Depends, Request, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from fip.api.auth import get_principal
 from fip.api.command_services import (
     DecisionCommandService,
     validate_backtest_configuration,
     validate_optimization_request,
 )
-from fip.api.context import principal_from_request
+from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import OperationRegistry, PersistentOperationService
@@ -208,8 +209,8 @@ def review_decision(
     decision_id: str,
     request: Request,
     payload: dict[str, Any] = Body(...),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
-    principal = principal_from_request(request)
     if not principal.can_review_decisions:
         raise ForbiddenError()
     session = (
@@ -224,6 +225,13 @@ def review_decision(
             snapshot = session.get(DecisionRecord, decision_id)
             if snapshot is None:
                 raise NotFoundError("decision", decision_id)
+            owner_id = snapshot.payload.get("owner_id")
+            if (
+                owner_id
+                and owner_id != principal.user_id
+                and "Administrator" not in principal.roles
+            ):
+                raise ForbiddenError()
             original_weights = snapshot.payload.get("proposed_weights", [])
         final_weights: Any = (
             payload.get("overridden_weights")

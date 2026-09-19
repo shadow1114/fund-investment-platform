@@ -29,7 +29,7 @@ class ErrorBody(BaseModel):
 
     code: str
     message: str
-    details: dict[str, Any] | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ErrorEnvelope(BaseModel):
