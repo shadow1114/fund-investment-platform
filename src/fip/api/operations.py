@@ -6,6 +6,12 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from fip.platform.jobs.models import CalculationJob
+from fip.platform.jobs.submitter import JobSubmitter
+
 
 @dataclass
 class OperationRecord:
@@ -40,3 +46,39 @@ class OperationRegistry:
 
     def get(self, operation_id: str) -> OperationRecord | None:
         return self._by_id.get(operation_id)
+
+
+class PersistentOperationService:
+    """PostgreSQL-backed operation adapter used by command and polling routes."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def submit(
+        self, kind: str, resource_id: str, idempotency_key: str, *, decision_id: str | None = None
+    ) -> OperationRecord:
+        job = JobSubmitter(self._session).submit(
+            job_type=kind, idempotency_key=idempotency_key, decision_id=decision_id
+        )
+        self._session.commit()
+        return self._record(job, resource_id)
+
+    def get(self, operation_id: str) -> OperationRecord | None:
+        job = self._session.execute(
+            select(CalculationJob).where(CalculationJob.execution_id == operation_id)
+        ).scalar_one_or_none()
+        return None if job is None else self._record(job, job.decision_id or "")
+
+    @staticmethod
+    def _record(job: CalculationJob, resource_id: str) -> OperationRecord:
+        error = None
+        if job.error_code or job.error_detail:
+            error = {"code": job.error_code, "message": job.error_detail}
+        return OperationRecord(
+            operation_id=job.execution_id,
+            kind=job.job_type,
+            resource_id=resource_id,
+            status=job.status,
+            error=error,
+            created_at=job.created_at,
+        )
