@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type {
   Decision,
+  DecisionReviewOutcomeEnvelope,
   DecisionReviewRequest,
   DecisionReviewRequestAction,
   Weight,
@@ -25,6 +26,8 @@ const parseWeights = (input: string): Weight[] =>
 
 type Props = {
   decision: Decision;
+  reviewResult?: DecisionReviewOutcomeEnvelope;
+  reviewAction?: DecisionReviewRequestAction;
   canReview: boolean;
   pending: boolean;
   error: unknown;
@@ -33,6 +36,8 @@ type Props = {
 
 export const DecisionReviewPanel = ({
   decision,
+  reviewResult,
+  reviewAction,
   canReview,
   pending,
   error,
@@ -60,11 +65,30 @@ export const DecisionReviewPanel = ({
   return (
     <section aria-label="决策复核">
       <h2>决策复核</h2>
-      <p>决策状态：{decision.decision_status}</p>
+      <p>
+        决策状态：
+        {reviewResult?.data.decision_status ?? decision.decision_status}
+      </p>
       <WeightExplainChain
-        proposedWeights={decision.proposed_weights}
-        finalWeights={decision.final_weights}
-        review={decision.review}
+        originalWeights={
+          reviewResult?.data.original_weights ?? decision.proposed_weights
+        }
+        finalWeights={
+          reviewResult
+            ? reviewResult.data.final_weights
+            : decision.final_weights
+        }
+        review={
+          reviewResult && reviewAction
+            ? {
+                action: reviewAction,
+                reason: reviewResult.data.reason,
+                reviewed_by: reviewResult.data.reviewed_by,
+                reviewed_at: reviewResult.data.reviewed_at,
+              }
+            : decision.review
+        }
+        auditId={reviewResult?.meta.audit_id}
       />
       {canReview && (
         <fieldset>

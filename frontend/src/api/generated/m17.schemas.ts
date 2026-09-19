@@ -889,6 +889,40 @@ export interface DecisionEnvelope {
   error: EmptyError;
 }
 
+export type DecisionReviewOutcomeDecisionStatus =
+  (typeof DecisionReviewOutcomeDecisionStatus)[keyof typeof DecisionReviewOutcomeDecisionStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const DecisionReviewOutcomeDecisionStatus = {
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+  OVERRIDDEN: "OVERRIDDEN",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
+export type DecisionReviewOutcomeFinalWeights = Weight[] | null;
+
+export interface DecisionReviewOutcome {
+  decision_id: string;
+  decision_status: DecisionReviewOutcomeDecisionStatus;
+  reviewed_by: string;
+  reviewed_at: string;
+  reason: string;
+  original_weights: Weight[];
+  final_weights: DecisionReviewOutcomeFinalWeights;
+}
+
+export type DecisionReviewOutcomeEnvelopeMeta = {
+  audit_id: string;
+  request_id?: string;
+};
+
+export interface DecisionReviewOutcomeEnvelope {
+  data: DecisionReviewOutcome;
+  meta: DecisionReviewOutcomeEnvelopeMeta;
+  error: EmptyError;
+}
+
 export type DecisionMetaAllOf = {
   versions: VersionReferences;
   is_point_in_time: boolean;
@@ -1564,6 +1598,11 @@ export type OptimizationResponseResponse = OptimizationEnvelope;
  * Immutable decision snapshot.
  */
 export type DecisionResponseResponse = DecisionEnvelope;
+
+/**
+ * Completed decision review with original and final weights.
+ */
+export type DecisionReviewResponseResponse = DecisionReviewOutcomeEnvelope;
 
 /**
  * Created backtest.

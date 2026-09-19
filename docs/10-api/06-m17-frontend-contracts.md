@@ -77,7 +77,7 @@
 | `final_weights` | 未形成可执行决策时为 `null`；Override 时与 `proposed_weights` 分开返回 |
 | `meta.versions`、`meta.is_point_in_time` | 按 `01-api-overview.md` §5.2、§11.4 返回完整版本引用与 PIT 标记 |
 
-复核写入仍使用 `04-portfolio-api.md` §4.8：`APPROVED` / `REJECTED` / `OVERRIDDEN`；Override 的 `reason` 必填，且需返回前后权重。业务执行失败必须依原契约通过业务状态表达，不可由前端把 HTTP 任务完成等同于决策获批。
+复核写入仍使用 `04-portfolio-api.md` §4.8：`APPROVED` / `REJECTED` / `OVERRIDDEN`；Override 的 `reason` 必填。`POST /api/v1/decisions/{decision_id}/review` 的 200 响应沿用该文档 §7.3 的独立结构：`data` 含 `decision_id`、`decision_status`、顶层 `reviewed_by` / `reviewed_at` / `reason`、`original_weights`、`final_weights`，`meta` 含 `audit_id`；不可按 GET 的 `Decision` 快照结构解析。业务执行失败必须依原契约通过业务状态表达，不可由前端把 HTTP 任务完成等同于决策获批。
 
 ### 3.3 Operation 进度
 

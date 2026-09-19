@@ -16,6 +16,7 @@ import type {
   BacktestValidationResponseResponse,
   DecisionResponseResponse,
   DecisionReviewRequest,
+  DecisionReviewResponseResponse,
   ErrorResponseResponse,
   FundEvaluationResponseResponse,
   FundListResponseResponse,
@@ -785,7 +786,7 @@ export const getDecision = async (
 };
 
 export type reviewDecisionResponse200 = {
-  data: DecisionResponseResponse;
+  data: DecisionReviewResponseResponse;
   status: 200;
 };
 

@@ -18,6 +18,7 @@ import { OperationProgress } from "./OperationProgress";
 import { ProvenanceBar } from "./ProvenanceBar";
 import { ScoreExplainChain } from "./ScoreExplainChain";
 import { WeightExplainChain } from "./WeightExplainChain";
+import { DecisionReviewPanel } from "../features/portfolio/DecisionReviewPanel";
 
 const getOperationMock = vi.hoisted(() => vi.fn());
 
@@ -211,7 +212,12 @@ describe("cross-page semantics", () => {
             raw_value: null,
             status: "EXCLUDED",
             reason_code: "INSUFFICIENT_SAMPLE",
+            normalized_value: null,
+            exclusion_reason: "FACTOR_INEFFECTIVE",
             weight: 0.25,
+            weighted_contribution: 0,
+            original_weight: 0.35,
+            reallocated_to: [{ factor_id: "momentum", delta_weight: 0.1 }],
           },
         ]}
       />,
@@ -220,6 +226,31 @@ describe("cross-page semantics", () => {
     expect(screen.getByText("quality")).toBeVisible();
     expect(screen.getByText("不可用（INSUFFICIENT_SAMPLE）")).toBeVisible();
     expect(screen.getByText("25.00%")).toBeVisible();
+    expect(screen.getByText("FACTOR_INEFFECTIVE")).toBeVisible();
+    expect(screen.getByText("加权贡献：0.00")).toBeVisible();
+    expect(screen.getByText("momentum +10.00%")).toBeVisible();
+  });
+
+  it("shows normalized value and weighted contribution for usable factors", () => {
+    render(
+      <ScoreExplainChain
+        attribution={[
+          {
+            factor_id: "return",
+            raw_value: 1.24,
+            normalized_value: 87,
+            status: "VALID",
+            reason_code: null,
+            weight: 0.3333,
+            weighted_contribution: 29,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("归一化值：")).toBeVisible();
+    expect(screen.getByText("87")).toBeVisible();
+    expect(screen.getByText("加权贡献：29.00")).toBeVisible();
   });
 
   it("shows proposed and final weights with complete PM review details", () => {
@@ -236,7 +267,7 @@ describe("cross-page semantics", () => {
 
     render(
       <WeightExplainChain
-        proposedWeights={decision.proposed_weights}
+        originalWeights={decision.proposed_weights}
         finalWeights={decision.final_weights}
         review={decision.review}
       />,
@@ -255,12 +286,53 @@ describe("cross-page semantics", () => {
   it("renders an unreviewed decision without inventing final weights", () => {
     render(
       <WeightExplainChain
-        proposedWeights={[{ fund_id: "000001", weight: 0.15 }]}
+        originalWeights={[{ fund_id: "000001", weight: 0.15 }]}
         finalWeights={null}
         review={null}
       />,
     );
 
     expect(screen.getByText("尚未复核，无最终权重")).toBeVisible();
+  });
+
+  it("keeps a rejected review's null final weights even when the prior snapshot had weights", () => {
+    render(
+      <DecisionReviewPanel
+        decision={{
+          decision_id: "D-003",
+          portfolio_id: "P001",
+          optimization_id: "OPT-001",
+          decision_status: "APPROVED",
+          proposed_weights: [{ fund_id: "000001", weight: 0.6 }],
+          review: null,
+          final_weights: [{ fund_id: "000001", weight: 0.6 }],
+        }}
+        reviewResult={{
+          data: {
+            decision_id: "D-003",
+            decision_status: "REJECTED",
+            reviewed_by: "PM-1",
+            reviewed_at: "2026-09-17T08:00:00Z",
+            reason: "风险超限",
+            original_weights: [{ fund_id: "000001", weight: 0.6 }],
+            final_weights: null,
+          },
+          meta: { audit_id: "AUDIT-003" },
+          error: null,
+        }}
+        reviewAction="REJECTED"
+        canReview={false}
+        pending={false}
+        error={null}
+        onReview={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("复核后无可执行最终权重")).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "最终权重" })).queryByText(
+        "000001 60.00%",
+      ),
+    ).not.toBeInTheDocument();
   });
 });

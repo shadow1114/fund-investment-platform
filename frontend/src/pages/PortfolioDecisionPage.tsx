@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import type {
   Decision,
   DecisionMeta,
   DecisionReviewRequest,
+  DecisionReviewOutcomeEnvelope,
   OptimizationMeta,
   OptimizationRequest,
   Portfolio,
@@ -97,7 +98,6 @@ const PortfolioDetail = ({
   portfolioId: string;
   pollIntervalMs: number;
 }) => {
-  const queryClient = useQueryClient();
   const [operationId, setOperationId] = useState<string>();
   const [submittedOptimizationId, setSubmittedOptimizationId] =
     useState<string>();
@@ -181,15 +181,19 @@ const PortfolioDetail = ({
   });
 
   const reviewMutation = useMutation({
-    mutationFn: async (request: DecisionReviewRequest) =>
-      unwrapResponse(
-        await reviewDecision(decisionId ?? "", request),
-      ) as Decision,
-    onSuccess: (decision) => {
-      queryClient.setQueryData(queryKeys.decision(decision.decision_id), {
-        data: decision,
-        meta: decisionQuery.data?.meta,
-      });
+    mutationFn: async ({
+      reviewedDecisionId,
+      request,
+    }: {
+      reviewedDecisionId: string;
+      request: DecisionReviewRequest;
+    }): Promise<DecisionReviewOutcomeEnvelope> => {
+      const response = await reviewDecision(reviewedDecisionId, request);
+      return {
+        data: unwrapResponse(response, { requiredMeta: ["audit_id"] }),
+        meta: response.data.meta as DecisionReviewOutcomeEnvelope["meta"],
+        error: null,
+      };
     },
   });
 
@@ -197,7 +201,13 @@ const PortfolioDetail = ({
   if (portfolioQuery.isError)
     return <ErrorState error={portfolioQuery.error} />;
 
-  const decision = reviewMutation.data ?? decisionQuery.data?.data;
+  const decision = decisionQuery.data?.data;
+  const reviewIsCurrent =
+    reviewMutation.variables?.reviewedDecisionId === decisionId;
+  const reviewResult =
+    reviewIsCurrent && reviewMutation.data?.data.decision_id === decisionId
+      ? reviewMutation.data
+      : undefined;
   const canReview =
     sessionQuery.data?.capabilities.can_review_decisions === true;
 
@@ -249,7 +259,10 @@ const PortfolioDetail = ({
         </label>
         <button
           disabled={!decisionInput.trim()}
-          onClick={() => setDecisionId(decisionInput.trim())}
+          onClick={() => {
+            reviewMutation.reset();
+            setDecisionId(decisionInput.trim());
+          }}
         >
           加载决策
         </button>
@@ -267,11 +280,23 @@ const PortfolioDetail = ({
             <ProvenanceBar meta={provenanceMeta(decisionQuery.data.meta)} />
           )}
           <DecisionReviewPanel
+            key={decision.decision_id}
             decision={decision}
+            reviewResult={reviewResult}
+            reviewAction={
+              reviewIsCurrent
+                ? reviewMutation.variables?.request.action
+                : undefined
+            }
             canReview={canReview}
-            pending={reviewMutation.isPending}
-            error={reviewMutation.error}
-            onReview={(request) => reviewMutation.mutate(request)}
+            pending={reviewIsCurrent && reviewMutation.isPending}
+            error={reviewIsCurrent ? reviewMutation.error : null}
+            onReview={(request) =>
+              reviewMutation.mutate({
+                reviewedDecisionId: decision.decision_id,
+                request,
+              })
+            }
           />
         </>
       )}

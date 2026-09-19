@@ -244,7 +244,7 @@ paths:
               $ref: "#/components/schemas/DecisionReviewRequest"
       responses:
         "200":
-          $ref: "#/components/responses/DecisionResponse"
+          $ref: "#/components/responses/DecisionReviewResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /api/v1/backtests:
@@ -531,6 +531,12 @@ components:
               { schema: { $ref: "#/components/schemas/DecisionEnvelope" } },
           },
       }
+    DecisionReviewResponse:
+      description: Completed decision review with original and final weights.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DecisionReviewOutcomeEnvelope"
     BacktestCreatedResponse:
       {
         description: Created backtest.,
@@ -1515,6 +1521,43 @@ components:
       properties:
         data: { $ref: "#/components/schemas/Decision" }
         meta: { $ref: "#/components/schemas/DecisionMeta" }
+        error: { $ref: "#/components/schemas/EmptyError" }
+    DecisionReviewOutcome:
+      type: object
+      required:
+        [
+          decision_id,
+          decision_status,
+          reviewed_by,
+          reviewed_at,
+          reason,
+          original_weights,
+          final_weights,
+        ]
+      properties:
+        decision_id: { type: string }
+        decision_status:
+          { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN, UNKNOWN] }
+        reviewed_by: { type: string }
+        reviewed_at: { type: string, format: date-time }
+        reason: { type: string }
+        original_weights:
+          type: array
+          items: { $ref: "#/components/schemas/Weight" }
+        final_weights:
+          type: [array, "null"]
+          items: { $ref: "#/components/schemas/Weight" }
+    DecisionReviewOutcomeEnvelope:
+      type: object
+      required: [data, meta, error]
+      properties:
+        data: { $ref: "#/components/schemas/DecisionReviewOutcome" }
+        meta:
+          type: object
+          required: [audit_id]
+          properties:
+            audit_id: { type: string }
+            request_id: { type: string }
         error: { $ref: "#/components/schemas/EmptyError" }
     DecisionMeta:
       required: [versions, is_point_in_time]

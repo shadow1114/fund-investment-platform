@@ -5,10 +5,13 @@ import type {
   SeriesPoint,
 } from "../../api/generated/m17.schemas";
 
-const valid = (points: SeriesPoint[]) =>
-  points
-    .filter((point) => point.value_status === "VALID" && point.value !== null)
-    .map((point) => [point.date, Number(point.value)]);
+const chartPoints = (points: SeriesPoint[]) =>
+  points.map((point) => [
+    point.date,
+    point.value_status === "VALID" && point.value !== null
+      ? Number(point.value)
+      : null,
+  ]);
 
 export const BacktestPerformanceChart = ({
   performance,
@@ -16,17 +19,38 @@ export const BacktestPerformanceChart = ({
   performance: BacktestPerformance;
 }) => {
   const cumulative = performance.series.cumulative_return;
+  const allSeries: Array<{ label: string; points: SeriesPoint[] }> = [
+    { label: "组合净值", points: performance.series.portfolio_value },
+    { label: "组合累计收益", points: cumulative.portfolio },
+    { label: "基准累计收益", points: cumulative.benchmark },
+    ...(cumulative.equal_weight_baseline
+      ? [
+          {
+            label: "等权基线累计收益",
+            points: cumulative.equal_weight_baseline,
+          },
+        ]
+      : []),
+    { label: "回撤", points: performance.series.drawdown },
+    { label: "滚动夏普", points: performance.series.rolling_sharpe },
+    { label: "滚动超额收益", points: performance.series.rolling_excess_return },
+  ];
+  const unavailable = allSeries.flatMap(({ label, points }) =>
+    points
+      .filter((point) => point.value_status !== "VALID" || point.value === null)
+      .map((point) => ({ label, point })),
+  );
   const series = [
     {
       name: "组合",
       type: "line",
-      data: valid(cumulative.portfolio),
+      data: chartPoints(cumulative.portfolio),
       showSymbol: false,
     },
     {
       name: "基准",
       type: "line",
-      data: valid(cumulative.benchmark),
+      data: chartPoints(cumulative.benchmark),
       showSymbol: false,
     },
     ...(cumulative.equal_weight_baseline
@@ -34,7 +58,7 @@ export const BacktestPerformanceChart = ({
           {
             name: "等权基线",
             type: "line",
-            data: valid(cumulative.equal_weight_baseline),
+            data: chartPoints(cumulative.equal_weight_baseline),
             showSymbol: false,
           },
         ]
@@ -60,6 +84,19 @@ export const BacktestPerformanceChart = ({
             cumulative.equal_weight_baseline_status}
           ）
         </p>
+      )}
+      {unavailable.length > 0 && (
+        <section aria-label="不可用绩效点位">
+          <h3>不可用绩效点位</h3>
+          <ul>
+            {unavailable.map(({ label, point }) => (
+              <li key={`${label}-${point.date}`}>
+                {label} · {point.date} · {point.value_status} ·{" "}
+                {point.value_reason ?? "未提供原因"}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </section>
   );
