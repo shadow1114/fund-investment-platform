@@ -7,11 +7,16 @@ from fip.api.contracts import success
 from fip.api.errors import NotFoundError
 from fip.api.operations import PersistentOperationService
 from fip.api.routers.commands import registry
+from fip.api.schemas import OperationModel, TypedEnvelope
 
 router = APIRouter()
 
 
-@router.get("/operations/{operation_id}", operation_id="getOperation")
+@router.get(
+    "/operations/{operation_id}",
+    operation_id="getOperation",
+    response_model=TypedEnvelope[OperationModel],
+)
 def get_operation(operation_id: str, request: Request) -> dict[str, object]:
     session: Session | None = None
     if getattr(request.app.state, "persistent_operations", False):

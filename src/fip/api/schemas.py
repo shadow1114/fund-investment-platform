@@ -57,6 +57,14 @@ class BacktestRunModel(StrictModel):
     status: Literal["RUNNING", "UNKNOWN"]
 
 
+class OperationModel(StrictModel):
+    operation_id: str
+    status: str
+    progress: dict[str, Any]
+    result_ref: str | None
+    failure: dict[str, Any] | None
+
+
 class MetricTriple(StrictModel):
     value: float | None
     status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
