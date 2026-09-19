@@ -108,7 +108,7 @@ class ReadPayloadModel(BaseModel):
     blocks are validated at the HTTP boundary.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     fund_id: str | None = None
     universe_id: str | None = None
@@ -148,6 +148,41 @@ class ReadPayloadModel(BaseModel):
     target_weights: list[Weight] | None = None
     proposed_weights: list[Weight] | None = None
     final_weights: list[Weight] | None = None
+    started_at: datetime | None = None
+    nav_type: str | None = None
+    adjustment_convention: str | None = None
+    adjustment_rule_version: str | None = None
+    unavailable_count: int | None = None
+    date: str | None = None
+    nav: float | None = None
+    nav_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"] | None = None
+    nav_reason: str | None = None
+    owner_user_id: str | None = None
+    viewer_user_ids: list[str] | None = None
+    risk_profile: str | None = None
+    portfolio_benchmark: dict[str, object] | None = None
+    portfolio_rule_version: str | None = None
+    fund_name: str | None = None
+    fund_type: str | None = None
+    inception_date: str | None = None
+    aum: float | None = None
+    lifecycle_status: str | None = None
+    investment_eligibility: str | None = None
+    classification_version: str | None = None
+    manager_ids: list[str] | None = None
+    benchmark: dict[str, object] | None = None
+    fee_structure: list[dict[str, object]] | None = None
+    share_class: str | None = None
+    fund_classification: str | None = None
+    management_company_id: str | None = None
+    manager_id: str | None = None
+    evaluation_period: str | None = None
+    factor_results: list[dict[str, object]] | None = None
+    sub_scores: dict[str, object] | None = None
+    attribution: list[dict[str, object]] | None = None
+    total_score: float | None = None
+    total_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"] | None = None
+    total_score_reason: str | None = None
 
     @model_serializer(mode="wrap")
     def serialize_present_fields(self, handler):  # type: ignore[no-untyped-def]
