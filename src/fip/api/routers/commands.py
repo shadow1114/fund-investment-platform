@@ -27,9 +27,7 @@ def _submit_operation(
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         return (
-            PersistentOperationService(session).submit(
-                kind, resource_id, idempotency_key, decision_id=resource_id
-            ),
+            PersistentOperationService(session).submit(kind, resource_id, idempotency_key),
             session,
         )
     return registry.submit(kind, resource_id, idempotency_key), None

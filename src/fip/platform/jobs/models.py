@@ -17,8 +17,8 @@ class ExecutionStatus(StrEnum):
 
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
-    BLOCKED = "BLOCKED"      # Global 级数据质量阻断
-    FAILED = "FAILED"        # 系统故障
+    BLOCKED = "BLOCKED"  # Global 级数据质量阻断
+    FAILED = "FAILED"  # 系统故障
     CANCELLED = "CANCELLED"
 
 
@@ -43,6 +43,7 @@ class CalculationJob(Base):
     idempotency_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     job_type: Mapped[str] = mapped_column(String(64), nullable=False)
     decision_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     status: Mapped[str] = mapped_column(execution_status_enum, nullable=False)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -51,6 +52,8 @@ class CalculationJob(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )

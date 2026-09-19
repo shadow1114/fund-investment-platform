@@ -58,16 +58,19 @@ class PersistentOperationService:
         self, kind: str, resource_id: str, idempotency_key: str, *, decision_id: str | None = None
     ) -> OperationRecord:
         job = JobSubmitter(self._session).submit(
-            job_type=kind, idempotency_key=idempotency_key, decision_id=decision_id
+            job_type=kind,
+            idempotency_key=idempotency_key,
+            decision_id=decision_id,
+            resource_id=resource_id,
         )
         self._session.commit()
-        return self._record(job, resource_id)
+        return self._record(job, job.resource_id or resource_id)
 
     def get(self, operation_id: str) -> OperationRecord | None:
         job = self._session.execute(
             select(CalculationJob).where(CalculationJob.execution_id == operation_id)
         ).scalar_one_or_none()
-        return None if job is None else self._record(job, job.decision_id or "")
+        return None if job is None else self._record(job, job.resource_id or job.decision_id or "")
 
     @staticmethod
     def _record(job: CalculationJob, resource_id: str) -> OperationRecord:

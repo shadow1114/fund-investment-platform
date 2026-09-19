@@ -21,9 +21,7 @@ def decision_idempotency_key(ctx: DecisionExecutionContext) -> str:
     )
 
 
-def ingest_idempotency_key(
-    dataset: str, subject: str, date_from: dt.date, date_to: dt.date
-) -> str:
+def ingest_idempotency_key(dataset: str, subject: str, date_from: dt.date, date_to: dt.date) -> str:
     """灌数任务的幂等键，使长回补可断点续跑而不产生重复行。"""
     return f"ingest|{dataset}|{subject}|{date_from.isoformat()}|{date_to.isoformat()}"
 
@@ -41,6 +39,7 @@ class JobSubmitter:
         job_type: str,
         idempotency_key: str,
         decision_id: str | None = None,
+        resource_id: str | None = None,
     ) -> CalculationJob:
         """提交任务。相同幂等键的重复提交返回既有任务，不产生第二条记录。
 
@@ -52,9 +51,7 @@ class JobSubmitter:
         其他约束冲突），此时必须重新抛出，不能静默吞掉。
         """
         existing = self._session.execute(
-            select(CalculationJob).where(
-                CalculationJob.idempotency_key == idempotency_key
-            )
+            select(CalculationJob).where(CalculationJob.idempotency_key == idempotency_key)
         ).scalar_one_or_none()
         if existing is not None:
             return existing
@@ -64,6 +61,7 @@ class JobSubmitter:
             idempotency_key=idempotency_key,
             job_type=job_type,
             decision_id=decision_id,
+            resource_id=resource_id,
             status=ExecutionStatus.RUNNING.value,
             progress=0,
         )
@@ -73,9 +71,7 @@ class JobSubmitter:
                 self._session.flush()
         except IntegrityError:
             existing = self._session.execute(
-                select(CalculationJob).where(
-                    CalculationJob.idempotency_key == idempotency_key
-                )
+                select(CalculationJob).where(CalculationJob.idempotency_key == idempotency_key)
             ).scalar_one_or_none()
             if existing is None:
                 raise
