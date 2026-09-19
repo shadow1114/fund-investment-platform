@@ -52,6 +52,11 @@ class PortfolioRepository(RepositoryAdapter):
         super().__init__(session, "portfolio")
 
 
+class OptimizationRepository(RepositoryAdapter):
+    def __init__(self, session: object) -> None:
+        super().__init__(session, "optimization")
+
+
 class DecisionRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "decision")
@@ -69,6 +74,7 @@ class ApiRepositories:
     funds: FundRepository
     universes: UniverseRepository
     portfolios: PortfolioRepository
+    optimizations: OptimizationRepository
     decisions: DecisionRepository
     backtests: BacktestRepository
 
@@ -78,6 +84,7 @@ class ApiRepositories:
             funds=FundRepository(session),
             universes=UniverseRepository(session),
             portfolios=PortfolioRepository(session),
+            optimizations=OptimizationRepository(session),
             decisions=DecisionRepository(session),
             backtests=BacktestRepository(session),
         )
@@ -91,17 +98,24 @@ class ApiRepositories:
     def list_portfolios(self, **filters: object) -> list[dict[str, object]]:
         return self.portfolios.list(**filters)
 
+    def list(self, resource: str, **filters: object) -> list[dict[str, object]]:
+        return self._adapter(resource).list(**filters)
+
     def get(self, resource: str, identifier: str) -> Mapping[str, object]:
+        return self._adapter(resource).get(identifier)
+
+    def _adapter(self, resource: str) -> RepositoryAdapter:
         repository = {
             "fund": self.funds,
             "fund universe": self.universes,
             "portfolio": self.portfolios,
+            "optimization": self.optimizations,
             "decision": self.decisions,
             "backtest": self.backtests,
         }.get(resource)
         if repository is None:
-            raise NotFoundError(resource, identifier)
-        return repository.get(identifier)
+            raise NotFoundError(resource, resource)
+        return repository
 
 
 # Compatibility name for consumers that imported the initial read seam.  It is

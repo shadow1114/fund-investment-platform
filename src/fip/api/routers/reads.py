@@ -152,8 +152,10 @@ def get_optimization(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.get("optimization", optimization_id)
-    return success({}, request_id=_request_id(request))
+    return success(
+        dict(repository.optimizations.get(optimization_id)),
+        request_id=_request_id(request),
+    )
 
 
 @router.get("/decisions/{decision_id}", operation_id="getDecision")

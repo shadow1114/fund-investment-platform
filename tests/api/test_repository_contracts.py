@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -14,6 +15,7 @@ from fip.api.repositories import (
     BacktestRepository,
     DecisionRepository,
     FundRepository,
+    OptimizationRepository,
     PortfolioRepository,
     RepositoryAdapter,
     UniverseRepository,
@@ -43,6 +45,33 @@ class _FoundFundRepository(FundRepository):
         if identifier == "fund-1":
             return {"id": "fund-1", "name": "Alpha"}
         return None
+
+
+class _FoundRepository(RepositoryAdapter):
+    def __init__(self, session: object, resource: str, identifier: str) -> None:
+        super().__init__(session, resource)
+        self.identifier = identifier
+
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if identifier == self.identifier:
+            return {"id": identifier, "name": "Available"}
+        return None
+
+
+def _repositories_with_detail(resource: str, identifier: str) -> ApiRepositories:
+    session = object()
+    repositories = ApiRepositories.from_session(session)
+    assert isinstance(repositories.optimizations, OptimizationRepository)
+    adapter = _FoundRepository(session, resource, identifier)
+    replacements = {
+        "fund": {"funds": adapter},
+        "fund universe": {"universes": adapter},
+        "portfolio": {"portfolios": adapter},
+        "optimization": {"optimizations": adapter},
+        "decision": {"decisions": adapter},
+        "backtest": {"backtests": adapter},
+    }
+    return replace(repositories, **replacements[resource])  # type: ignore[arg-type]
 
 
 def test_list_rows_have_a_deterministic_id_tiebreaker() -> None:
@@ -147,6 +176,7 @@ def test_fund_detail_route_uses_the_injected_canonical_repository() -> None:
         funds=_FoundFundRepository(session),
         universes=UniverseRepository(session),
         portfolios=PortfolioRepository(session),
+        optimizations=OptimizationRepository(session),
         decisions=DecisionRepository(session),
         backtests=BacktestRepository(session),
     )
@@ -158,3 +188,39 @@ def test_fund_detail_route_uses_the_injected_canonical_repository() -> None:
 
     assert response.status_code == 200
     assert response.json()["data"] == {"id": "fund-1", "name": "Alpha"}
+
+
+@pytest.mark.parametrize(
+    ("path", "resource", "identifier"),
+    [
+        ("/api/v1/funds/fund-1", "fund", "fund-1"),
+        ("/api/v1/funds/fund-1/nav-series", "fund", "fund-1"),
+        ("/api/v1/funds/fund-1/evaluations", "fund", "fund-1"),
+        ("/api/v1/funds/fund-1/scores", "fund", "fund-1"),
+        ("/api/v1/fund-universes/universe-1", "fund universe", "universe-1"),
+        ("/api/v1/portfolios/portfolio-1", "portfolio", "portfolio-1"),
+        (
+            "/api/v1/portfolios/portfolio-1/optimizations/optimization-1",
+            "optimization",
+            "optimization-1",
+        ),
+        ("/api/v1/decisions/decision-1", "decision", "decision-1"),
+        ("/api/v1/backtests/backtest-1/status", "backtest", "backtest-1"),
+        ("/api/v1/backtests/backtest-1/result", "backtest", "backtest-1"),
+        ("/api/v1/backtests/backtest-1/performance", "backtest", "backtest-1"),
+        ("/api/v1/backtests/backtest-1/bias-check", "backtest", "backtest-1"),
+    ],
+)
+def test_detail_routes_use_the_request_scoped_repository_override(
+    path: str, resource: str, identifier: str
+) -> None:
+    """A direct NotFoundError bypass would make every case below return 404."""
+    app = api_app.create_app()
+    app.dependency_overrides[get_api_repositories] = lambda: _repositories_with_detail(
+        resource, identifier
+    )
+
+    with TestClient(app) as client:
+        response = client.get(path)
+
+    assert response.status_code == 200
