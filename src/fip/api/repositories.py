@@ -8,7 +8,7 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fip.api.errors import NotFoundError
+from fip.api.errors import InvalidQueryError, NotFoundError
 from fip.platform.decision_data.pit import resolve_visible_until
 from fip.services.data_service.models.fund import (
     Fund,
@@ -18,7 +18,9 @@ from fip.services.data_service.models.fund import (
     InvestmentEligibility,
 )
 from fip.services.data_service.models.market import FundNav
+from fip.services.data_service.repositories.benchmark import SqlBenchmarkPitRepository
 from fip.services.data_service.repositories.classification import SqlClassificationPitRepository
+from fip.services.data_service.repositories.fee import SqlFeePitRepository
 from fip.services.data_service.repositories.nav import SqlNavPitRepository
 from fip.services.factor_service.models import FactorRun, FactorValue
 from fip.services.fund_service.models import (
@@ -99,6 +101,14 @@ class FundRepository(RepositoryAdapter):
         classification = SqlClassificationPitRepository(
             self._session(), resolve_visible_until(view_date)
         ).current(fund.id)
+        benchmark = SqlBenchmarkPitRepository(
+            self._session(), resolve_visible_until(view_date)
+        ).resolve(
+            share_class.id, classification.classification_code if classification else "UNKNOWN"
+        )
+        fees = SqlFeePitRepository(self._session(), resolve_visible_until(view_date)).current(
+            share_class.id
+        )
         return {
             **summary,
             "classification_version": (
@@ -106,13 +116,28 @@ class FundRepository(RepositoryAdapter):
             ),
             "manager_ids": self._manager_ids(fund.id, view_date),
             "benchmark": {
-                "benchmark_id": "UNKNOWN",
+                "benchmark_id": str(benchmark.benchmark_id)
+                if benchmark.benchmark_id is not None
+                else "UNKNOWN",
                 "benchmark_name": "UNKNOWN",
                 "benchmark_type": "UNKNOWN",
-                "mapping_version": "UNKNOWN",
-                "components": None,
+                "mapping_version": benchmark.mapping_version or "UNKNOWN",
+                "components": [
+                    {"index_id": str(item.index_id), "weight": item.weight}
+                    for item in benchmark.components
+                ],
+                "status": benchmark.status,
             },
-            "fee_structure": [],
+            "fee_structure": [
+                {
+                    "expense_type": fee.fee_type,
+                    "expense_rate": fee.rate,
+                    "included_in_nav": "UNKNOWN",
+                    "included_in_backtest": False,
+                    "inclusion_source": fee.availability_quality,
+                }
+                for fee in fees
+            ],
         }
 
     def read_nav_series(
@@ -131,7 +156,7 @@ class FundRepository(RepositoryAdapter):
         start = _query_date(date_from) or share_class.inception_date or view_date
         end = _query_date(date_to) or view_date
         if end < start:
-            return {"data": {"fund_id": identifier, "points": []}, "meta": {}}
+            raise InvalidQueryError("date_from must not be after date_to")
         visible_until = resolve_visible_until(view_date)
         if nav_type == "ADJUSTED":
             points = SqlNavPitRepository(self._session(), visible_until).adjusted_nav_series(
@@ -199,6 +224,8 @@ class FundRepository(RepositoryAdapter):
         values = self._factor_values(
             evaluation.factor_run_id, share_class.id, evaluation_period, view_date
         )
+        factor_run = self._session().get(FactorRun, evaluation.factor_run_id)
+        peer_group = self._session().get(PeerGroupSnapshot, evaluation.peer_group_snapshot_id)
         period = evaluation_period or (values[0].window if values else "UNKNOWN")
         return {
             "data": {
@@ -221,7 +248,15 @@ class FundRepository(RepositoryAdapter):
                     for value in values
                 ],
             },
-            "meta": {"factor_version": "UNKNOWN"},
+            "meta": {
+                "peer_group_id": str(evaluation.peer_group_snapshot_id),
+                "peer_group_version": str(peer_group.policy_version_id)
+                if peer_group
+                else "UNKNOWN",
+                "evaluation_policy_version": str(evaluation.policy_version_id),
+                "factor_version": str(factor_run.metric_version_id) if factor_run else "UNKNOWN",
+                "data_version": str(factor_run.metric_version_id) if factor_run else "UNKNOWN",
+            },
         }
 
     def read_scores(
@@ -262,9 +297,18 @@ class FundRepository(RepositoryAdapter):
                 "total_score_status": score.status,
                 "total_score_reason": score.reason_code,
                 "attribution": [dict(item.detail) for item in attribution],
+                "sub_scores": {},
+                "data_completeness": score.data_completeness,
                 "score_status": score.status,
             },
-            "meta": {"scoring_policy_version": str(evaluation.policy_version_id)},
+            "meta": {
+                "peer_group_id": str(evaluation.peer_group_snapshot_id),
+                "peer_group_version": "UNKNOWN",
+                "scoring_policy_version": str(evaluation.policy_version_id),
+                "evaluation_policy_version": str(evaluation.policy_version_id),
+                "factor_version": "UNKNOWN",
+                "data_version": str(evaluation.policy_version_id),
+            },
         }
 
     def _summary(
@@ -286,6 +330,7 @@ class FundRepository(RepositoryAdapter):
             if classification
             else "UNKNOWN",
             "management_company_id": "UNKNOWN",
+            "manager_ids": self._manager_ids(fund.id, view_date),
             "inception_date": share_class.inception_date.isoformat()
             if share_class.inception_date
             else None,
