@@ -124,6 +124,30 @@ class ReadPayloadModel(BaseModel):
     selection_status: Literal["SELECTED", "REJECTED", "UNKNOWN"] | None = None
     metric_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"] | None = None
     data_completeness: DataCompleteness | None = None
+    id: str | None = None
+    name: str | None = None
+    user_id: str | None = None
+    roles: list[str] | None = None
+    capabilities: dict[str, bool] | None = None
+    portfolio_name: str | None = None
+    portfolio_type: str | None = None
+    base_currency: str | None = None
+    portfolio_version: str | None = None
+    strategy_id: str | None = None
+    decision_at: str | None = None
+    universe_strategy: str | None = None
+    member_count: int | None = None
+    eligibility_rules_version: str | None = None
+    scoring_policy_version: str | None = None
+    points: list[dict[str, object]] | None = None
+    members: list[dict[str, object]] | None = None
+    excluded: list[dict[str, object]] | None = None
+    progress: dict[str, object] | None = None
+    result: dict[str, object] | None = None
+    review: dict[str, object] | None = None
+    target_weights: list[Weight] | None = None
+    proposed_weights: list[Weight] | None = None
+    final_weights: list[Weight] | None = None
 
     @model_serializer(mode="wrap")
     def serialize_present_fields(self, handler):  # type: ignore[no-untyped-def]
