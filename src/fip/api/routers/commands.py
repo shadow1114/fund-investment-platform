@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Request, status
@@ -73,9 +74,11 @@ def submit_optimization(
 
 @router.post("/backtests", operation_id="createBacktest", status_code=status.HTTP_201_CREATED)
 def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    validate_backtest_configuration(payload)
     backtest_id = f"BT-{uuid.uuid4().hex[:12].upper()}"
     return success(
-        {"backtest_id": backtest_id, "status": "CREATED"}, request_id=_request_id(request)
+        {"backtest_id": backtest_id, "status": "CREATED", "created_at": datetime.now(UTC)},
+        request_id=_request_id(request),
     )
 
 

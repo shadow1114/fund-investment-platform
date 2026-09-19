@@ -52,10 +52,44 @@ class DecisionCommandService:
 
 
 def validate_backtest_configuration(payload: dict[str, Any]) -> dict[str, Any]:
-    required = {"start_date", "end_date", "universe_id"}
+    required = {
+        "strategy_id",
+        "start_date",
+        "end_date",
+        "initial_capital",
+        "backtest_mode",
+        "benchmark_id",
+        "rebalancing_policy_version",
+        "portfolio_rule_version",
+        "return_estimate_version",
+        "risk_model_version",
+        "eligibility_rules_version",
+        "transaction_cost_model_version",
+        "execution_price_rule",
+        "cash_return_assumption",
+        "infeasible_handling",
+    }
     missing = sorted(required - payload.keys())
     if missing:
         raise InvalidQueryError(f"Missing backtest fields: {', '.join(missing)}")
     if payload["start_date"] > payload["end_date"]:
         raise InvalidQueryError("start_date must not be after end_date")
-    return {"validation_status": "PASS", "errors": []}
+    from datetime import date
+
+    try:
+        start = date.fromisoformat(str(payload["start_date"]))
+        end = date.fromisoformat(str(payload["end_date"]))
+    except ValueError as error:
+        raise InvalidQueryError("start_date and end_date must be ISO dates") from error
+    if end < start:
+        raise InvalidQueryError("start_date must not be after end_date")
+    days = (end - start).days + 1
+    return {
+        "validation_result": "PASS",
+        "warm_up_end_date": start.isoformat(),
+        "effective_period": {"from": start.isoformat(), "to": end.isoformat()},
+        "in_sample_length_days": days,
+        "out_of_sample_length_days": 0,
+        "warnings": [],
+        "blocking_issues": [],
+    }
