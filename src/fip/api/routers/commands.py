@@ -74,7 +74,10 @@ def _key(request: Request) -> str:
     response_model=TypedEnvelope[OptimizationSubmissionModel],
 )
 def submit_optimization(
-    id: str, request: Request, payload: dict[str, Any] = Body(...)
+    id: str,
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     validate_optimization_request(payload)
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
@@ -85,8 +88,18 @@ def submit_optimization(
             session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": request_key}
             )
-            if session.get(PortfolioRecord, id) is None:
+            portfolio = session.get(PortfolioRecord, id)
+            if portfolio is None:
                 raise NotFoundError("portfolio", id)
+            if hasattr(portfolio, "owner_user_id"):
+                if (
+                    portfolio.owner_user_id != principal.user_id
+                    and principal.user_id not in portfolio.viewer_user_ids
+                    and not any(
+                        role.lower() in {"admin", "administrator"} for role in principal.roles
+                    )
+                ):
+                    raise ForbiddenError()
             existing_job = session.execute(
                 select(CalculationJob).where(CalculationJob.idempotency_key == request_key)
             ).scalar_one_or_none()

@@ -11,7 +11,7 @@ from fip.api.auth import get_principal
 from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
-from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError
+from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError, NotFoundError
 from fip.api.fund_queries import FundQueries
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
@@ -22,6 +22,27 @@ from fip.api.universe_queries import UniverseQueries
 # ruff: noqa: B008
 
 router = APIRouter()
+
+
+def _ensure_portfolio_visible(
+    repository: ApiRepositories, portfolio_id: str, principal: Principal
+) -> None:
+    try:
+        row = repository.portfolios.get(portfolio_id)
+    except NotFoundError:
+        if not isinstance(getattr(repository.portfolios, "session", None), Session):
+            return
+        raise
+    owner = row.get("owner_user_id")
+    viewers = row.get("viewer_user_ids", [])
+    if not isinstance(owner, str) or not isinstance(viewers, list):
+        if isinstance(getattr(repository.portfolios, "session", None), Session):
+            raise ForbiddenError()
+        return
+    if principal.user_id != owner and principal.user_id not in viewers and not any(
+        role.lower() in {"administrator", "admin"} for role in principal.roles
+    ):
+        raise ForbiddenError()
 
 
 def get_repository(
@@ -279,7 +300,9 @@ def get_optimization(
     optimization_id: str,
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
+    principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
+    _ensure_portfolio_visible(repository, id, principal)
     data = OptimizationQueries(repository.optimizations).detail(optimization_id, portfolio_id=id)
     provenance = data.pop("_meta", {})
     provenance_map = provenance if isinstance(provenance, Mapping) else {}
@@ -303,8 +326,10 @@ def get_decision(
     principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     data = DecisionQueries(repository.decisions).detail(decision_id)
-    owner_id = data.get("owner_id") if isinstance(data, Mapping) else None
-    if owner_id and owner_id != principal.user_id and "Administrator" not in principal.roles:
+    portfolio_id = data.get("portfolio_id") if isinstance(data, Mapping) else None
+    if isinstance(portfolio_id, str):
+        _ensure_portfolio_visible(repository, portfolio_id, principal)
+    elif isinstance(getattr(repository.decisions, "session", None), Session):
         raise ForbiddenError()
     provenance = data.pop("_meta", {})
     provenance_map = provenance if isinstance(provenance, Mapping) else {}

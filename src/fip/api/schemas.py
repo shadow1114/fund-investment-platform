@@ -121,3 +121,24 @@ class TypedEnvelope(BaseModel, Generic[T]):
 
 class ReadEnvelopeModel(SuccessEnvelopeModel):
     """Strict envelope used by read endpoints until each payload gets a dedicated model."""
+
+
+class FrozenReadPayload(StrictModel):
+    """Shared strict projection for read payloads; resource-specific keys are preserved."""
+
+    model_config = ConfigDict(extra="allow")
+
+    fund_id: str | None = None
+    universe_id: str | None = None
+    portfolio_id: str | None = None
+    optimization_id: str | None = None
+    decision_id: str | None = None
+    backtest_id: str | None = None
+    operation_id: str | None = None
+    status: str | None = None
+    validation_status: str | None = None
+    evaluation_status: str | None = None
+    score_status: str | None = None
+    selection_status: Literal["SELECTED", "REJECTED", "UNKNOWN"] | None = None
+    metric_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"] | None = None
+    data_completeness: DataCompleteness | None = None

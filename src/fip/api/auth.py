@@ -13,17 +13,12 @@ def authenticate_request(request: Request) -> Principal:
     """Resolve a principal; the development header mechanism is never production auth."""
     environment = os.getenv("FIP_ENV", "development").lower()
     if environment == "production":
-        # Production never trusts the development identity headers.  The
-        # deployment's auth middleware supplies a bearer subject in this
-        # explicit adapter until a full OIDC connector is installed.
-        authorization = request.headers.get("Authorization", "")
-        if not authorization.startswith("Bearer "):
-            raise AuthenticationError()
-        token_subject = authorization.removeprefix("Bearer ").strip()
-        if not token_subject:
-            raise AuthenticationError()
-        user_id, _, role_text = token_subject.partition("|")
-        raw_roles = role_text or "Researcher"
+        # Only verified upstream middleware may establish this state. Raw
+        # headers and bearer tokens are deliberately rejected here.
+        verified = getattr(request.state, "verified_principal", None)
+        if not isinstance(verified, Principal):
+            raise AuthenticationError("A verified identity is required")
+        return verified
     else:
         user_id = request.headers.get("X-User-ID", "development-user")
         raw_roles = request.headers.get("X-Roles", "Researcher")
