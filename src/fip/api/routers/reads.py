@@ -14,6 +14,7 @@ from fip.api.errors import ConflictError, InvalidQueryError
 from fip.api.fund_queries import FundQueries
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
+from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
@@ -56,7 +57,7 @@ def _multi_values(
     return parsed
 
 
-@router.get("/session", operation_id="getSession")
+@router.get("/session", operation_id="getSession", response_model=ReadEnvelopeModel)
 def get_session(request: Request) -> dict[str, Any]:
     principal = principal_from_request(request)
     return success(
@@ -69,7 +70,7 @@ def get_session(request: Request) -> dict[str, Any]:
     )
 
 
-@router.get("/funds", operation_id="listFunds")
+@router.get("/funds", operation_id="listFunds", response_model=ReadEnvelopeModel)
 def list_funds(
     request: Request,
     page: int = Query(1, ge=1),
@@ -139,7 +140,7 @@ def list_funds(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/fund-universes", operation_id="listUniverses")
+@router.get("/fund-universes", operation_id="listUniverses", response_model=ReadEnvelopeModel)
 def list_universes(
     request: Request,
     strategy_id: str | None = None,
@@ -155,7 +156,7 @@ def list_universes(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/portfolios", operation_id="listPortfolios")
+@router.get("/portfolios", operation_id="listPortfolios", response_model=ReadEnvelopeModel)
 def list_portfolios(
     request: Request,
     page: int = Query(1, ge=1),
@@ -171,7 +172,7 @@ def list_portfolios(
     return success(rows, request_id=_request_id(request), **meta)
 
 
-@router.get("/funds/{fund_id}", operation_id="getFund")
+@router.get("/funds/{fund_id}", operation_id="getFund", response_model=ReadEnvelopeModel)
 def get_fund(
     fund_id: str,
     request: Request,
@@ -182,7 +183,9 @@ def get_fund(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/funds/{fund_id}/nav-series", operation_id="getFundNavSeries")
+@router.get(
+    "/funds/{fund_id}/nav-series", operation_id="getFundNavSeries", response_model=ReadEnvelopeModel
+)
 def get_nav_series(
     fund_id: str,
     request: Request,
@@ -204,7 +207,11 @@ def get_nav_series(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/funds/{fund_id}/evaluations", operation_id="getFundEvaluations")
+@router.get(
+    "/funds/{fund_id}/evaluations",
+    operation_id="getFundEvaluations",
+    response_model=ReadEnvelopeModel,
+)
 def get_evaluations(
     fund_id: str,
     request: Request,
@@ -218,7 +225,9 @@ def get_evaluations(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/funds/{fund_id}/scores", operation_id="getFundScores")
+@router.get(
+    "/funds/{fund_id}/scores", operation_id="getFundScores", response_model=ReadEnvelopeModel
+)
 def get_scores(
     fund_id: str,
     request: Request,
@@ -232,7 +241,9 @@ def get_scores(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/fund-universes/{universe_id}", operation_id="getUniverse")
+@router.get(
+    "/fund-universes/{universe_id}", operation_id="getUniverse", response_model=ReadEnvelopeModel
+)
 def get_universe(
     universe_id: str,
     request: Request,
@@ -242,7 +253,7 @@ def get_universe(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
-@router.get("/portfolios/{id}", operation_id="getPortfolio")
+@router.get("/portfolios/{id}", operation_id="getPortfolio", response_model=ReadEnvelopeModel)
 def get_portfolio(
     id: str,
     request: Request,
@@ -256,7 +267,11 @@ def get_portfolio(
     )
 
 
-@router.get("/portfolios/{id}/optimizations/{optimization_id}", operation_id="getOptimization")
+@router.get(
+    "/portfolios/{id}/optimizations/{optimization_id}",
+    operation_id="getOptimization",
+    response_model=ReadEnvelopeModel,
+)
 def get_optimization(
     id: str,
     optimization_id: str,
@@ -276,7 +291,9 @@ def get_optimization(
     )
 
 
-@router.get("/decisions/{decision_id}", operation_id="getDecision")
+@router.get(
+    "/decisions/{decision_id}", operation_id="getDecision", response_model=ReadEnvelopeModel
+)
 def get_decision(
     decision_id: str,
     request: Request,
@@ -293,7 +310,9 @@ def get_decision(
     )
 
 
-@router.get("/backtests/{id}/status", operation_id="getBacktestStatus")
+@router.get(
+    "/backtests/{id}/status", operation_id="getBacktestStatus", response_model=ReadEnvelopeModel
+)
 def get_backtest_status(
     id: str,
     request: Request,
@@ -320,7 +339,9 @@ def get_backtest_status(
     )
 
 
-@router.get("/backtests/{id}/result", operation_id="getBacktestResult")
+@router.get(
+    "/backtests/{id}/result", operation_id="getBacktestResult", response_model=ReadEnvelopeModel
+)
 def get_backtest_result(
     id: str,
     request: Request,
@@ -385,7 +406,11 @@ def get_backtest_result(
     )
 
 
-@router.get("/backtests/{id}/performance", operation_id="getBacktestPerformance")
+@router.get(
+    "/backtests/{id}/performance",
+    operation_id="getBacktestPerformance",
+    response_model=ReadEnvelopeModel,
+)
 def get_backtest_performance(
     id: str,
     request: Request,
@@ -395,7 +420,11 @@ def get_backtest_performance(
     return success({}, request_id=_request_id(request))
 
 
-@router.get("/backtests/{id}/bias-check", operation_id="getBacktestBiasCheck")
+@router.get(
+    "/backtests/{id}/bias-check",
+    operation_id="getBacktestBiasCheck",
+    response_model=ReadEnvelopeModel,
+)
 def get_backtest_bias_check(
     id: str,
     request: Request,

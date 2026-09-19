@@ -21,6 +21,12 @@ class ResponseMetaModel(BaseModel):
     api_version: str = "v1"
     request_id: str | None = None
     generated_at: datetime
+    as_of_date: str
+    data_version: str
+    versions: dict[str, str]
+    is_point_in_time: bool
+    availability_quality_distribution: dict[str, float]
+    pagination: dict[str, int] | None = None
 
 
 class EmptyErrorModel(BaseModel):
@@ -59,10 +65,21 @@ class BacktestRunModel(StrictModel):
 
 class OperationModel(StrictModel):
     operation_id: str
-    status: str
-    progress: dict[str, Any]
+    status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED", "UNKNOWN"]
+    progress: OperationProgress | None
     result_ref: str | None
-    failure: dict[str, Any] | None
+    failure: OperationFailure | None
+
+
+class OperationProgress(StrictModel):
+    completed: int
+    total: int | None
+    unit: str
+
+
+class OperationFailure(StrictModel):
+    code: str
+    message: str
 
 
 class MetricTriple(StrictModel):
@@ -77,10 +94,10 @@ class DataCompleteness(StrictModel):
 
 
 class SuccessEnvelopeModel(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     data: Any
-    meta: dict[str, Any]
+    meta: ResponseMetaModel
     error: None = None
 
 
@@ -91,5 +108,9 @@ class TypedEnvelope(BaseModel, Generic[T]):
     model_config = ConfigDict(extra="forbid")
 
     data: T
-    meta: dict[str, Any]
+    meta: ResponseMetaModel
     error: None = None
+
+
+class ReadEnvelopeModel(SuccessEnvelopeModel):
+    """Strict envelope used by read endpoints until each payload gets a dedicated model."""

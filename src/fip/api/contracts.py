@@ -25,19 +25,24 @@ class SuccessEnvelope(BaseModel):
 
 
 class ErrorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     code: str
     message: str
-    details: Any | None = None
+    details: dict[str, Any] | None = None
 
 
 class ErrorEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     data: None = None
     error: ErrorBody
     meta: ResponseMeta
 
 
 def success(data: Any, *, request_id: str | None = None, **meta: Any) -> dict[str, Any]:
-    meta.setdefault("as_of_date", date.today().isoformat())
+    if meta.get("as_of_date") is None:
+        meta["as_of_date"] = date.today().isoformat()
     meta.setdefault("data_version", "api-v1")
     meta.setdefault("versions", {})
     meta.setdefault("is_point_in_time", False)
