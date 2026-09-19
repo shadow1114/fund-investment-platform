@@ -156,7 +156,7 @@ export const BacktestPage = ({ pollIntervalMs = 1000 }: Props) => {
   );
 
   return (
-    <main>
+    <section>
       <h1>回测</h1>
       <BacktestForm
         disabled={Boolean(backtestId)}
@@ -218,6 +218,6 @@ export const BacktestPage = ({ pollIntervalMs = 1000 }: Props) => {
         <BacktestPerformanceChart performance={performanceQuery.data} />
       )}
       {biasQuery.data && <BiasCheckPanel bias={biasQuery.data} />}
-    </main>
+    </section>
   );
 };

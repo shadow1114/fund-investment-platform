@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useSearchParams, useParams } from "react-router-dom";
 
 import {
   getDecision,
@@ -48,10 +48,13 @@ const provenanceMeta = (meta: ResponseMeta) => ({
 });
 
 const PortfolioIndex = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const pageSize = Math.max(1, Number(searchParams.get("page_size") || "20"));
   const query = useQuery({
-    queryKey: queryKeys.portfolios(),
+    queryKey: queryKeys.portfolios({ page, page_size: pageSize }),
     queryFn: async () => {
-      const response = await listPortfolios();
+      const response = await listPortfolios({ page, page_size: pageSize });
       return {
         data: unwrapResponse(response, {
           requiredMeta: ["versions", "is_point_in_time", "pagination"],
@@ -70,7 +73,41 @@ const PortfolioIndex = () => {
         <>
           <ProvenanceBar meta={provenanceMeta(query.data.meta)} />
           {query.data.data.length > 0 ? (
-            <PortfolioList portfolios={query.data.data} />
+            <>
+              <PortfolioList portfolios={query.data.data} />
+              <nav aria-label="组合列表分页">
+                <button
+                  disabled={query.data.meta.pagination.page <= 1}
+                  onClick={() =>
+                    setSearchParams({
+                      page: String(page - 1),
+                      page_size: String(pageSize),
+                    })
+                  }
+                >
+                  上一页
+                </button>
+                <span>
+                  第 {query.data.meta.pagination.page} /{" "}
+                  {query.data.meta.pagination.total_pages} 页，共{" "}
+                  {query.data.meta.pagination.total_items} 个组合
+                </span>
+                <button
+                  disabled={
+                    query.data.meta.pagination.page >=
+                    query.data.meta.pagination.total_pages
+                  }
+                  onClick={() =>
+                    setSearchParams({
+                      page: String(page + 1),
+                      page_size: String(pageSize),
+                    })
+                  }
+                >
+                  下一页
+                </button>
+              </nav>
+            </>
           ) : (
             <p>当前用户没有可见组合。</p>
           )}
