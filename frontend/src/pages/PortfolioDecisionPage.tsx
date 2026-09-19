@@ -297,8 +297,11 @@ const PortfolioDetail = ({
         <button
           disabled={!decisionInput.trim()}
           onClick={() => {
-            reviewMutation.reset();
-            setDecisionId(decisionInput.trim());
+            const nextDecisionId = decisionInput.trim();
+            // Reloading the same ID must not discard a successful POST review
+            // while the GET snapshot is still cached (and may be stale).
+            if (nextDecisionId !== decisionId) reviewMutation.reset();
+            setDecisionId(nextDecisionId);
           }}
         >
           加载决策

@@ -351,4 +351,23 @@ describe("PortfolioDecisionPage", () => {
     expect(requests[1].url.pathname).toBe("/api/v1/decisions/D-002/review");
     expect(requests[1].body).toEqual({ action: "APPROVED", reason: "复核 B" });
   });
+
+  it("keeps the current review outcome when reloading the same decision ID", async () => {
+    canReview = true;
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "稳健组合" });
+    await user.type(screen.getByLabelText("决策 ID"), "D-001");
+    await user.click(screen.getByRole("button", { name: "加载决策" }));
+    await screen.findByText("000001 60.00%");
+    await user.type(screen.getByLabelText("复核原因"), "复核后重新加载");
+    await user.click(screen.getByRole("button", { name: "批准" }));
+    await screen.findByText("审计 ID：AUDIT-001");
+
+    await user.click(screen.getByRole("button", { name: "加载决策" }));
+
+    expect(await screen.findByText("审计 ID：AUDIT-001")).toBeVisible();
+    expect(screen.getByText("复核人：USR-001")).toBeVisible();
+  });
 });
