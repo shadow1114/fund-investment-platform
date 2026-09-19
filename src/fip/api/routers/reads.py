@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
+from fip.api.fund_queries import FundQueries
 from fip.api.repositories import ApiRepositories
+from fip.api.universe_queries import UniverseQueries
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -57,23 +59,66 @@ def list_funds(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
+    sort: str | None = None,
+    order: Literal["asc", "desc"] = "asc",
+    as_of_date: date | None = None,
+    fund_name: str | None = None,
+    fund_type: list[str] | None = Query(None),
+    management_company_id: str | None = None,
+    manager_id: str | None = None,
+    lifecycle_status: list[
+        Literal[
+            "NORMAL",
+            "SUSPENDED_SUBSCRIPTION",
+            "LIQUIDATED",
+            "MERGED",
+            "TRANSFORMED",
+            "UNKNOWN",
+        ]
+    ] | None = Query(None),
+    investment_eligibility: list[
+        Literal["FULLY_ELIGIBLE", "HOLD_ONLY", "LIMITED", "EXIT_ONLY", "NOT_TRADABLE", "UNKNOWN"]
+    ] | None = Query(None),
+    inception_date_from: date | None = None,
+    inception_date_to: date | None = None,
+    aum_min: float | None = None,
+    aum_max: float | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    rows = repository.list_funds()
-    return success(rows, request_id=_request_id(request), **_page_meta(page, page_size, len(rows)))
+    result = FundQueries(repository.funds).list(
+        fund_name=fund_name,
+        fund_type=fund_type,
+        management_company_id=management_company_id,
+        manager_id=manager_id,
+        lifecycle_status=lifecycle_status,
+        investment_eligibility=investment_eligibility,
+        inception_date_from=inception_date_from,
+        inception_date_to=inception_date_to,
+        aum_min=aum_min,
+        aum_max=aum_max,
+        as_of_date=as_of_date,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        order=order,
+    )
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/fund-universes", operation_id="listUniverses")
 def list_universes(
-    request: Request, repository: ApiRepositories = Depends(get_repository)
+    request: Request,
+    strategy_id: str | None = None,
+    decision_at: date | None = None,
+    eligibility_rules_version: str | None = None,
+    repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    rows = repository.list_universes()
-    return success(
-        rows,
-        request_id=_request_id(request),
-        eligibility_rules_version="unknown",
-        scoring_policy_version=None,
+    result = UniverseQueries(repository.universes).list(
+        strategy_id=strategy_id,
+        decision_at=decision_at,
+        eligibility_rules_version=eligibility_rules_version,
     )
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/portfolios", operation_id="listPortfolios")
@@ -94,37 +139,58 @@ def get_fund(
     as_of_date: date | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    return success(dict(repository.funds.get(fund_id)), request_id=_request_id(request))
+    result = FundQueries(repository.funds).detail(fund_id, as_of_date=as_of_date)
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/funds/{fund_id}/nav-series", operation_id="getFundNavSeries")
 def get_nav_series(
     fund_id: str,
     request: Request,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    frequency: Literal["DAILY", "WEEKLY", "MONTHLY"] = "DAILY",
+    nav_type: Literal["ADJUSTED", "RAW"] = "ADJUSTED",
+    as_of_date: date | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.funds.get(fund_id)
-    return success([], request_id=_request_id(request))
+    result = FundQueries(repository.funds).nav_series(
+        fund_id,
+        date_from=date_from,
+        date_to=date_to,
+        frequency=frequency,
+        nav_type=nav_type,
+        as_of_date=as_of_date,
+    )
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/funds/{fund_id}/evaluations", operation_id="getFundEvaluations")
 def get_evaluations(
     fund_id: str,
     request: Request,
+    evaluation_period: Literal["1M", "3M", "6M", "1Y", "3Y", "5Y"] | None = None,
+    as_of_date: date | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.funds.get(fund_id)
-    return success({}, request_id=_request_id(request))
+    result = FundQueries(repository.funds).evaluations(
+        fund_id, evaluation_period=evaluation_period, as_of_date=as_of_date
+    )
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/funds/{fund_id}/scores", operation_id="getFundScores")
 def get_scores(
     fund_id: str,
     request: Request,
+    evaluation_period: Literal["1M", "3M", "6M", "1Y", "3Y", "5Y"] | None = None,
+    as_of_date: date | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.funds.get(fund_id)
-    return success({}, request_id=_request_id(request))
+    result = FundQueries(repository.funds).scores(
+        fund_id, evaluation_period=evaluation_period, as_of_date=as_of_date
+    )
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/fund-universes/{universe_id}", operation_id="getUniverse")
@@ -133,7 +199,8 @@ def get_universe(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    return success(dict(repository.universes.get(universe_id)), request_id=_request_id(request))
+    result = UniverseQueries(repository.universes).detail(universe_id)
+    return success(result.data, request_id=_request_id(request), **result.meta)
 
 
 @router.get("/portfolios/{id}", operation_id="getPortfolio")
