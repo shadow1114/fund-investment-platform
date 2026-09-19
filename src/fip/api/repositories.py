@@ -37,6 +37,7 @@ from fip.services.fund_service.models import (
     SelectionConditionRecord,
 )
 from fip.services.portfolio_service.models import (
+    BacktestRecord,
     DecisionRecord,
     OptimizationRecord,
     PortfolioRecord,
@@ -773,6 +774,14 @@ class DecisionRepository(RepositoryAdapter):
 class BacktestRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "backtest")
+
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if not isinstance(self.session, Session):
+            return super()._get_row(identifier)
+        item = self.session.get(BacktestRecord, identifier)
+        if item is None:
+            return None
+        return {"backtest_id": item.id, "status": item.status, **item.payload}
 
 
 @dataclass(frozen=True, slots=True)

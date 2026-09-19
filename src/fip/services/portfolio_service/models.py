@@ -40,3 +40,11 @@ class DecisionRecord(Base):
     portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.portfolio.id"), nullable=False)
     optimization_id: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class BacktestRecord(Base):
+    __tablename__ = "backtest"
+    __table_args__ = {"schema": "backtest"}
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

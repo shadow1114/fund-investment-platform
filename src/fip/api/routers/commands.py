@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 from fip.api.command_services import DecisionCommandService, validate_backtest_configuration
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
-from fip.api.errors import ForbiddenError
+from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import OperationRegistry, PersistentOperationService
-from fip.services.portfolio_service.models import DecisionRecord
+from fip.services.portfolio_service.models import BacktestRecord, DecisionRecord, OptimizationRecord
 
 # FastAPI's dependency/body declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -56,6 +56,19 @@ def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
+    if getattr(request.app.state, "persistent_operations", False):
+        session = Session(request.app.state.api_engine, future=True)
+        try:
+            session.add(
+                OptimizationRecord(
+                    id=optimization_id,
+                    portfolio_id=id,
+                    payload={"optimization_status": "UNKNOWN", "request": payload},
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
     record = _submit_operation(
         request,
         "optimization",
@@ -77,6 +90,13 @@ def submit_optimization(
 def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     validate_backtest_configuration(payload)
     backtest_id = f"BT-{uuid.uuid4().hex[:12].upper()}"
+    if getattr(request.app.state, "persistent_operations", False):
+        session = Session(request.app.state.api_engine, future=True)
+        try:
+            session.add(BacktestRecord(id=backtest_id, status="CREATED", payload=payload))
+            session.commit()
+        finally:
+            session.close()
     return success(
         {"backtest_id": backtest_id, "status": "CREATED", "created_at": datetime.now(UTC)},
         request_id=_request_id(request),
@@ -123,8 +143,9 @@ def review_decision(
         original_weights: Any = payload.get("proposed_weights", [])
         if session is not None:
             snapshot = session.get(DecisionRecord, decision_id)
-            if snapshot is not None:
-                original_weights = snapshot.payload.get("proposed_weights", [])
+            if snapshot is None:
+                raise NotFoundError("decision", decision_id)
+            original_weights = snapshot.payload.get("proposed_weights", [])
         final_weights: Any = (
             payload.get("overridden_weights")
             if action == "OVERRIDDEN"
@@ -142,6 +163,20 @@ def review_decision(
             _request_id(request),
         )
         if session is not None:
+            snapshot = session.get(DecisionRecord, decision_id)
+            if snapshot is None:
+                raise NotFoundError("decision", decision_id)
+            snapshot.payload = {
+                **snapshot.payload,
+                "decision_status": result["decision_status"],
+                "review": {
+                    "action": result["decision_status"],
+                    "reason": result["reason"],
+                    "reviewed_by": result["reviewed_by"],
+                    "reviewed_at": result["reviewed_at"],
+                },
+                "final_weights": result["final_weights"],
+            }
             session.commit()
     finally:
         if session is not None:
