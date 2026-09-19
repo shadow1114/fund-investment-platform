@@ -261,9 +261,14 @@ def get_optimization(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
+    data = OptimizationQueries(repository.optimizations).detail(optimization_id, portfolio_id=id)
     return success(
-        OptimizationQueries(repository.optimizations).detail(optimization_id, portfolio_id=id),
+        data,
         request_id=_request_id(request),
+        portfolio_rule_version=str(data.get("portfolio_rule_version", "UNKNOWN")),
+        return_estimate_version=str(data.get("return_estimate_version", "UNKNOWN")),
+        risk_model_version=str(data.get("risk_model_version", "UNKNOWN")),
+        code_version=str(data.get("code_version", "UNKNOWN")),
     )
 
 
@@ -273,8 +278,12 @@ def get_decision(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
+    data = DecisionQueries(repository.decisions).detail(decision_id)
     return success(
-        DecisionQueries(repository.decisions).detail(decision_id), request_id=_request_id(request)
+        data,
+        request_id=_request_id(request),
+        versions=data.get("versions", {}),
+        is_point_in_time=bool(data.get("is_point_in_time", False)),
     )
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Protocol
 
+from sqlalchemy.orm import Session
+
 from fip.api.context import Principal
 from fip.api.errors import NotFoundError
 
@@ -61,11 +63,20 @@ class PortfolioQueries:
 
     def detail(self, identifier: str, *, principal: Principal) -> dict[str, object]:
         row = self.repository.get(identifier)
-        if set(row) <= {"id", "name"}:
+        if not isinstance(getattr(self.repository, "session", None), Session):
             return dict(row)
         if not _visible(row, principal):
             raise NotFoundError("portfolio", identifier)
         result = _summary(row)
+        benchmark = result["portfolio_benchmark"]
+        if not isinstance(benchmark, Mapping) or not {
+            "benchmark_id",
+            "benchmark_name",
+            "benchmark_type",
+            "mapping_version",
+            "components",
+        } <= set(benchmark):
+            raise NotFoundError("portfolio", identifier)
         result.update(
             {
                 "risk_profile": row.get("risk_profile", "UNKNOWN"),

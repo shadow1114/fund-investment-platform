@@ -27,6 +27,7 @@ from fip.services.data_service.models import (
 )
 from fip.services.factor_service import models as factor_service_models  # noqa: F401
 from fip.services.fund_service import models as fund_service_models  # noqa: F401
+from fip.services.portfolio_service import models as portfolio_models  # noqa: F401
 from fip.services.portfolio_service.estimation import models as estimation_models  # noqa: F401
 from fip.settings import settings
 
