@@ -26,9 +26,12 @@ def _submit_operation(
 ) -> tuple[Any, Session | None]:
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
-        return PersistentOperationService(session).submit(
-            kind, resource_id, idempotency_key
-        ), session
+        return (
+            PersistentOperationService(session).submit(
+                kind, resource_id, idempotency_key, decision_id=resource_id
+            ),
+            session,
+        )
     return registry.submit(kind, resource_id, idempotency_key), None
 
 
