@@ -338,6 +338,7 @@ def get_backtest_result(
         "validation_status",
         "backtest_mode",
         "period",
+        "initial_capital",
         "final_value",
         "summary",
         "excess_return",
