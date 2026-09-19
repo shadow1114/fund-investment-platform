@@ -10,6 +10,7 @@ from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
 from fip.api.errors import InvalidQueryError
 from fip.api.fund_queries import FundQueries
+from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
 from fip.api.universe_queries import UniverseQueries
 
@@ -157,10 +158,15 @@ def list_portfolios(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
+    sort: Literal["portfolio_name"] | None = None,
+    order: Literal["asc", "desc"] = "asc",
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    rows = repository.list_portfolios()
-    return success(rows, request_id=_request_id(request), **_page_meta(page, page_size, len(rows)))
+    principal = principal_from_request(request)
+    rows, meta = PortfolioQueries(repository.portfolios).list(
+        principal=principal, page=page, page_size=page_size, sort=sort, order=order
+    )
+    return success(rows, request_id=_request_id(request), **meta)
 
 
 @router.get("/funds/{fund_id}", operation_id="getFund")
@@ -240,7 +246,12 @@ def get_portfolio(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    return success(dict(repository.portfolios.get(id)), request_id=_request_id(request))
+    return success(
+        PortfolioQueries(repository.portfolios).detail(
+            id, principal=principal_from_request(request)
+        ),
+        request_id=_request_id(request),
+    )
 
 
 @router.get("/portfolios/{id}/optimizations/{optimization_id}", operation_id="getOptimization")
@@ -251,7 +262,7 @@ def get_optimization(
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
     return success(
-        dict(repository.optimizations.get(optimization_id)),
+        OptimizationQueries(repository.optimizations).detail(optimization_id),
         request_id=_request_id(request),
     )
 
@@ -262,7 +273,9 @@ def get_decision(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    return success(dict(repository.decisions.get(decision_id)), request_id=_request_id(request))
+    return success(
+        DecisionQueries(repository.decisions).detail(decision_id), request_id=_request_id(request)
+    )
 
 
 @router.get("/backtests/{id}/status", operation_id="getBacktestStatus")
