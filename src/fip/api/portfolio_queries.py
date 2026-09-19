@@ -88,6 +88,28 @@ class OptimizationQueries:
             and row["portfolio_id"] != portfolio_id
         ):
             raise NotFoundError("optimization", identifier)
+        if "optimization_id" in row:
+            return {
+                "optimization_id": row["optimization_id"],
+                "optimization_status": row.get("optimization_status", "UNKNOWN"),
+                "target_weights": row.get("target_weights"),
+                "objective_value": row.get("objective_value"),
+                "objective_value_status": row.get("objective_value_status", "UNKNOWN"),
+                "objective_value_reason": row.get("objective_value_reason"),
+                "binding_constraints": row.get("binding_constraints", []),
+                "conflicting_constraints": row.get("conflicting_constraints", []),
+                "shadow_prices": row.get("shadow_prices", {}),
+                "post_optimization_risk": row.get(
+                    "post_optimization_risk",
+                    {
+                        "portfolio_volatility": None,
+                        "portfolio_volatility_status": "UNKNOWN",
+                        "portfolio_volatility_reason": "NOT_DECLARED",
+                    },
+                ),
+                "excluded_candidates": row.get("excluded_candidates", []),
+                "solve_path": row.get("solve_path", "UNKNOWN"),
+            }
         return row
 
 
@@ -96,4 +118,15 @@ class DecisionQueries:
         self.repository = repository
 
     def detail(self, identifier: str) -> dict[str, object]:
-        return dict(self.repository.get(identifier))
+        row = dict(self.repository.get(identifier))
+        if "decision_id" in row:
+            return {
+                "decision_id": row["decision_id"],
+                "portfolio_id": row.get("portfolio_id", "UNKNOWN"),
+                "optimization_id": row.get("optimization_id", "UNKNOWN"),
+                "decision_status": row.get("decision_status", "UNKNOWN"),
+                "proposed_weights": row.get("proposed_weights", []),
+                "review": row.get("review"),
+                "final_weights": row.get("final_weights"),
+            }
+        return row
