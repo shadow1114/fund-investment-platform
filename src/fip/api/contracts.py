@@ -6,7 +6,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-
 class ResponseMeta(BaseModel):
     model_config = ConfigDict(extra="allow")
 

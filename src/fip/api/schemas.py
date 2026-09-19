@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_serializer
 
 
 class StrictModel(BaseModel):
@@ -125,11 +125,20 @@ class ReadPayloadModel(BaseModel):
     metric_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"] | None = None
     data_completeness: DataCompleteness | None = None
 
+    @model_serializer(mode="wrap")
+    def serialize_present_fields(self, handler):  # type: ignore[no-untyped-def]
+        value = handler(self)
+        return {
+            key: item
+            for key, item in value.items()
+            if key in self.model_fields_set or item is not None
+        }
+
 
 class SuccessEnvelopeModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: dict[str, object] | list[dict[str, object]]
+    data: ReadPayloadModel | list[ReadPayloadModel]
     meta: ResponseMetaModel
     error: None = None
 
