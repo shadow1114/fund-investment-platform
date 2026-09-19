@@ -10,6 +10,11 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class Weight(StrictModel):
+    fund_id: str
+    weight: float
+
+
 class ResponseMetaModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -36,8 +41,8 @@ class DecisionReviewOutcomeModel(StrictModel):
     reviewed_by: str
     reviewed_at: datetime
     reason: str
-    original_weights: list[dict[str, Any]]
-    final_weights: list[dict[str, Any]] | None
+    original_weights: list[Weight]
+    final_weights: list[Weight] | None
 
 
 class BacktestCreatedModel(StrictModel):
@@ -48,7 +53,7 @@ class BacktestCreatedModel(StrictModel):
 
 class MetricTriple(StrictModel):
     value: float | None
-    status: str
+    status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
     reason: str | None
 
 

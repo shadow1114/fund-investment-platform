@@ -32,3 +32,9 @@ def test_review_model_rejects_nullable_reason_and_unknown_status() -> None:
             original_weights=[],
             final_weights=None,
         )
+    with pytest.raises(ValidationError):
+        MetricTriple(value=1.0, status="BAD", reason=None)
+    with pytest.raises(ValidationError):
+        OptimizationSubmissionModel(
+            operation_id="OP-1", status="RUNNING", optimization_id="OPT-1", extra="x"
+        )

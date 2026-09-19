@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from fip.api.schemas import SuccessEnvelopeModel
+
 
 class ResponseMeta(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -29,6 +31,7 @@ class ErrorBody(BaseModel):
 
 
 class ErrorEnvelope(BaseModel):
+    data: None = None
     error: ErrorBody
     meta: ResponseMeta
 
@@ -42,8 +45,10 @@ def success(data: Any, *, request_id: str | None = None, **meta: Any) -> dict[st
         "availability_quality_distribution",
         {"EXACT": 0.0, "DERIVED": 0.0, "INFERRED": 0.0},
     )
-    return {
-        "data": data,
-        "meta": ResponseMeta(request_id=request_id, **meta).model_dump(mode="json"),
-        "error": None,
-    }
+    return SuccessEnvelopeModel.model_validate(
+        {
+            "data": data,
+            "meta": ResponseMeta(request_id=request_id, **meta).model_dump(mode="json"),
+            "error": None,
+        }
+    ).model_dump(mode="json")
