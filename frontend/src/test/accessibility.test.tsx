@@ -1,14 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { MemoryRouter, Route, Routes, useRoutes } from "react-router-dom";
+import { MemoryRouter, useRoutes } from "react-router-dom";
 
 import { App } from "../app/App";
 import { queryClient } from "../app/queryClient";
 import { routes } from "../app/routes";
-import { FundResearchPage } from "../pages/FundResearchPage";
 import { errorEnvelope, universeDetailEnvelope } from "./contractFixtures";
 import { requestLog, resetRequestLog, server } from "./mswServer";
 
@@ -59,31 +58,94 @@ describe("M1.7 accessibility and contract verification", () => {
     }
   });
 
-  it.each([
+  const statuses = [
     [401, "AUTHENTICATION_REQUIRED"],
     [403, "FORBIDDEN"],
     [409, "VERSION_CONFLICT"],
     [422, "VALIDATION_ERROR"],
     [500, "INTERNAL_ERROR"],
-  ])("renders HTTP %i and its API error code", async (status, code) => {
-    server.use(
-      http.get("/api/v1/funds", () =>
-        HttpResponse.json(errorEnvelope(code), { status }),
-      ),
-    );
-    const client = newClient();
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/funds"]}>
-          <Routes>
-            <Route path="/funds" element={<FundResearchPage />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+  ] as const;
+  const readEndpoints = [
+    ["/funds", "/api/v1/funds"],
+    ["/funds/000001", "/api/v1/funds/000001"],
+    ["/universes", "/api/v1/fund-universes"],
+    ["/universes/UNI-001", "/api/v1/fund-universes/UNI-001"],
+    ["/portfolios", "/api/v1/portfolios"],
+    ["/portfolios/P001", "/api/v1/portfolios/P001"],
+    ["/portfolios/P001", "/api/v1/session"],
+  ] as const;
 
-    expect(await screen.findByText(`HTTP ${status} · ${code}`)).toBeVisible();
-  });
+  it.each(
+    readEndpoints.flatMap(([path, endpoint]) =>
+      statuses.map(([status, code]) => ({ path, endpoint, status, code })),
+    ),
+  )(
+    "$path exposes HTTP $status from $endpoint with API code",
+    async ({ path, endpoint, status, code }) => {
+      server.use(
+        http.get(endpoint, () =>
+          HttpResponse.json(errorEnvelope(code), { status }),
+        ),
+      );
+      renderRoute(path);
+      expect(await screen.findByText(`HTTP ${status} · ${code}`)).toBeVisible();
+      expect(screen.getByText(`Contract fixture for ${code}`)).toBeVisible();
+    },
+  );
+
+  it.each([
+    ["/api/v1/funds/000001/nav-series", "净值"],
+    ["/api/v1/funds/000001/evaluations", "评估"],
+    ["/api/v1/funds/000001/scores", "评分"],
+  ] as const)(
+    "fund detail exposes dependent %s errors",
+    async (endpoint, tab) => {
+      server.use(
+        http.get(endpoint, () =>
+          HttpResponse.json(errorEnvelope("DEPENDENT_DATA_FAILED"), {
+            status: 422,
+          }),
+        ),
+      );
+      renderRoute("/funds/000001");
+      await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      expect(
+        await screen.findByText("HTTP 422 · DEPENDENT_DATA_FAILED"),
+      ).toBeVisible();
+    },
+  );
+
+  it.each(statuses)(
+    "backtest creation exposes HTTP %i and its API code",
+    async (status, code) => {
+      server.use(
+        http.post("/api/v1/backtests", () =>
+          HttpResponse.json(errorEnvelope(code), { status }),
+        ),
+      );
+      renderRoute("/backtests");
+      for (const [label, value] of [
+        ["策略 ID", "STRATEGY-1"],
+        ["开始日期", "2020-01-01"],
+        ["结束日期", "2026-06-30"],
+        ["基准 ID", "CSI300"],
+        ["再平衡政策版本", "rebalance-v3"],
+        ["组合规则版本", "portfolio-v4"],
+        ["收益估计版本", "return-v5"],
+        ["风险模型版本", "risk-v7"],
+        ["资格规则版本", "eligibility-v4"],
+        ["交易成本模型版本", "cost-v2"],
+      ]) {
+        fireEvent.change(screen.getByLabelText(label), {
+          target: { value },
+        });
+      }
+      fireEvent.click(screen.getByRole("button", { name: "创建回测" }));
+      expect(await screen.findByText(`HTTP ${status} · ${code}`)).toBeVisible();
+      expect(screen.getByRole("button", { name: "启动回测" })).toBeDisabled();
+    },
+  );
 
   it("keeps unknown enums, null reasons, and PIT provenance visible", async () => {
     server.use(
@@ -110,7 +172,10 @@ describe("M1.7 accessibility and contract verification", () => {
   it("keeps all page API traffic inside the frozen /api/v1 boundary", async () => {
     const visits = [
       ["/funds", "基金研究"],
+      ["/funds/000001", "Alpha 稳健基金"],
+      ["/universes", "候选池快照"],
       ["/universes/UNI-001", "候选池快照"],
+      ["/portfolios", "组合决策"],
       ["/portfolios/P001", "稳健组合"],
       ["/backtests", "回测"],
     ] as const;
@@ -124,7 +189,7 @@ describe("M1.7 accessibility and contract verification", () => {
       view.client.clear();
     }
 
-    expect(requestLog.length).toBeGreaterThanOrEqual(4);
+    expect(requestLog.length).toBeGreaterThanOrEqual(6);
     expect(
       requestLog.every((request) => request.pathname.startsWith("/api/v1/")),
     ).toBe(true);

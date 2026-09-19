@@ -2,7 +2,11 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
 import {
+  fundDetailEnvelope,
+  fundEvaluationEnvelope,
   fundListEnvelope,
+  fundNavEnvelope,
+  fundScoreEnvelope,
   operationEnvelope,
   portfolioEnvelope,
   portfolioListEnvelope,
@@ -23,6 +27,18 @@ export const contractHandlers = [
     HttpResponse.json(operationEnvelope),
   ),
   http.get("/api/v1/funds", () => HttpResponse.json(fundListEnvelope)),
+  http.get("/api/v1/funds/:fundId", () =>
+    HttpResponse.json(fundDetailEnvelope),
+  ),
+  http.get("/api/v1/funds/:fundId/nav-series", () =>
+    HttpResponse.json(fundNavEnvelope),
+  ),
+  http.get("/api/v1/funds/:fundId/evaluations", () =>
+    HttpResponse.json(fundEvaluationEnvelope),
+  ),
+  http.get("/api/v1/funds/:fundId/scores", () =>
+    HttpResponse.json(fundScoreEnvelope),
+  ),
   http.get("/api/v1/fund-universes", () =>
     HttpResponse.json(universeListEnvelope),
   ),
