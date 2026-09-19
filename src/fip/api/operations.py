@@ -83,8 +83,17 @@ class PersistentOperationService:
     @staticmethod
     def _record(job: CalculationJob, resource_id: str) -> OperationRecord:
         error = None
-        if job.error_code or job.error_detail:
-            error = {"code": job.error_code, "message": job.error_detail}
+        if job.status in {"BLOCKED", "FAILED"}:
+            error = {
+                "code": job.error_code
+                or ("DATA_BLOCKED" if job.status == "BLOCKED" else "OPERATION_FAILED"),
+                "message": job.error_detail
+                or (
+                    "Operation blocked by data quality"
+                    if job.status == "BLOCKED"
+                    else "Operation failed"
+                ),
+            }
         return OperationRecord(
             operation_id=job.execution_id,
             kind=job.job_type,

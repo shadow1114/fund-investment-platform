@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from fip.api.app import create_app
+from fip.api.operations import PersistentOperationService
 
 
 class _FakeService:
@@ -45,3 +46,33 @@ def test_persistent_mode_uses_job_service_for_submit_and_poll(monkeypatch) -> No
     assert submitted.json()["data"]["operation_id"] == "OP-stable"
     assert polled.status_code == 200
     assert polled.json()["data"]["status"] == "COMPLETED"
+
+
+def test_persistent_record_maps_terminal_failure_states() -> None:
+    blocked = SimpleNamespace(
+        execution_id="OP-BLOCKED",
+        job_type="optimization",
+        status="BLOCKED",
+        error_code=None,
+        error_detail=None,
+        resource_id="OPT-1",
+        result_ref=None,
+        progress=0,
+        created_at=None,
+    )
+    running = SimpleNamespace(
+        execution_id="OP-RUNNING",
+        job_type="optimization",
+        status="RUNNING",
+        error_code="STALE",
+        error_detail="ignored",
+        resource_id="OPT-1",
+        result_ref=None,
+        progress=2,
+        created_at=None,
+    )
+    assert PersistentOperationService._record(blocked, "OPT-1").error == {
+        "code": "DATA_BLOCKED",
+        "message": "Operation blocked by data quality",
+    }
+    assert PersistentOperationService._record(running, "OPT-1").error is None
