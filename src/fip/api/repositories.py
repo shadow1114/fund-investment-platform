@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from fip.api.errors import NotFoundError
 
@@ -83,18 +82,28 @@ class ApiRepositories:
             backtests=BacktestRepository(session),
         )
 
+    def list_funds(self, **filters: object) -> list[dict[str, object]]:
+        return self.funds.list(**filters)
 
-class ReadRepository:
-    """Contract-facing adapter seam; domain repositories can be injected later."""
+    def list_universes(self, **filters: object) -> list[dict[str, object]]:
+        return self.universes.list(**filters)
 
-    def list_funds(self, **_: Any) -> list[dict[str, Any]]:
-        return []
+    def list_portfolios(self, **filters: object) -> list[dict[str, object]]:
+        return self.portfolios.list(**filters)
 
-    def list_universes(self, **_: Any) -> list[dict[str, Any]]:
-        return []
+    def get(self, resource: str, identifier: str) -> Mapping[str, object]:
+        repository = {
+            "fund": self.funds,
+            "fund universe": self.universes,
+            "portfolio": self.portfolios,
+            "decision": self.decisions,
+            "backtest": self.backtests,
+        }.get(resource)
+        if repository is None:
+            raise NotFoundError(resource, identifier)
+        return repository.get(identifier)
 
-    def list_portfolios(self, **_: Any) -> list[dict[str, Any]]:
-        return []
 
-    def get(self, resource: str, identifier: str) -> dict[str, Any]:
-        raise NotFoundError(resource, identifier)
+# Compatibility name for consumers that imported the initial read seam.  It is
+# an alias, not a second adapter implementation.
+ReadRepository = ApiRepositories

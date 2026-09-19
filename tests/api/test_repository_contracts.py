@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 
 import pytest
-from starlette.requests import Request
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 
-from fip.api.dependencies import get_api_repositories
+import fip.api.app as api_app
 from fip.api.errors import NotFoundError
-from fip.api.repositories import RepositoryAdapter
+from fip.api.repositories import ApiRepositories, RepositoryAdapter
+from fip.api.routers.reads import get_repository
 
 
 class _RowsAdapter(RepositoryAdapter):
@@ -25,10 +27,6 @@ class _ClosingSession:
 
     def close(self) -> None:
         self.closed = True
-
-
-def _request() -> Request:
-    return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
 
 def test_list_rows_have_a_deterministic_id_tiebreaker() -> None:
@@ -50,30 +48,77 @@ def test_missing_detail_id_raises_contract_not_found_error() -> None:
         adapter.get("missing")
 
 
-def test_dependency_creates_and_closes_one_adapter_set_per_request(
+def test_router_dependency_supplies_one_canonical_adapter_set_per_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reusing a session across requests would leak transaction state."""
+    """Bypassing the request-scoped set would give routes the old placeholder adapter."""
     sessions: list[_ClosingSession] = []
 
-    def new_session() -> _ClosingSession:
+    def new_session(*_: object) -> _ClosingSession:
         session = _ClosingSession()
         sessions.append(session)
         return session
 
     monkeypatch.setattr("fip.api.dependencies._new_session", new_session)
+    app = FastAPI()
 
-    first: Iterator[object] = get_api_repositories(_request())
-    first_repositories = next(first)
-    second: Iterator[object] = get_api_repositories(_request())
-    second_repositories = next(second)
+    @app.get("/repository-probe")
+    def repository_probe(
+        repositories: ApiRepositories = Depends(get_repository),  # noqa: B008
+    ) -> dict[str, object]:
+        adapters = (
+            repositories.funds,
+            repositories.universes,
+            repositories.portfolios,
+            repositories.decisions,
+            repositories.backtests,
+        )
+        return {
+            "resources": [adapter.resource for adapter in adapters],
+            "same_session": all(adapter.session is adapters[0].session for adapter in adapters),
+        }
 
-    assert first_repositories is not second_repositories
-    assert first_repositories.funds is not second_repositories.funds  # type: ignore[attr-defined]
-    assert first_repositories.funds.session is sessions[0]  # type: ignore[attr-defined]
-    assert second_repositories.funds.session is sessions[1]  # type: ignore[attr-defined]
+    with TestClient(app) as client:
+        first = client.get("/repository-probe")
+        second = client.get("/repository-probe")
 
-    first.close()
-    second.close()
-
+    assert first.json() == {
+        "resources": ["fund", "fund universe", "portfolio", "decision", "backtest"],
+        "same_session": True,
+    }
+    assert second.json() == first.json()
+    assert len(sessions) == 2
+    assert sessions[0] is not sessions[1]
     assert [session.closed for session in sessions] == [True, True]
+
+
+def test_app_lifespan_owns_configured_engine_and_disposes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A module-global engine would not be disposed when this app stops."""
+    created_urls: list[str] = []
+
+    class _Engine:
+        def __init__(self) -> None:
+            self.disposed = False
+
+        def dispose(self) -> None:
+            self.disposed = True
+
+    engine = _Engine()
+
+    def create_engine(database_url: str) -> _Engine:
+        created_urls.append(database_url)
+        return engine
+
+    monkeypatch.setattr(api_app.settings, "database_url", "postgresql+psycopg://db/fip")
+    monkeypatch.setattr(api_app, "create_api_engine", create_engine)
+
+    app = api_app.create_app()
+    assert created_urls == ["postgresql+psycopg://db/fip"]
+    assert app.state.api_engine is engine
+
+    with TestClient(app):
+        assert engine.disposed is False
+
+    assert engine.disposed is True
