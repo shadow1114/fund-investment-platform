@@ -26,7 +26,7 @@ def get_operation(operation_id: str, request: Request) -> dict[str, object]:
         "operation_id": record.operation_id,
         "status": record.status,
         "progress": {"completed": 0, "total": 1, "unit": "operation"},
-        "result_ref": record.result_ref,
+            "result_ref": getattr(record, "result_ref", None),
         "failure": record.error,
     }
     return success(data, request_id=getattr(request.state, "request_id", None))
