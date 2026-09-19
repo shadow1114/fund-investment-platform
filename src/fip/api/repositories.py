@@ -36,6 +36,11 @@ from fip.services.fund_service.models import (
     PeerGroupSnapshot,
     SelectionConditionRecord,
 )
+from fip.services.portfolio_service.models import (
+    DecisionRecord,
+    OptimizationRecord,
+    PortfolioRecord,
+)
 
 
 class RepositoryAdapter:
@@ -706,15 +711,63 @@ class PortfolioRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "portfolio")
 
+    def _list_rows(self, **_: object) -> list[Mapping[str, object]]:
+        if not isinstance(self.session, Session):
+            return super()._list_rows()
+        return [self._row(item) for item in self.session.execute(select(PortfolioRecord)).scalars()]
+
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if not isinstance(self.session, Session):
+            return super()._get_row(identifier)
+        item = self.session.get(PortfolioRecord, identifier)
+        return self._row(item) if item is not None else None
+
+    @staticmethod
+    def _row(item: PortfolioRecord) -> dict[str, object]:
+        return {
+            "portfolio_id": item.id,
+            "portfolio_name": item.name,
+            "portfolio_type": item.portfolio_type,
+            "status": item.status,
+            "base_currency": item.base_currency,
+            "portfolio_version": item.portfolio_version,
+            "risk_profile": item.risk_profile,
+            "portfolio_benchmark": item.benchmark,
+            "portfolio_rule_version": item.portfolio_rule_version,
+            "owner_user_id": item.owner_user_id,
+            "viewer_user_ids": item.viewer_user_ids,
+        }
+
 
 class OptimizationRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "optimization")
 
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if not isinstance(self.session, Session):
+            return super()._get_row(identifier)
+        item = self.session.get(OptimizationRecord, identifier)
+        if item is None:
+            return None
+        return {"optimization_id": item.id, **item.payload, "portfolio_id": item.portfolio_id}
+
 
 class DecisionRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "decision")
+
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if not isinstance(self.session, Session):
+            return super()._get_row(identifier)
+        item = self.session.get(DecisionRecord, identifier)
+        if item is None:
+            return None
+        return {
+            "decision_id": item.id,
+            **item.payload,
+            "portfolio_id": item.portfolio_id,
+            "optimization_id": item.optimization_id,
+        }
 
 
 class BacktestRepository(RepositoryAdapter):

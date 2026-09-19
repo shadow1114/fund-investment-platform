@@ -262,7 +262,7 @@ def get_optimization(
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
     return success(
-        OptimizationQueries(repository.optimizations).detail(optimization_id),
+        OptimizationQueries(repository.optimizations).detail(optimization_id, portfolio_id=id),
         request_id=_request_id(request),
     )
 

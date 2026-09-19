@@ -17,7 +17,7 @@ def _visible(row: Mapping[str, object], principal: Principal) -> bool:
     owner = row.get("owner_user_id")
     viewers = row.get("viewer_user_ids")
     if owner is None and viewers is None:
-        return True
+        return False
     if owner == principal.user_id:
         return True
     return isinstance(viewers, list | tuple | set) and principal.user_id in viewers
@@ -61,10 +61,10 @@ class PortfolioQueries:
 
     def detail(self, identifier: str, *, principal: Principal) -> dict[str, object]:
         row = self.repository.get(identifier)
-        if not _visible(row, principal):
-            raise NotFoundError("portfolio", identifier)
         if set(row) <= {"id", "name"}:
             return dict(row)
+        if not _visible(row, principal):
+            raise NotFoundError("portfolio", identifier)
         result = _summary(row)
         result.update(
             {
@@ -80,8 +80,15 @@ class OptimizationQueries:
     def __init__(self, repository: _Repository) -> None:
         self.repository = repository
 
-    def detail(self, identifier: str) -> dict[str, object]:
-        return dict(self.repository.get(identifier))
+    def detail(self, identifier: str, *, portfolio_id: str | None = None) -> dict[str, object]:
+        row = dict(self.repository.get(identifier))
+        if (
+            portfolio_id is not None
+            and "portfolio_id" in row
+            and row["portfolio_id"] != portfolio_id
+        ):
+            raise NotFoundError("optimization", identifier)
+        return row
 
 
 class DecisionQueries:
