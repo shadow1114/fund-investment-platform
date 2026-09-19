@@ -18,6 +18,7 @@ from fip.services.data_service.models.fund import (
     InvestmentEligibility,
 )
 from fip.services.data_service.models.market import FundNav
+from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
 from fip.services.data_service.repositories.benchmark import SqlBenchmarkPitRepository
 from fip.services.data_service.repositories.classification import SqlClassificationPitRepository
 from fip.services.data_service.repositories.fee import SqlFeePitRepository
@@ -123,7 +124,7 @@ class FundRepository(RepositoryAdapter):
                 "benchmark_type": "UNKNOWN",
                 "mapping_version": benchmark.mapping_version or "UNKNOWN",
                 "components": [
-                    {"index_id": str(item.index_id), "weight": item.weight}
+                    {"benchmark_id": str(item.index_id), "weight": item.weight}
                     for item in benchmark.components
                 ],
                 "status": benchmark.status,
@@ -134,7 +135,7 @@ class FundRepository(RepositoryAdapter):
                     "expense_rate": fee.rate,
                     "included_in_nav": "UNKNOWN",
                     "included_in_backtest": False,
-                    "inclusion_source": fee.availability_quality,
+                    "inclusion_source": "NOT_DECLARED",
                 }
                 for fee in fees
             ],
@@ -158,19 +159,32 @@ class FundRepository(RepositoryAdapter):
         if end < start:
             raise InvalidQueryError("date_from must not be after date_to")
         visible_until = resolve_visible_until(view_date)
+        data: list[dict[str, object]]
         if nav_type == "ADJUSTED":
-            points = SqlNavPitRepository(self._session(), visible_until).adjusted_nav_series(
-                share_class.id, start, end
-            )
-            data = [
-                {
-                    "date": point.effective_at.isoformat(),
-                    "nav": float(point.adjusted_nav),
-                    "nav_status": "VALID",
-                    "nav_reason": None,
-                }
-                for point in points
-            ]
+            try:
+                points = SqlNavPitRepository(self._session(), visible_until).adjusted_nav_series(
+                    share_class.id, start, end
+                )
+            except AdjustedNavUnavailable:
+                points = []
+                data = [
+                    {
+                        "date": start.isoformat(),
+                        "nav": None,
+                        "nav_status": "UNAVAILABLE",
+                        "nav_reason": "ADJUSTED_NAV_UNAVAILABLE",
+                    }
+                ]
+            else:
+                data = [
+                    {
+                        "date": point.effective_at.isoformat(),
+                        "nav": float(point.adjusted_nav),
+                        "nav_status": "VALID",
+                        "nav_reason": None,
+                    }
+                    for point in points
+                ]
         else:
             rows = (
                 self._session()
@@ -210,7 +224,10 @@ class FundRepository(RepositoryAdapter):
             data = list(buckets.values())
         return {
             "data": {"fund_id": identifier, "points": data},
-            "meta": {"adjustment_rule_version": "UNKNOWN", "unavailable_count": 0},
+            "meta": {
+                "adjustment_rule_version": "UNKNOWN",
+                "unavailable_count": sum(1 for point in data if point["nav"] is None),
+            },
         }
 
     def read_evaluation(
@@ -297,8 +314,25 @@ class FundRepository(RepositoryAdapter):
                 "total_score_status": score.status,
                 "total_score_reason": score.reason_code,
                 "attribution": [dict(item.detail) for item in attribution],
-                "sub_scores": {},
-                "data_completeness": score.data_completeness,
+                "sub_scores": {
+                    field: value
+                    for group in (
+                        ("return",),
+                        ("risk",),
+                        ("risk_adjusted",),
+                        ("stability",),
+                        ("relative_performance",),
+                    )
+                    for field, value in (
+                        (f"{group[0]}_score", None),
+                        (f"{group[0]}_score_status", "UNKNOWN"),
+                        (f"{group[0]}_score_reason", "NOT_DECLARED"),
+                    )
+                },
+                "data_completeness": {
+                    "available": int(float(score.data_completeness) > 0),
+                    "expected": 1,
+                },
                 "score_status": score.status,
             },
             "meta": {
