@@ -166,14 +166,28 @@ class FundRepository(RepositoryAdapter):
                     share_class.id, start, end
                 )
             except AdjustedNavUnavailable:
-                points = []
+                unavailable_dates = (
+                    self._session()
+                    .execute(
+                        select(FundNav.effective_at)
+                        .where(
+                            FundNav.share_class_id == share_class.id,
+                            FundNav.available_at <= visible_until,
+                            FundNav.effective_at.between(start, end),
+                        )
+                        .distinct()
+                        .order_by(FundNav.effective_at)
+                    )
+                    .scalars()
+                )
                 data = [
                     {
-                        "date": start.isoformat(),
+                        "date": point_date.isoformat(),
                         "nav": None,
                         "nav_status": "UNAVAILABLE",
                         "nav_reason": "ADJUSTED_NAV_UNAVAILABLE",
                     }
+                    for point_date in unavailable_dates
                 ]
             else:
                 data = [
@@ -241,6 +255,8 @@ class FundRepository(RepositoryAdapter):
         values = self._factor_values(
             evaluation.factor_run_id, share_class.id, evaluation_period, view_date
         )
+        if evaluation_period is not None and not values:
+            raise NotFoundError("fund evaluation", identifier)
         factor_run = self._session().get(FactorRun, evaluation.factor_run_id)
         peer_group = self._session().get(PeerGroupSnapshot, evaluation.peer_group_snapshot_id)
         period = evaluation_period or (values[0].window if values else "UNKNOWN")
@@ -284,6 +300,11 @@ class FundRepository(RepositoryAdapter):
         evaluation = self._evaluation_for(share_class.id, view_date)
         if evaluation is None:
             raise NotFoundError("fund score", identifier)
+        values = self._factor_values(
+            evaluation.factor_run_id, share_class.id, evaluation_period, view_date
+        )
+        if evaluation_period is not None and not values:
+            raise NotFoundError("fund score", identifier)
         score = (
             self._session()
             .execute(
@@ -308,7 +329,8 @@ class FundRepository(RepositoryAdapter):
         return {
             "data": {
                 "fund_id": identifier,
-                "evaluation_period": evaluation_period or "UNKNOWN",
+                "evaluation_period": evaluation_period
+                or (values[0].window if values else "UNKNOWN"),
                 "as_of_date": view_date.isoformat(),
                 "total_score": score.value,
                 "total_score_status": score.status,
@@ -330,8 +352,12 @@ class FundRepository(RepositoryAdapter):
                     )
                 },
                 "data_completeness": {
-                    "available": int(float(score.data_completeness) > 0),
-                    "expected": 1,
+                    "available": sum(
+                        1
+                        for value in values
+                        if value.status in {"VALID", "COMPLETED"} and value.raw_value is not None
+                    ),
+                    "expected": len(values),
                 },
                 "score_status": score.status,
             },
