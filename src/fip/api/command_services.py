@@ -25,8 +25,8 @@ class DecisionCommandService:
     ) -> dict[str, Any]:
         if action not in {"APPROVED", "REJECTED", "OVERRIDDEN"}:
             raise InvalidQueryError("action must be APPROVED, REJECTED, or OVERRIDDEN")
-        if action == "OVERRIDDEN" and not reason:
-            raise InvalidQueryError("reason is required for OVERRIDDEN reviews")
+        if not reason or not reason.strip():
+            raise InvalidQueryError("reason is required for decision reviews")
         audit_id = f"AUD-{decision_id}-{principal_id}"
         if self._session is not None:
             audit = AuditLog(
@@ -59,6 +59,7 @@ def validate_backtest_configuration(payload: dict[str, Any]) -> dict[str, Any]:
         "initial_capital",
         "backtest_mode",
         "benchmark_id",
+        "equal_weight_baseline_enabled",
         "rebalancing_policy_version",
         "portfolio_rule_version",
         "return_estimate_version",
@@ -72,8 +73,13 @@ def validate_backtest_configuration(payload: dict[str, Any]) -> dict[str, Any]:
     missing = sorted(required - payload.keys())
     if missing:
         raise InvalidQueryError(f"Missing backtest fields: {', '.join(missing)}")
-    if payload["start_date"] > payload["end_date"]:
-        raise InvalidQueryError("start_date must not be after end_date")
+    if payload["backtest_mode"] not in {"HISTORICAL_FIDELITY", "CURRENT_RULE"}:
+        raise InvalidQueryError("Invalid backtest_mode")
+    if payload["infeasible_handling"] not in {"ABORT", "SKIP_PERIOD"}:
+        raise InvalidQueryError("Invalid infeasible_handling")
+    capital = payload["initial_capital"]
+    if not isinstance(capital, dict) or not {"amount", "currency"} <= set(capital):
+        raise InvalidQueryError("initial_capital must contain amount and currency")
     from datetime import date
 
     try:

@@ -14,6 +14,7 @@ def test_backtest_validation_returns_contract_shape() -> None:
         "initial_capital": {"amount": "100000", "currency": "CNY"},
         "backtest_mode": "HISTORICAL_FIDELITY",
         "benchmark_id": "CSI300",
+        "equal_weight_baseline_enabled": True,
         "rebalancing_policy_version": "r1",
         "portfolio_rule_version": "p1",
         "return_estimate_version": "ret1",

@@ -12,6 +12,7 @@ from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError
 from fip.api.operations import OperationRegistry, PersistentOperationService
+from fip.services.portfolio_service.models import DecisionRecord
 
 # FastAPI's dependency/body declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -118,13 +119,26 @@ def review_decision(
         else None
     )
     try:
+        action = str(payload.get("action", payload.get("decision_status", "")))
+        original_weights: Any = payload.get("proposed_weights", [])
+        if session is not None:
+            snapshot = session.get(DecisionRecord, decision_id)
+            if snapshot is not None:
+                original_weights = snapshot.payload.get("proposed_weights", [])
+        final_weights: Any = (
+            payload.get("overridden_weights")
+            if action == "OVERRIDDEN"
+            else original_weights
+            if action == "APPROVED"
+            else None
+        )
         result = DecisionCommandService(session).review(
             decision_id,
-            str(payload.get("decision_status")),
+            action,
             payload.get("reason"),
             principal.user_id,
-            payload.get("original_weights", {}),
-            payload.get("final_weights", {}),
+            original_weights,
+            final_weights,
             _request_id(request),
         )
         if session is not None:
