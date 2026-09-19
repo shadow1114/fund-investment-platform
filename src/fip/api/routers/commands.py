@@ -23,7 +23,7 @@ from fip.api.schemas import (
     BacktestRunModel,
     DecisionReviewOutcomeModel,
     OptimizationSubmissionModel,
-    SuccessEnvelopeModel,
+    ReadPayloadModel,
     TypedEnvelope,
 )
 from fip.platform.jobs.models import CalculationJob
@@ -173,7 +173,7 @@ def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> di
 @router.post(
     "/backtests/{id}/validate-configuration",
     operation_id="validateBacktest",
-    response_model=SuccessEnvelopeModel,
+    response_model=TypedEnvelope[ReadPayloadModel],
 )
 def validate_backtest(id: str, request: Request) -> dict[str, Any]:
     payload: dict[str, Any] = {}

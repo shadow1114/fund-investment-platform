@@ -9,6 +9,7 @@ from typing import Any, cast
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
@@ -86,6 +87,9 @@ def create_app(*, persistent_operations: bool = False) -> FastAPI:
     app.include_router(reads.router, prefix="/api/v1")
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.response_model_exclude_none = True
 
     def openapi() -> dict[str, Any]:
         if app.openapi_schema is None:
