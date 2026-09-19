@@ -31,9 +31,32 @@ class _FakeService:
         )
 
 
+class _FakeSession:
+    def get(self, _model, _identifier):
+        return object()
+
+    def execute(self, _statement):
+        return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+    def add(self, _item):
+        pass
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
 def test_persistent_mode_uses_job_service_for_submit_and_poll(monkeypatch) -> None:
     monkeypatch.setattr("fip.api.routers.commands.PersistentOperationService", _FakeService)
     monkeypatch.setattr("fip.api.routers.operations.PersistentOperationService", _FakeService)
+    monkeypatch.setattr(
+        "fip.api.routers.commands.Session", lambda *_args, **_kwargs: _FakeSession()
+    )
+    monkeypatch.setattr(
+        "fip.api.routers.operations.Session", lambda *_args, **_kwargs: _FakeSession()
+    )
     app = create_app(persistent_operations=True)
     with TestClient(app) as client:
         submitted = client.post(

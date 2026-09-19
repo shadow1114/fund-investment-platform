@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from fip.api.command_services import DecisionCommandService, validate_backtest_configuration
@@ -12,7 +13,13 @@ from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import OperationRegistry, PersistentOperationService
-from fip.services.portfolio_service.models import BacktestRecord, DecisionRecord, OptimizationRecord
+from fip.platform.jobs.models import CalculationJob
+from fip.services.portfolio_service.models import (
+    BacktestRecord,
+    DecisionRecord,
+    OptimizationRecord,
+    PortfolioRecord,
+)
 
 # FastAPI's dependency/body declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -56,24 +63,33 @@ def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
+    request_key = _key(request)
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         try:
-            session.add(
-                OptimizationRecord(
-                    id=optimization_id,
-                    portfolio_id=id,
-                    payload={"optimization_status": "UNKNOWN", "request": payload},
+            if session.get(PortfolioRecord, id) is None:
+                raise NotFoundError("portfolio", id)
+            existing_job = session.execute(
+                select(CalculationJob).where(CalculationJob.idempotency_key == request_key)
+            ).scalar_one_or_none()
+            if existing_job is not None:
+                optimization_id = existing_job.resource_id or optimization_id
+            else:
+                session.add(
+                    OptimizationRecord(
+                        id=optimization_id,
+                        portfolio_id=id,
+                        payload={"optimization_status": "UNKNOWN", "request": payload},
+                    )
                 )
-            )
-            session.commit()
+                session.commit()
         finally:
             session.close()
     record = _submit_operation(
         request,
         "optimization",
         optimization_id,
-        _key(request),
+        request_key,
         f"/api/v1/portfolios/{id}/optimizations/{optimization_id}",
     )
     return success(
@@ -104,9 +120,17 @@ def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> di
 
 
 @router.post("/backtests/{id}/validate-configuration", operation_id="validateBacktest")
-def validate_backtest(
-    id: str, request: Request, payload: dict[str, Any] = Body(...)
-) -> dict[str, Any]:
+def validate_backtest(id: str, request: Request) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if getattr(request.app.state, "persistent_operations", False):
+        session = Session(request.app.state.api_engine, future=True)
+        try:
+            record = session.get(BacktestRecord, id)
+            if record is None:
+                raise NotFoundError("backtest", id)
+            payload = record.payload
+        finally:
+            session.close()
     result = validate_backtest_configuration(payload)
     return success({"backtest_id": id, **result}, request_id=_request_id(request))
 
@@ -114,7 +138,14 @@ def validate_backtest(
 @router.post(
     "/backtests/{id}/runs", operation_id="runBacktest", status_code=status.HTTP_202_ACCEPTED
 )
-def run_backtest(id: str, request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def run_backtest(id: str, request: Request) -> dict[str, Any]:
+    if getattr(request.app.state, "persistent_operations", False):
+        session = Session(request.app.state.api_engine, future=True)
+        try:
+            if session.get(BacktestRecord, id) is None:
+                raise NotFoundError("backtest", id)
+        finally:
+            session.close()
     record = _submit_operation(
         request, "backtest", id, _key(request), f"/api/v1/backtests/{id}/result"
     )
