@@ -55,3 +55,11 @@ class MetricTriple(StrictModel):
 class DataCompleteness(StrictModel):
     available: int
     expected: int
+
+
+class SuccessEnvelopeModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    data: Any
+    meta: dict[str, Any]
+    error: None = None
