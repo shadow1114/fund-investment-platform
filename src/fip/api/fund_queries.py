@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
-from fip.api.errors import NotFoundError
+from fip.api.errors import InvalidQueryError, NotFoundError
 from fip.api.repositories import FundRepository
 
 
@@ -153,6 +153,18 @@ class FundQueries:
             "as_of_date": _as_iso(as_of_date),
         }
         rows = [dict(row) for row in self._repository.list(**filters)]
+        if (
+            management_company_id is not None
+            and rows
+            and all(row.get("management_company_id") in (None, "UNKNOWN") for row in rows)
+        ):
+            raise InvalidQueryError("management_company_id is unavailable for the current data set")
+        if (
+            (aum_min is not None or aum_max is not None)
+            and rows
+            and all(not isinstance(row.get("aum"), int | float) for row in rows)
+        ):
+            raise InvalidQueryError("aum filters are unavailable for the current data set")
         matched = _sort_rows([row for row in rows if _matches(row, filters)], sort, order)
         offset = (page - 1) * page_size
         return QueryResult(
