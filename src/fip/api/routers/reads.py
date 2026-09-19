@@ -298,8 +298,25 @@ def get_backtest_status(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.backtests.get(id)
-    return success({}, request_id=_request_id(request))
+    row = dict(repository.backtests.get(id))
+    return success(
+        {
+            "backtest_id": id,
+            "status": row.get("status", "UNKNOWN"),
+            "validation_status": row.get("validation_status"),
+            "progress": row.get(
+                "progress",
+                {
+                    "current_decision_date": None,
+                    "completed_periods": 0,
+                    "total_periods": None,
+                    "total_periods_is_estimate": False,
+                },
+            ),
+            "started_at": row.get("started_at"),
+        },
+        request_id=_request_id(request),
+    )
 
 
 @router.get("/backtests/{id}/result", operation_id="getBacktestResult")
@@ -308,8 +325,8 @@ def get_backtest_result(
     request: Request,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
-    repository.backtests.get(id)
-    return success({}, request_id=_request_id(request))
+    row = dict(repository.backtests.get(id))
+    return success(row.get("result", row), request_id=_request_id(request))
 
 
 @router.get("/backtests/{id}/performance", operation_id="getBacktestPerformance")
