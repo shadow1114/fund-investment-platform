@@ -2,7 +2,7 @@ PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 export PATH := .venv/bin:$(PATH)
 
-.PHONY: test test-unit test-integration test-fitness test-contract lint typecheck check migrate frontend-install frontend-dev frontend-build frontend-test frontend-lint
+.PHONY: test test-unit test-integration test-fitness test-contract lint typecheck check migrate frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
 
 test-unit:
 	$(PYTEST) tests/unit -v
@@ -44,6 +44,9 @@ frontend-build:
 
 frontend-test:
 	cd frontend && npm test -- --run
+
+frontend-e2e:
+	cd frontend && npm run test:e2e
 
 frontend-lint:
 	cd frontend && npm run lint
