@@ -17,7 +17,14 @@ from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import OperationRegistry, PersistentOperationService
-from fip.api.schemas import SuccessEnvelopeModel
+from fip.api.schemas import (
+    BacktestCreatedModel,
+    BacktestRunModel,
+    DecisionReviewOutcomeModel,
+    OptimizationSubmissionModel,
+    SuccessEnvelopeModel,
+    TypedEnvelope,
+)
 from fip.platform.jobs.models import CalculationJob
 from fip.services.portfolio_service.models import (
     BacktestRecord,
@@ -63,7 +70,7 @@ def _key(request: Request) -> str:
     "/portfolios/{id}/optimizations",
     operation_id="submitOptimization",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=SuccessEnvelopeModel,
+    response_model=TypedEnvelope[OptimizationSubmissionModel],
 )
 def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
@@ -131,7 +138,7 @@ def submit_optimization(
     "/backtests",
     operation_id="createBacktest",
     status_code=status.HTTP_201_CREATED,
-    response_model=SuccessEnvelopeModel,
+    response_model=TypedEnvelope[BacktestCreatedModel],
 )
 def create_backtest(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     validate_backtest_configuration(payload)
@@ -173,7 +180,7 @@ def validate_backtest(id: str, request: Request) -> dict[str, Any]:
     "/backtests/{id}/runs",
     operation_id="runBacktest",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=SuccessEnvelopeModel,
+    response_model=TypedEnvelope[BacktestRunModel],
 )
 def run_backtest(id: str, request: Request) -> dict[str, Any]:
     if getattr(request.app.state, "persistent_operations", False):
@@ -195,7 +202,7 @@ def run_backtest(id: str, request: Request) -> dict[str, Any]:
 @router.post(
     "/decisions/{decision_id}/review",
     operation_id="reviewDecision",
-    response_model=SuccessEnvelopeModel,
+    response_model=TypedEnvelope[DecisionReviewOutcomeModel],
 )
 def review_decision(
     decision_id: str,

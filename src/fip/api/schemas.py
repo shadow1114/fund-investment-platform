@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,6 +51,12 @@ class BacktestCreatedModel(StrictModel):
     created_at: datetime
 
 
+class BacktestRunModel(StrictModel):
+    operation_id: str
+    backtest_id: str
+    status: Literal["RUNNING", "UNKNOWN"]
+
+
 class MetricTriple(StrictModel):
     value: float | None
     status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
@@ -66,5 +72,16 @@ class SuccessEnvelopeModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     data: Any
+    meta: dict[str, Any]
+    error: None = None
+
+
+T = TypeVar("T")
+
+
+class TypedEnvelope(BaseModel, Generic[T]):
+    model_config = ConfigDict(extra="forbid")
+
+    data: T
     meta: dict[str, Any]
     error: None = None
