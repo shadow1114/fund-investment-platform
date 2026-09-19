@@ -4,17 +4,32 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Request, status
+from sqlalchemy.orm import Session
 
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.errors import ApiError, ForbiddenError
-from fip.api.operations import OperationRegistry
+from fip.api.operations import OperationRegistry, PersistentOperationService
 
 # FastAPI's dependency/body declarations intentionally live in signatures.
 # ruff: noqa: B008
 
 router = APIRouter()
 registry = OperationRegistry()
+
+
+def _submit_operation(
+    request: Request,
+    kind: str,
+    resource_id: str,
+    idempotency_key: str,
+) -> tuple[Any, Session | None]:
+    if getattr(request.app.state, "persistent_operations", False):
+        session = Session(request.app.state.api_engine, future=True)
+        return PersistentOperationService(session).submit(
+            kind, resource_id, idempotency_key
+        ), session
+    return registry.submit(kind, resource_id, idempotency_key), None
 
 
 def _request_id(request: Request) -> str | None:
@@ -34,7 +49,9 @@ def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
-    record = registry.submit("optimization", optimization_id, _key(request))
+    record, session = _submit_operation(request, "optimization", optimization_id, _key(request))
+    if session is not None:
+        session.close()
     return success(
         {
             "operation_id": record.operation_id,
@@ -66,7 +83,9 @@ def validate_backtest(
     "/backtests/{id}/runs", operation_id="runBacktest", status_code=status.HTTP_202_ACCEPTED
 )
 def run_backtest(id: str, request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    record = registry.submit("backtest", id, _key(request))
+    record, session = _submit_operation(request, "backtest", id, _key(request))
+    if session is not None:
+        session.close()
     return success(
         {"operation_id": record.operation_id, "backtest_id": id, "status": record.status},
         request_id=_request_id(request),

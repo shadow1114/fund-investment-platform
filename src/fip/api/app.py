@@ -28,7 +28,7 @@ def create_api_engine(database_url: str) -> Engine:
     return create_engine(database_url, future=True)
 
 
-def create_app() -> FastAPI:
+def create_app(*, persistent_operations: bool = False) -> FastAPI:
     engine = create_api_engine(settings.database_url)
 
     @asynccontextmanager
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.state.api_engine = engine
+    app.state.persistent_operations = persistent_operations
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -76,4 +77,4 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app(persistent_operations=True)
