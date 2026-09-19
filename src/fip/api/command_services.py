@@ -51,6 +51,28 @@ class DecisionCommandService:
         }
 
 
+def validate_optimization_request(payload: dict[str, Any]) -> None:
+    required = {
+        "decision_at",
+        "universe_id",
+        "portfolio_rule_version",
+        "return_estimate_version",
+        "risk_model_version",
+        "mode",
+    }
+    missing = sorted(required - payload.keys())
+    if missing:
+        raise InvalidQueryError(f"Missing optimization fields: {', '.join(missing)}")
+    if payload["mode"] != "REBALANCE":
+        raise InvalidQueryError("Invalid optimization mode")
+    from datetime import date
+
+    try:
+        date.fromisoformat(str(payload["decision_at"]))
+    except ValueError as error:
+        raise InvalidQueryError("decision_at must be an ISO date") from error
+
+
 def validate_backtest_configuration(payload: dict[str, Any]) -> dict[str, Any]:
     required = {
         "strategy_id",

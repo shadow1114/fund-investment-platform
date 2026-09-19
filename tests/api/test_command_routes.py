@@ -6,8 +6,16 @@ from fip.api.app import create_app
 def test_optimization_submission_is_async_and_idempotent() -> None:
     client = TestClient(create_app())
     headers = {"Idempotency-Key": "optimization-1"}
-    first = client.post("/api/v1/portfolios/P-1/optimizations", json={}, headers=headers)
-    second = client.post("/api/v1/portfolios/P-1/optimizations", json={}, headers=headers)
+    payload = {
+        "decision_at": "2025-01-01",
+        "universe_id": "U-1",
+        "portfolio_rule_version": "p1",
+        "return_estimate_version": "r1",
+        "risk_model_version": "risk1",
+        "mode": "REBALANCE",
+    }
+    first = client.post("/api/v1/portfolios/P-1/optimizations", json=payload, headers=headers)
+    second = client.post("/api/v1/portfolios/P-1/optimizations", json=payload, headers=headers)
     assert first.status_code == second.status_code == 202
     assert first.json()["data"]["operation_id"] == second.json()["data"]["operation_id"]
 

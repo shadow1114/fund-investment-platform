@@ -8,7 +8,11 @@ from fastapi import APIRouter, Body, Request, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from fip.api.command_services import DecisionCommandService, validate_backtest_configuration
+from fip.api.command_services import (
+    DecisionCommandService,
+    validate_backtest_configuration,
+    validate_optimization_request,
+)
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError, NotFoundError
@@ -62,6 +66,7 @@ def _key(request: Request) -> str:
 def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
+    validate_optimization_request(payload)
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
     request_key = _key(request)
     if getattr(request.app.state, "persistent_operations", False):

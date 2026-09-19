@@ -61,7 +61,14 @@ def test_persistent_mode_uses_job_service_for_submit_and_poll(monkeypatch) -> No
     with TestClient(app) as client:
         submitted = client.post(
             "/api/v1/portfolios/P-1/optimizations",
-            json={},
+            json={
+                "decision_at": "2025-01-01",
+                "universe_id": "U-1",
+                "portfolio_rule_version": "p1",
+                "return_estimate_version": "r1",
+                "risk_model_version": "risk1",
+                "mode": "REBALANCE",
+            },
             headers={"Idempotency-Key": "stable"},
         )
         polled = client.get("/api/v1/operations/OP-stable")
