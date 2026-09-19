@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("frontend reaches the locally running FastAPI session endpoint", async ({ page }) => {
+test("frontend reaches the locally running FastAPI session endpoint", async ({
+  page,
+}) => {
   const apiRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("/api/v1/")) apiRequests.push(request.url());

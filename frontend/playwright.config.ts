@@ -24,7 +24,8 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "cd .. && LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/uvicorn fip.api.app:app --host 127.0.0.1 --port 8000",
+      command:
+        "cd .. && LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/uvicorn fip.api.app:app --host 127.0.0.1 --port 8000",
       url: "http://127.0.0.1:8000/openapi.json",
       reuseExistingServer: !process.env.CI,
     },
