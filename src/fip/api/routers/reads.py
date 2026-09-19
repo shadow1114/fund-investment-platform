@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Any, Literal
 
@@ -262,13 +263,15 @@ def get_optimization(
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
     data = OptimizationQueries(repository.optimizations).detail(optimization_id, portfolio_id=id)
+    provenance = data.pop("_meta", {})
+    provenance_map = provenance if isinstance(provenance, Mapping) else {}
     return success(
         data,
         request_id=_request_id(request),
-        portfolio_rule_version=str(data.get("portfolio_rule_version", "UNKNOWN")),
-        return_estimate_version=str(data.get("return_estimate_version", "UNKNOWN")),
-        risk_model_version=str(data.get("risk_model_version", "UNKNOWN")),
-        code_version=str(data.get("code_version", "UNKNOWN")),
+        portfolio_rule_version=str(provenance_map.get("portfolio_rule_version", "UNKNOWN")),
+        return_estimate_version=str(provenance_map.get("return_estimate_version", "UNKNOWN")),
+        risk_model_version=str(provenance_map.get("risk_model_version", "UNKNOWN")),
+        code_version=str(provenance_map.get("code_version", "UNKNOWN")),
     )
 
 
@@ -279,11 +282,13 @@ def get_decision(
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
     data = DecisionQueries(repository.decisions).detail(decision_id)
+    provenance = data.pop("_meta", {})
+    provenance_map = provenance if isinstance(provenance, Mapping) else {}
     return success(
         data,
         request_id=_request_id(request),
-        versions=data.get("versions", {}),
-        is_point_in_time=bool(data.get("is_point_in_time", False)),
+        versions=provenance_map.get("versions", {}),
+        is_point_in_time=bool(provenance_map.get("is_point_in_time", False)),
     )
 
 

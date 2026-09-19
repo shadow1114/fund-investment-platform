@@ -68,7 +68,7 @@ class PortfolioQueries:
         if not _visible(row, principal):
             raise NotFoundError("portfolio", identifier)
         result = _summary(row)
-        benchmark = result["portfolio_benchmark"]
+        benchmark = row.get("portfolio_benchmark")
         if not isinstance(benchmark, Mapping) or not {
             "benchmark_id",
             "benchmark_name",
@@ -100,7 +100,7 @@ class OptimizationQueries:
         ):
             raise NotFoundError("optimization", identifier)
         if "optimization_id" in row:
-            return {
+            result = {
                 "optimization_id": row["optimization_id"],
                 "optimization_status": row.get("optimization_status", "UNKNOWN"),
                 "target_weights": row.get("target_weights"),
@@ -121,6 +121,16 @@ class OptimizationQueries:
                 "excluded_candidates": row.get("excluded_candidates", []),
                 "solve_path": row.get("solve_path", "UNKNOWN"),
             }
+            result["_meta"] = {
+                key: row.get(key, "UNKNOWN")
+                for key in (
+                    "portfolio_rule_version",
+                    "return_estimate_version",
+                    "risk_model_version",
+                    "code_version",
+                )
+            }
+            return result
         return row
 
 
@@ -131,7 +141,7 @@ class DecisionQueries:
     def detail(self, identifier: str) -> dict[str, object]:
         row = dict(self.repository.get(identifier))
         if "decision_id" in row:
-            return {
+            result = {
                 "decision_id": row["decision_id"],
                 "portfolio_id": row.get("portfolio_id", "UNKNOWN"),
                 "optimization_id": row.get("optimization_id", "UNKNOWN"),
@@ -140,4 +150,9 @@ class DecisionQueries:
                 "review": row.get("review"),
                 "final_weights": row.get("final_weights"),
             }
+            result["_meta"] = {
+                "versions": row.get("versions", {}),
+                "is_point_in_time": row.get("is_point_in_time", False),
+            }
+            return result
         return row
