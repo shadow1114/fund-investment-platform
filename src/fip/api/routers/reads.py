@@ -333,6 +333,8 @@ def get_backtest_result(
             return success(row, request_id=_request_id(request))
         raise ConflictError("Backtest result is not available")
     required = {
+        "backtest_id",
+        "status",
         "validation_status",
         "backtest_mode",
         "period",
@@ -344,12 +346,41 @@ def get_backtest_result(
     }
     if not required <= set(result):
         raise ConflictError("Backtest result is incomplete")
+    meta = row.get("result_meta")
+    required_meta = {
+        "configuration_version",
+        "data_version",
+        "strategy_versions",
+        "code_version",
+        "transaction_cost_model_version",
+        "methodology_policy_version",
+        "report_policy_version",
+    }
+    if not isinstance(meta, Mapping) or not required_meta <= set(meta):
+        raise ConflictError("Backtest result metadata is incomplete")
+    strategy_versions = meta["strategy_versions"]
+    if not isinstance(strategy_versions, Mapping) or not {
+        "metric_version",
+        "scoring_version",
+        "portfolio_rule_version",
+        "rebalance_rule_version",
+        "return_estimate_version",
+        "risk_model_version",
+        "eligibility_universe_version",
+        "benchmark_version",
+        "peer_group_classification_version",
+    } <= set(strategy_versions):
+        raise ConflictError("Backtest strategy metadata is incomplete")
     return success(
         result,
         request_id=_request_id(request),
-        configuration_versions=row.get("configuration_versions", {}),
-        strategy_version=row.get("strategy_version", "UNKNOWN"),
-        code_version=row.get("code_version", "UNKNOWN"),
+        configuration_version=meta["configuration_version"],
+        data_version=meta["data_version"],
+        strategy_versions=strategy_versions,
+        code_version=meta["code_version"],
+        transaction_cost_model_version=meta["transaction_cost_model_version"],
+        methodology_policy_version=meta["methodology_policy_version"],
+        report_policy_version=meta["report_policy_version"],
     )
 
 
