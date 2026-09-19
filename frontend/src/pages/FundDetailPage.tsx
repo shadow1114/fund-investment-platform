@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import {
@@ -33,6 +33,15 @@ export const FundDetailPage = () => {
   const [search] = useSearchParams();
   const asOfDate = search.get("as_of_date") || undefined;
   const [tab, setTab] = useState<Tab>("nav");
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    nav: null,
+    evaluation: null,
+    score: null,
+  });
+  const selectTab = (nextTab: Tab, focus = false) => {
+    setTab(nextTab);
+    if (focus) tabRefs.current[nextTab]?.focus();
+  };
   const fund = useQuery({
     queryKey: ["fund-detail", fundId, asOfDate],
     enabled: Boolean(fundId),
@@ -119,14 +128,32 @@ export const FundDetailPage = () => {
             ["evaluation", "评估"],
             ["score", "评分"],
           ] as const
-        ).map(([id, label]) => (
+        ).map(([id, label], index, allTabs) => (
           <button
             key={id}
+            id={`${id}-tab`}
+            ref={(element) => {
+              tabRefs.current[id] = element;
+            }}
             role="tab"
             type="button"
             aria-selected={tab === id}
             aria-controls={`${id}-panel`}
-            onClick={() => setTab(id)}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => selectTab(id)}
+            onKeyDown={(event) => {
+              let nextIndex: number | undefined;
+              if (event.key === "ArrowRight")
+                nextIndex = (index + 1) % allTabs.length;
+              if (event.key === "ArrowLeft")
+                nextIndex = (index - 1 + allTabs.length) % allTabs.length;
+              if (event.key === "Home") nextIndex = 0;
+              if (event.key === "End") nextIndex = allTabs.length - 1;
+              if (nextIndex !== undefined) {
+                event.preventDefault();
+                selectTab(allTabs[nextIndex][0], true);
+              }
+            }}
           >
             {label}
           </button>
@@ -135,6 +162,8 @@ export const FundDetailPage = () => {
       <section
         id={`${tab}-panel`}
         role="tabpanel"
+        tabIndex={0}
+        aria-labelledby={`${tab}-tab`}
         aria-label={
           tab === "nav" ? "净值" : tab === "evaluation" ? "评估" : "评分"
         }

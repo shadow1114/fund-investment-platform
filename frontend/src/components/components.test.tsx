@@ -216,6 +216,11 @@ describe("cross-page semantics", () => {
         attribution={[
           {
             factor_id: "quality",
+            window: "1Y",
+            direction: "HIGHER_IS_BETTER",
+            effectiveness_verdict: "VALID",
+            weight_source: "PROFILE_FIXED_V1",
+            sub_score: "quality_score",
             raw_value: null,
             status: "EXCLUDED",
             reason_code: "INSUFFICIENT_SAMPLE",
@@ -231,6 +236,12 @@ describe("cross-page semantics", () => {
     );
 
     expect(screen.getByText("quality")).toBeVisible();
+    expect(screen.getByText("窗口：1Y")).toBeVisible();
+    expect(screen.getByText("方向：HIGHER_IS_BETTER")).toBeVisible();
+    expect(screen.getByText("有效性判定：VALID")).toBeVisible();
+    expect(screen.getByText("权重来源：PROFILE_FIXED_V1")).toBeVisible();
+    expect(screen.getByText("子评分：quality_score")).toBeVisible();
+    expect(screen.getByText("原始权重：35.00%")).toBeVisible();
     expect(screen.getByText("不可用（INSUFFICIENT_SAMPLE）")).toBeVisible();
     expect(screen.getByText("25.00%")).toBeVisible();
     expect(screen.getByText("FACTOR_INEFFECTIVE")).toBeVisible();

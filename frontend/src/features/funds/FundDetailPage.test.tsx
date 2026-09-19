@@ -226,6 +226,25 @@ describe("FundDetailPage", () => {
     expect(within(evaluation).getByText("eval-v4")).toBeVisible();
   });
 
+  it("supports roving-tab keyboard navigation", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+    const nav = screen.getByRole("tab", { name: "净值" });
+    const evaluation = screen.getByRole("tab", { name: "评估" });
+    const score = screen.getByRole("tab", { name: "评分" });
+    expect(nav).toHaveAttribute("tabindex", "0");
+    expect(evaluation).toHaveAttribute("tabindex", "-1");
+    nav.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(evaluation).toHaveFocus();
+    expect(evaluation).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{End}");
+    expect(score).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(nav).toHaveFocus();
+  });
+
   it("renders dimensionless score values and the attribution chain", async () => {
     const user = userEvent.setup();
     renderPage();
