@@ -238,11 +238,13 @@ def review_decision(
             snapshot = session.get(DecisionRecord, decision_id)
             if snapshot is None:
                 raise NotFoundError("decision", decision_id)
-            owner_id = snapshot.payload.get("owner_id")
+            portfolio = session.get(PortfolioRecord, snapshot.portfolio_id)
+            if portfolio is None:
+                raise ForbiddenError()
             if (
-                owner_id
-                and owner_id != principal.user_id
-                and "Administrator" not in principal.roles
+                portfolio.owner_user_id != principal.user_id
+                and principal.user_id not in portfolio.viewer_user_ids
+                and not any(role.lower() in {"admin", "administrator"} for role in principal.roles)
             ):
                 raise ForbiddenError()
             original_weights = snapshot.payload.get("proposed_weights", [])
