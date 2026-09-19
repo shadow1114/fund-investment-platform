@@ -20,6 +20,7 @@ class OperationRecord:
     resource_id: str
     status: str = "RUNNING"
     result_ref: str | None = None
+    progress: int = 0
     error: dict[str, Any] | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -83,5 +84,7 @@ class PersistentOperationService:
             resource_id=resource_id,
             status=job.status,
             error=error,
+            result_ref=job.result_ref,
+            progress=job.progress,
             created_at=job.created_at,
         )

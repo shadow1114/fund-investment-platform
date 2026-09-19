@@ -44,6 +44,7 @@ class CalculationJob(Base):
     job_type: Mapped[str] = mapped_column(String(64), nullable=False)
     decision_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    result_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(execution_status_enum, nullable=False)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)

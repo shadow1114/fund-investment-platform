@@ -16,8 +16,10 @@ def get_operation(operation_id: str, request: Request) -> dict[str, object]:
     session: Session | None = None
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
-        record = PersistentOperationService(session).get(operation_id)
-        session.close()
+        try:
+            record = PersistentOperationService(session).get(operation_id)
+        finally:
+            session.close()
     else:
         record = registry.get(operation_id)
     if record is None:
@@ -25,8 +27,12 @@ def get_operation(operation_id: str, request: Request) -> dict[str, object]:
     data: dict[str, object] = {
         "operation_id": record.operation_id,
         "status": record.status,
-        "progress": {"completed": 0, "total": 1, "unit": "operation"},
-            "result_ref": getattr(record, "result_ref", None),
+        "progress": {
+            "completed": getattr(record, "progress", 0),
+            "total": 100,
+            "unit": "percent",
+        },
+        "result_ref": getattr(record, "result_ref", None),
         "failure": record.error,
     }
     return success(data, request_id=getattr(request.state, "request_id", None))

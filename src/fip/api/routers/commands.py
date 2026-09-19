@@ -23,14 +23,14 @@ def _submit_operation(
     kind: str,
     resource_id: str,
     idempotency_key: str,
-) -> tuple[Any, Session | None]:
+) -> Any:
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
-        return (
-            PersistentOperationService(session).submit(kind, resource_id, idempotency_key),
-            session,
-        )
-    return registry.submit(kind, resource_id, idempotency_key), None
+        try:
+            return PersistentOperationService(session).submit(kind, resource_id, idempotency_key)
+        finally:
+            session.close()
+    return registry.submit(kind, resource_id, idempotency_key)
 
 
 def _request_id(request: Request) -> str | None:
@@ -50,9 +50,7 @@ def submit_optimization(
     id: str, request: Request, payload: dict[str, Any] = Body(...)
 ) -> dict[str, Any]:
     optimization_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
-    record, session = _submit_operation(request, "optimization", optimization_id, _key(request))
-    if session is not None:
-        session.close()
+    record = _submit_operation(request, "optimization", optimization_id, _key(request))
     return success(
         {
             "operation_id": record.operation_id,
@@ -84,9 +82,7 @@ def validate_backtest(
     "/backtests/{id}/runs", operation_id="runBacktest", status_code=status.HTTP_202_ACCEPTED
 )
 def run_backtest(id: str, request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    record, session = _submit_operation(request, "backtest", id, _key(request))
-    if session is not None:
-        session.close()
+    record = _submit_operation(request, "backtest", id, _key(request))
     return success(
         {"operation_id": record.operation_id, "backtest_id": id, "status": record.status},
         request_id=_request_id(request),
