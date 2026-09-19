@@ -5,11 +5,12 @@ from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.orm import Session
 
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
-from fip.api.errors import InvalidQueryError
+from fip.api.errors import ConflictError, InvalidQueryError
 from fip.api.fund_queries import FundQueries
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
@@ -326,7 +327,30 @@ def get_backtest_result(
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
     row = dict(repository.backtests.get(id))
-    return success(row.get("result", row), request_id=_request_id(request))
+    result = row.get("result")
+    if not isinstance(result, Mapping):
+        if not isinstance(getattr(repository.backtests, "session", None), Session):
+            return success(row, request_id=_request_id(request))
+        raise ConflictError("Backtest result is not available")
+    required = {
+        "validation_status",
+        "backtest_mode",
+        "period",
+        "final_value",
+        "summary",
+        "excess_return",
+        "significance_verdict",
+        "validation_summary",
+    }
+    if not required <= set(result):
+        raise ConflictError("Backtest result is incomplete")
+    return success(
+        result,
+        request_id=_request_id(request),
+        configuration_versions=row.get("configuration_versions", {}),
+        strategy_version=row.get("strategy_version", "UNKNOWN"),
+        code_version=row.get("code_version", "UNKNOWN"),
+    )
 
 
 @router.get("/backtests/{id}/performance", operation_id="getBacktestPerformance")
