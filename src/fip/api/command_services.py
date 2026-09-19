@@ -5,8 +5,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from fip.api.audit import AuditWriter
 from fip.api.errors import InvalidQueryError
-from fip.services.data_service.models.governance import AuditLog
 
 
 class DecisionCommandService:
@@ -29,16 +29,13 @@ class DecisionCommandService:
             raise InvalidQueryError("reason is required for decision reviews")
         audit_id = f"AUD-{decision_id}-{principal_id}"
         if self._session is not None:
-            audit = AuditLog(
-                resource_type="decision",
-                resource_id=decision_id,
+            audit_id = AuditWriter(self._session).review(
+                decision_id=decision_id,
+                actor=principal_id,
                 action=action,
-                operator=principal_id,
-                detail={"reason": reason, "request_id": request_id},
+                reason=reason,
+                request_id=request_id,
             )
-            self._session.add(audit)
-            self._session.flush()
-            audit_id = str(audit.id)
         return {
             "decision_id": decision_id,
             "decision_status": action,

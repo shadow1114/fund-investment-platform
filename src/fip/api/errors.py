@@ -28,6 +28,11 @@ class ForbiddenError(ApiError):
         super().__init__(403, "FORBIDDEN", message)
 
 
+class AuthenticationError(ApiError):
+    def __init__(self, message: str = "Authentication is required") -> None:
+        super().__init__(401, "UNAUTHENTICATED", message)
+
+
 class ConflictError(ApiError):
     def __init__(self, message: str, details: Any | None = None) -> None:
         super().__init__(409, "CONFLICT", message, details)
