@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from fip.api.context import principal_from_request
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
-from fip.api.errors import NotFoundError
 from fip.api.repositories import ApiRepositories
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
@@ -88,77 +87,119 @@ def list_portfolios(
     return success(rows, request_id=_request_id(request), **_page_meta(page, page_size, len(rows)))
 
 
-def _not_found(resource: str, identifier: str) -> None:
-    raise NotFoundError(resource, identifier)
-
-
 @router.get("/funds/{fund_id}", operation_id="getFund")
-def get_fund(fund_id: str, request: Request, as_of_date: date | None = None) -> dict[str, Any]:
-    _not_found("fund", fund_id)
-    return success({}, request_id=_request_id(request))
+def get_fund(
+    fund_id: str,
+    request: Request,
+    as_of_date: date | None = None,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    return success(dict(repository.funds.get(fund_id)), request_id=_request_id(request))
 
 
 @router.get("/funds/{fund_id}/nav-series", operation_id="getFundNavSeries")
-def get_nav_series(fund_id: str, request: Request) -> dict[str, Any]:
-    _not_found("fund", fund_id)
+def get_nav_series(
+    fund_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.funds.get(fund_id)
     return success([], request_id=_request_id(request))
 
 
 @router.get("/funds/{fund_id}/evaluations", operation_id="getFundEvaluations")
-def get_evaluations(fund_id: str, request: Request) -> dict[str, Any]:
-    _not_found("fund", fund_id)
+def get_evaluations(
+    fund_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.funds.get(fund_id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/funds/{fund_id}/scores", operation_id="getFundScores")
-def get_scores(fund_id: str, request: Request) -> dict[str, Any]:
-    _not_found("fund", fund_id)
+def get_scores(
+    fund_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.funds.get(fund_id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/fund-universes/{universe_id}", operation_id="getUniverse")
-def get_universe(universe_id: str, request: Request) -> dict[str, Any]:
-    _not_found("fund universe", universe_id)
-    return success({}, request_id=_request_id(request))
+def get_universe(
+    universe_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    return success(dict(repository.universes.get(universe_id)), request_id=_request_id(request))
 
 
 @router.get("/portfolios/{id}", operation_id="getPortfolio")
-def get_portfolio(id: str, request: Request) -> dict[str, Any]:
-    _not_found("portfolio", id)
-    return success({}, request_id=_request_id(request))
+def get_portfolio(
+    id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    return success(dict(repository.portfolios.get(id)), request_id=_request_id(request))
 
 
 @router.get("/portfolios/{id}/optimizations/{optimization_id}", operation_id="getOptimization")
-def get_optimization(id: str, optimization_id: str, request: Request) -> dict[str, Any]:
-    _not_found("optimization", optimization_id)
+def get_optimization(
+    id: str,
+    optimization_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.get("optimization", optimization_id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/decisions/{decision_id}", operation_id="getDecision")
-def get_decision(decision_id: str, request: Request) -> dict[str, Any]:
-    _not_found("decision", decision_id)
-    return success({}, request_id=_request_id(request))
+def get_decision(
+    decision_id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    return success(dict(repository.decisions.get(decision_id)), request_id=_request_id(request))
 
 
 @router.get("/backtests/{id}/status", operation_id="getBacktestStatus")
-def get_backtest_status(id: str, request: Request) -> dict[str, Any]:
-    _not_found("backtest", id)
+def get_backtest_status(
+    id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.backtests.get(id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/backtests/{id}/result", operation_id="getBacktestResult")
-def get_backtest_result(id: str, request: Request) -> dict[str, Any]:
-    _not_found("backtest", id)
+def get_backtest_result(
+    id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.backtests.get(id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/backtests/{id}/performance", operation_id="getBacktestPerformance")
-def get_backtest_performance(id: str, request: Request) -> dict[str, Any]:
-    _not_found("backtest", id)
+def get_backtest_performance(
+    id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.backtests.get(id)
     return success({}, request_id=_request_id(request))
 
 
 @router.get("/backtests/{id}/bias-check", operation_id="getBacktestBiasCheck")
-def get_backtest_bias_check(id: str, request: Request) -> dict[str, Any]:
-    _not_found("backtest", id)
+def get_backtest_bias_check(
+    id: str,
+    request: Request,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    repository.backtests.get(id)
     return success({}, request_id=_request_id(request))

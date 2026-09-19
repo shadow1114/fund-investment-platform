@@ -7,8 +7,17 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 import fip.api.app as api_app
+from fip.api.dependencies import get_api_repositories
 from fip.api.errors import NotFoundError
-from fip.api.repositories import ApiRepositories, RepositoryAdapter
+from fip.api.repositories import (
+    ApiRepositories,
+    BacktestRepository,
+    DecisionRepository,
+    FundRepository,
+    PortfolioRepository,
+    RepositoryAdapter,
+    UniverseRepository,
+)
 from fip.api.routers.reads import get_repository
 
 
@@ -27,6 +36,13 @@ class _ClosingSession:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FoundFundRepository(FundRepository):
+    def _get_row(self, identifier: str) -> Mapping[str, object] | None:
+        if identifier == "fund-1":
+            return {"id": "fund-1", "name": "Alpha"}
+        return None
 
 
 def test_list_rows_have_a_deterministic_id_tiebreaker() -> None:
@@ -122,3 +138,23 @@ def test_app_lifespan_owns_configured_engine_and_disposes_it(
         assert engine.disposed is False
 
     assert engine.disposed is True
+
+
+def test_fund_detail_route_uses_the_injected_canonical_repository() -> None:
+    """A direct `_not_found` call would discard a repository detail result."""
+    session = object()
+    repositories = ApiRepositories(
+        funds=_FoundFundRepository(session),
+        universes=UniverseRepository(session),
+        portfolios=PortfolioRepository(session),
+        decisions=DecisionRepository(session),
+        backtests=BacktestRepository(session),
+    )
+    app = api_app.create_app()
+    app.dependency_overrides[get_api_repositories] = lambda: repositories
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/funds/fund-1")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"id": "fund-1", "name": "Alpha"}
