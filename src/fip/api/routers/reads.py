@@ -13,8 +13,8 @@ from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
 from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError, NotFoundError
 from fip.api.fund_queries import FundQueries
-from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.policy import require_read_access
+from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries

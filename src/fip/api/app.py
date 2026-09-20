@@ -89,7 +89,9 @@ def create_app(
 
         started_at = perf_counter()
         if request.url.path.startswith("/api/v1"):
-            principal_key = request.headers.get("X-User-ID") or (request.client.host if request.client else "unknown")
+            principal_key = request.headers.get("X-User-ID") or (
+                request.client.host if request.client else "unknown"
+            )
             decision = app.state.rate_limiter.allow(principal_key, request.url.path)
             if not decision.allowed:
                 response = JSONResponse(
@@ -108,7 +110,11 @@ def create_app(
                 return response
             query_values = parse_qs(request.url.query)
             page_size = query_values.get("page_size", [None])[0]
-            if page_size is not None and page_size.isdigit() and int(page_size) > runtime_settings.max_page_size:
+            if (
+                page_size is not None
+                and page_size.isdigit()
+                and int(page_size) > runtime_settings.max_page_size
+            ):
                 response = JSONResponse(
                     status_code=422,
                     content=ErrorEnvelope(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -26,15 +26,15 @@ class JobOutcome:
     error_message: str | None = None
 
     @classmethod
-    def completed(cls, result_ref: str | None = None) -> "JobOutcome":
+    def completed(cls, result_ref: str | None = None) -> JobOutcome:
         return cls(ExecutionStatus.COMPLETED.value, result_ref=result_ref)
 
     @classmethod
-    def blocked(cls, code: str, message: str) -> "JobOutcome":
+    def blocked(cls, code: str, message: str) -> JobOutcome:
         return cls(ExecutionStatus.BLOCKED.value, error_code=code, error_message=message)
 
     @classmethod
-    def failed(cls, code: str, message: str) -> "JobOutcome":
+    def failed(cls, code: str, message: str) -> JobOutcome:
         return cls(ExecutionStatus.FAILED.value, error_code=code, error_message=message)
 
 

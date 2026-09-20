@@ -14,6 +14,8 @@ make api-dev
 
 Plan-6 增加本地作业进程：`make worker-dev` 轮询 PostgreSQL 中的计算作业；API 就绪检查使用 `make api-health-check`。两者均为本地命令，不需要容器。
 
+Plan-6 完整验收使用 `make plan6-check`，会依次运行 Python/API/PostgreSQL/Worker 检查和前端检查。
+
 ## 前端
 
 本地启动：

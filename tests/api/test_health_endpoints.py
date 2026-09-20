@@ -9,7 +9,9 @@ from fip.settings import Settings
 def _offline_app():
     settings = Settings(database_url="sqlite://")
     app = create_app(settings_override=settings)
-    app.state.api_engine = SimpleNamespace(connect=lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+    app.state.api_engine = SimpleNamespace(
+        connect=lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+    )
     return app
 
 

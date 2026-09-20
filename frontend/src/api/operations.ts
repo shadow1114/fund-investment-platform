@@ -17,7 +17,9 @@ export async function pollOperation(
       throw new DOMException("Operation polling aborted", "AbortError");
     }
     const operation = unwrapResponse(await getOperation(operationId));
-    if (["COMPLETED", "BLOCKED", "FAILED", "CANCELLED"].includes(operation.status)) {
+    if (
+      ["COMPLETED", "BLOCKED", "FAILED", "CANCELLED"].includes(operation.status)
+    ) {
       return operation;
     }
     if (attempt + 1 < maxAttempts) {

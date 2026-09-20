@@ -28,4 +28,6 @@ def test_postgres_portfolio_visibility_uses_owner_and_viewers(db_session):
     assert resource is not None
     policy = ResourcePolicy()
     assert policy.can_read(Principal("USR-VIEWER", ("Researcher",), False), "portfolio", resource)
-    assert not policy.can_read(Principal("USR-OTHER", ("Researcher",), False), "portfolio", resource)
+    assert not policy.can_read(
+        Principal("USR-OTHER", ("Researcher",), False), "portfolio", resource
+    )

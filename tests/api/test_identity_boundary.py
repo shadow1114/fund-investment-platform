@@ -32,7 +32,9 @@ def _request(headers: dict[str, str], *, environment: str) -> Request:
 
 def test_production_rejects_development_headers():
     with pytest.raises(AuthenticationError):
-        resolve_principal(_request({"X-User-ID": "USR-1", "X-Roles": "admin"}, environment="production"))
+        resolve_principal(
+            _request({"X-User-ID": "USR-1", "X-Roles": "admin"}, environment="production")
+        )
 
 
 def test_development_headers_create_principal():

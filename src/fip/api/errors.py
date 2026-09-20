@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 ERROR_CODES: dict[str, tuple[int, bool]] = {
     "VALIDATION_ERROR": (422, False),
     "UNAUTHENTICATED": (401, False),
@@ -38,7 +37,12 @@ class ServiceUnavailableError(ApiError):
 
 class RateLimitedError(ApiError):
     def __init__(self, retry_after: int) -> None:
-        super().__init__(429, "RATE_LIMITED", "Request rate limit exceeded", {"retry_after": retry_after})
+        super().__init__(
+            429,
+            "RATE_LIMITED",
+            "Request rate limit exceeded",
+            {"retry_after": retry_after},
+        )
 
 
 class NotFoundError(ApiError):

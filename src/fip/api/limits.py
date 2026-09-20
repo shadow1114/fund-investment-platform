@@ -18,10 +18,12 @@ class LocalRateLimiter:
         self.limit_per_minute = limit_per_minute
         self._events: dict[str, deque[float]] = defaultdict(deque)
 
-    def with_limit(self, limit_per_minute: int) -> "LocalRateLimiter":
+    def with_limit(self, limit_per_minute: int) -> LocalRateLimiter:
         return LocalRateLimiter(limit_per_minute)
 
-    def allow(self, principal_key: str, route_key: str, now: float | None = None) -> RateLimitDecision:
+    def allow(
+        self, principal_key: str, route_key: str, now: float | None = None
+    ) -> RateLimitDecision:
         current = monotonic() if now is None else now
         key = f"{principal_key}:{route_key}"
         events = self._events[key]

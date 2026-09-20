@@ -5,9 +5,12 @@ import { ApiError } from "./http";
 
 describe("live API mode", () => {
   it("uses VITE_API_BASE_URL only when configured", () => {
-    expect(apiBaseUrl({ VITE_API_BASE_URL: "http://127.0.0.1:8000" }, "http://localhost:5173")).toBe(
-      "http://127.0.0.1:8000",
-    );
+    expect(
+      apiBaseUrl(
+        { VITE_API_BASE_URL: "http://127.0.0.1:8000" },
+        "http://localhost:5173",
+      ),
+    ).toBe("http://127.0.0.1:8000");
     expect(apiBaseUrl({ VITE_API_BASE_URL: "" }, "http://localhost:5173")).toBe(
       "http://localhost:5173",
     );

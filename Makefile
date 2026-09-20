@@ -2,7 +2,7 @@ PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 export PATH := .venv/bin:$(PATH)
 
-.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-health-check worker-dev api-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
+.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-health-check worker-dev api-check plan6-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
 
 test-unit:
 	$(PYTEST) tests/unit -v
@@ -36,6 +36,13 @@ api-check:
 
 test-api-integration:
 	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/integration/test_api_*.py -q -m integration
+
+plan6-check:
+	LC_ALL=en_US.UTF-8 make check
+	LC_ALL=en_US.UTF-8 make api-check
+	LC_ALL=en_US.UTF-8 make test-api-integration
+	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/integration/test_job_worker_postgres.py tests/integration/test_api_policy_postgres.py tests/integration/test_plan6_acceptance.py -q -m integration
+	LC_ALL=en_US.UTF-8 make frontend-check
 
 lint:
 	.venv/bin/ruff check src tests
