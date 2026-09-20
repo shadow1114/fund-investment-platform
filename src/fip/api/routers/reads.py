@@ -14,6 +14,7 @@ from fip.api.dependencies import get_api_repositories
 from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError, NotFoundError
 from fip.api.fund_queries import FundQueries
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
+from fip.api.policy import require_read_access
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries
@@ -33,16 +34,7 @@ def _ensure_portfolio_visible(
         if not isinstance(getattr(repository.portfolios, "session", None), Session):
             return
         raise
-    owner = row.get("owner_user_id")
-    viewers = row.get("viewer_user_ids", [])
-    if not isinstance(owner, str) or not isinstance(viewers, list):
-        if isinstance(getattr(repository.portfolios, "session", None), Session):
-            raise ForbiddenError()
-        return
-    if principal.user_id != owner and principal.user_id not in viewers and not any(
-        role.lower() in {"administrator", "admin"} for role in principal.roles
-    ):
-        raise ForbiddenError()
+    require_read_access(principal, "portfolio", row)
 
 
 def get_repository(

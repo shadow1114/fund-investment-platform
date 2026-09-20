@@ -18,6 +18,7 @@ from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import OperationRegistry, PersistentOperationService
+from fip.api.policy import require_read_access
 from fip.api.schemas import (
     BacktestCreatedModel,
     BacktestRunModel,
@@ -91,15 +92,7 @@ def submit_optimization(
             portfolio = session.get(PortfolioRecord, id)
             if portfolio is None:
                 raise NotFoundError("portfolio", id)
-            if hasattr(portfolio, "owner_user_id"):
-                if (
-                    portfolio.owner_user_id != principal.user_id
-                    and principal.user_id not in portfolio.viewer_user_ids
-                    and not any(
-                        role.lower() in {"admin", "administrator"} for role in principal.roles
-                    )
-                ):
-                    raise ForbiddenError()
+            require_read_access(principal, "portfolio", portfolio)
             existing_job = session.execute(
                 select(CalculationJob).where(CalculationJob.idempotency_key == request_key)
             ).scalar_one_or_none()
@@ -241,12 +234,7 @@ def review_decision(
             portfolio = session.get(PortfolioRecord, snapshot.portfolio_id)
             if portfolio is None:
                 raise ForbiddenError()
-            if (
-                portfolio.owner_user_id != principal.user_id
-                and principal.user_id not in portfolio.viewer_user_ids
-                and not any(role.lower() in {"admin", "administrator"} for role in principal.roles)
-            ):
-                raise ForbiddenError()
+            require_read_access(principal, "portfolio", portfolio)
             original_weights = snapshot.payload.get("proposed_weights", [])
         final_weights: Any = (
             payload.get("overridden_weights")
