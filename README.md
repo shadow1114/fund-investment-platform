@@ -12,6 +12,8 @@ make api-dev
 
 服务默认监听 `http://127.0.0.1:8000`，OpenAPI 文档位于 `/docs`，契约 JSON 位于 `/openapi.json`。API 测试和路径校验使用 `make api-check`。开发环境会从 `X-User-ID`/`X-Roles` 读取临时身份；生产认证中间件接入前不能将其视为生产鉴权。数据库连接沿用 `FIP_DATABASE_URL`。
 
+Plan-6 增加本地作业进程：`make worker-dev` 轮询 PostgreSQL 中的计算作业；API 就绪检查使用 `make api-health-check`。两者均为本地命令，不需要容器。
+
 ## 前端
 
 本地启动：

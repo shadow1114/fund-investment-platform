@@ -2,7 +2,7 @@ PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 export PATH := .venv/bin:$(PATH)
 
-.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
+.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-health-check worker-dev api-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
 
 test-unit:
 	$(PYTEST) tests/unit -v
@@ -24,6 +24,12 @@ migrate:
 
 api-dev:
 	PYTHONPATH=src .venv/bin/uvicorn fip.api.app:app --reload
+
+api-health-check:
+	curl --fail http://127.0.0.1:8000/health/ready
+
+worker-dev:
+	PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker
 
 api-check:
 	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/api -q

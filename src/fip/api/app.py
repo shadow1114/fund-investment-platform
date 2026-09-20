@@ -47,8 +47,14 @@ def create_api_engine(database_url: str) -> Engine:
     return create_engine(database_url, future=True)
 
 
-def create_app(*, persistent_operations: bool = False, strict_contracts: bool = False) -> FastAPI:
-    engine = create_api_engine(settings.database_url)
+def create_app(
+    *,
+    settings_override: Any | None = None,
+    persistent_operations: bool = False,
+    strict_contracts: bool = False,
+) -> FastAPI:
+    runtime_settings = settings_override or settings
+    engine = create_api_engine(runtime_settings.database_url)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -65,6 +71,7 @@ def create_app(*, persistent_operations: bool = False, strict_contracts: bool = 
         lifespan=lifespan,
     )
     app.state.api_engine = engine
+    app.state.settings = runtime_settings
     app.state.persistent_operations = persistent_operations
 
     @app.middleware("http")
