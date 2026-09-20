@@ -35,6 +35,7 @@ class CalculationJob(Base):
         # 与迁移 0005 里的 CREATE INDEX 对齐 —— 只写进迁移会让 Base.metadata
         # 不知道它，后续 autogenerate 会把它当作待删除对象。
         Index("ix_calculation_job_status", "status"),
+        Index("ix_calculation_job_claimable", "status", "lease_expires_at", "created_at"),
         {"schema": "governance"},
     )
 
@@ -49,6 +50,13 @@ class CalculationJob(Base):
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
