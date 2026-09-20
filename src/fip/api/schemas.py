@@ -267,3 +267,151 @@ class DecisionPayloadModel(ReadPayloadModel):
 
 class BacktestPayloadModel(ReadPayloadModel):
     pass
+
+
+# Plan-7 strict domain payloads.  These classes intentionally sit beside the
+# legacy common projection above until every route has been migrated to the
+# operation registry; none of the domain models accepts arbitrary nested keys.
+class FundSummaryModel(StrictModel):
+    fund_id: str
+    fund_name: str
+    share_class: str
+    fund_classification: str
+    management_company_id: str
+    inception_date: str
+    lifecycle_status: Literal[
+        "NORMAL", "SUSPENDED_SUBSCRIPTION", "LIQUIDATED", "MERGED", "TRANSFORMED", "UNKNOWN"
+    ]
+    investment_eligibility: Literal[
+        "FULLY_ELIGIBLE", "HOLD_ONLY", "LIMITED", "EXIT_ONLY", "NOT_TRADABLE", "UNKNOWN"
+    ]
+
+
+class BenchmarkComponentModel(StrictModel):
+    benchmark_id: str
+    weight: float
+
+
+class BenchmarkModel(StrictModel):
+    benchmark_id: str
+    benchmark_name: str
+    benchmark_type: str
+    mapping_version: str
+    components: list[BenchmarkComponentModel] | None
+
+
+class FeeModel(StrictModel):
+    expense_type: str
+    expense_rate: float
+    included_in_nav: Literal["TRUE", "FALSE", "UNKNOWN"]
+    included_in_backtest: bool
+    inclusion_source: str
+
+
+class FundModel(FundSummaryModel):
+    classification_version: str
+    manager_ids: list[str]
+    benchmark: BenchmarkModel
+    fee_structure: list[FeeModel]
+
+
+class NavPointModel(StrictModel):
+    date: str
+    nav: float | None
+    nav_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    nav_reason: str | None
+    reason_code: str | None = None
+
+
+class NavSeriesModel(StrictModel):
+    fund_id: str
+    points: list[NavPointModel]
+
+
+class FactorResultModel(StrictModel):
+    factor_id: str
+    window: str
+    raw_value: float | None
+    normalized_value: float | None
+    status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    reason_code: str | None
+    direction: Literal["HIGHER_IS_BETTER", "LOWER_IS_BETTER", "UNKNOWN"]
+
+
+class FundEvaluationModel(StrictModel):
+    fund_id: str
+    evaluation_period: str
+    as_of_date: str
+    evaluation_status: Literal["NOT_ELIGIBLE", "COMPLETED", "PARTIAL", "FAILED", "UNKNOWN"]
+    evaluation_profile: str
+    data_completeness: DataCompleteness
+    factor_results: list[FactorResultModel]
+
+
+class SubScoresModel(StrictModel):
+    return_score: float | None
+    return_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    return_score_reason: str | None
+    risk_score: float | None
+    risk_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    risk_score_reason: str | None
+    risk_adjusted_score: float | None
+    risk_adjusted_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    risk_adjusted_score_reason: str | None
+    stability_score: float | None
+    stability_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    stability_score_reason: str | None
+    relative_performance_score: float | None
+    relative_performance_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    relative_performance_score_reason: str | None
+
+
+class ScoreAttributionModel(StrictModel):
+    factor_id: str
+    window: str | None = None
+    raw_value: float | None
+    normalized_value: float | None = None
+    direction: Literal["HIGHER_IS_BETTER", "LOWER_IS_BETTER", "UNKNOWN"] | None = None
+    status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    reason_code: str | None
+    exclusion_reason: str | None = None
+    effectiveness_verdict: Literal["VALID", "INVALID", "UNKNOWN"] | None = None
+    weight: float
+    original_weight: float | None = None
+    weight_source: Literal["PROFILE_FIXED_V1", "OPTIMIZED", "UNKNOWN"] | None = None
+    weighted_contribution: float | None = None
+    sub_score: str | None = None
+    reallocated_to: list[dict[str, float | str]] | None = None
+
+
+class FundScoreModel(StrictModel):
+    fund_id: str
+    evaluation_period: str
+    as_of_date: str
+    total_score: float | None
+    total_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    total_score_reason: str | None
+    sub_scores: SubScoresModel
+    attribution: list[ScoreAttributionModel]
+    data_completeness: DataCompleteness
+    score_status: Literal["COMPLETED", "PARTIAL", "VALIDATION_PENDING", "FAILED", "UNKNOWN"]
+
+
+class FundListPayloadModel(FundSummaryModel):
+    pass
+
+
+class FundPayloadModel(FundModel):
+    pass
+
+
+class NavSeriesPayloadModel(NavSeriesModel):
+    pass
+
+
+class EvaluationPayloadModel(FundEvaluationModel):
+    pass
+
+
+class ScorePayloadModel(FundScoreModel):
+    pass

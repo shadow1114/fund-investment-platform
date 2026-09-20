@@ -6,8 +6,8 @@ Complete strict nested response models and freeze parity across the Python API, 
 
 ## Task status
 
-- [ ] Task 1 — inventory and lock nested component matrix
-- [ ] Task 2 — fund, NAV, evaluation, and score models
+- [x] Task 1 — inventory and lock nested component matrix
+- [x] Task 2 — fund, NAV, evaluation, and score models
 - [ ] Task 3 — universe, portfolio, optimization, decision, and backtest models
 - [ ] Task 4 — endpoint response binding
 - [ ] Task 5 — frontend generated type synchronization
