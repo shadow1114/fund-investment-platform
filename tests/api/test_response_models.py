@@ -9,6 +9,7 @@ from fip.api.schemas import (
     DecisionReviewOutcomeModel,
     MetricTriple,
     OptimizationSubmissionModel,
+    ReadPayloadModel,
 )
 
 
@@ -38,3 +39,10 @@ def test_review_model_rejects_nullable_reason_and_unknown_status() -> None:
         OptimizationSubmissionModel(
             operation_id="OP-1", status="RUNNING", optimization_id="OPT-1", extra="x"
         )
+
+
+def test_read_payload_rejects_unknown_top_level_fields_and_metric_status() -> None:
+    with pytest.raises(ValidationError):
+        ReadPayloadModel(fund_id="000001", unexpected="x")
+    with pytest.raises(ValidationError):
+        ReadPayloadModel(fund_id="000001", nav_status="BROKEN")
