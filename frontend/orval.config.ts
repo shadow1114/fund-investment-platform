@@ -13,6 +13,10 @@ export default defineConfig({
         fetch: {
           explode: false,
         },
+        mutator: {
+          path: "./src/api/client.ts",
+          name: "apiFetch",
+        },
       },
     },
   },

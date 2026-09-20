@@ -135,13 +135,18 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details: Record<string, unknown>;
+  readonly requestId: string | null;
+  readonly retryAfterSeconds: number | null;
 
-  constructor(status: number, failure: ApiFailure) {
+  constructor(status: number, failure: ApiFailure, headers?: Headers) {
     super(failure.message);
     this.name = "ApiError";
     this.status = status;
     this.code = failure.code;
     this.details = failure.details;
+    this.requestId = headers?.get("X-Request-ID") ?? null;
+    const retryAfter = headers?.get("Retry-After");
+    this.retryAfterSeconds = retryAfter ? Number(retryAfter) : null;
   }
 }
 
@@ -252,7 +257,7 @@ export function unwrapResponse<Response extends GeneratedResponse>(
   options: UnwrapOptions = {},
 ): SuccessfulData<Response> {
   if (response.data.error !== null) {
-    throw new ApiError(response.status, response.data.error);
+    throw new ApiError(response.status, response.data.error, response.headers);
   }
 
   if (response.status < 200 || response.status >= 300) {

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { getOperationQueryOptions } from "../api/queries";
 import { ErrorState } from "./ErrorState";
 type Props = {
@@ -18,10 +19,14 @@ export const OperationProgress = ({
   resultRef,
   pollIntervalMs = 1000,
 }: Props) => {
+  const pollCount = useRef(0);
   const q = useQuery({
     ...getOperationQueryOptions(operationId),
-    refetchInterval: (query) =>
-      query.state.data?.status === "RUNNING" ? pollIntervalMs : false,
+    refetchInterval: (query) => {
+      if (query.state.data?.status !== "RUNNING") return false;
+      pollCount.current += 1;
+      return pollCount.current <= 60 ? pollIntervalMs : false;
+    },
   });
   const op = q.data;
   if (q.isLoading) return <div>加载中</div>;

@@ -20,7 +20,7 @@ Vite 启动后打开终端显示的本地地址。首次执行浏览器测试时
 
 ### API 地址与测试数据
 
-生成的客户端目前请求同源相对路径 `/api/v1/...`。实时模式要求页面所在 origin 提供冻结的 `/api/v1` 路由（可由同源反向代理转发到 API 服务）；Vite 当前没有 `/api` 代理。`VITE_API_BASE_URL` 尚未接入客户端，设置它不会改变请求地址。独立运行 `npm run dev` 可以打开页面，但在没有上述 API 服务时数据请求会显示错误。
+生成的客户端默认请求同源 `/api/v1/...`。设置 `VITE_API_BASE_URL=http://127.0.0.1:8000` 后，生成客户端会把相对路径解析到该 API 地址；未设置时仍要求页面所在 origin 提供冻结的 `/api/v1` 路由。独立运行 `npm run dev` 可以打开页面，但在没有上述 API 服务时数据请求会显示错误。非 2xx 响应保留 `status`、`error.code`、`X-Request-ID` 和 `Retry-After`，不会被转换为空列表。
 
 `src/test/contractFixtures.ts` 和 MSW handlers 只在 Vitest 测试中使用；Playwright 烟测在浏览器测试里拦截请求并返回同一组契约 fixtures。API server 的实时契约由仓库根目录 `make api-check` 单独验收。
 

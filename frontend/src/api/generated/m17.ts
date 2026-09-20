@@ -42,6 +42,8 @@ import type {
   UniverseResponseResponse,
 } from "./m17.schemas";
 
+import { apiFetch } from "../client";
+
 export type HTTPStatusCode1xx = 100 | 101 | 102 | 103;
 export type HTTPStatusCode2xx = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207;
 export type HTTPStatusCode3xx = 300 | 301 | 302 | 303 | 304 | 305 | 307 | 308;
@@ -111,19 +113,10 @@ export const getGetSessionUrl = () => {
 export const getSession = async (
   options?: RequestInit,
 ): Promise<getSessionResponse> => {
-  const res = await fetch(getGetSessionUrl(), {
+  return apiFetch<getSessionResponse>(getGetSessionUrl(), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getSessionResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getSessionResponse;
 };
 
 export type getOperationResponse200 = {
@@ -154,19 +147,10 @@ export const getOperation = async (
   operationId: string,
   options?: RequestInit,
 ): Promise<getOperationResponse> => {
-  const res = await fetch(getGetOperationUrl(operationId), {
+  return apiFetch<getOperationResponse>(getGetOperationUrl(operationId), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOperationResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getOperationResponse;
 };
 
 export type listFundsResponse200 = {
@@ -209,19 +193,10 @@ export const listFunds = async (
   params?: ListFundsParams,
   options?: RequestInit,
 ): Promise<listFundsResponse> => {
-  const res = await fetch(getListFundsUrl(params), {
+  return apiFetch<listFundsResponse>(getListFundsUrl(params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listFundsResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as listFundsResponse;
 };
 
 export type getFundResponse200 = {
@@ -264,15 +239,10 @@ export const getFund = async (
   params?: GetFundParams,
   options?: RequestInit,
 ): Promise<getFundResponse> => {
-  const res = await fetch(getGetFundUrl(fundId, params), {
+  return apiFetch<getFundResponse>(getGetFundUrl(fundId, params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getFundResponse["data"] = body ? JSON.parse(body) : {};
-  return { data, status: res.status, headers: res.headers } as getFundResponse;
 };
 
 export type getFundNavSeriesResponse200 = {
@@ -319,19 +289,13 @@ export const getFundNavSeries = async (
   params?: GetFundNavSeriesParams,
   options?: RequestInit,
 ): Promise<getFundNavSeriesResponse> => {
-  const res = await fetch(getGetFundNavSeriesUrl(fundId, params), {
-    ...options,
-    method: "GET",
-  });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getFundNavSeriesResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getFundNavSeriesResponse;
+  return apiFetch<getFundNavSeriesResponse>(
+    getGetFundNavSeriesUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export type getFundEvaluationsResponse200 = {
@@ -380,19 +344,13 @@ export const getFundEvaluations = async (
   params?: GetFundEvaluationsParams,
   options?: RequestInit,
 ): Promise<getFundEvaluationsResponse> => {
-  const res = await fetch(getGetFundEvaluationsUrl(fundId, params), {
-    ...options,
-    method: "GET",
-  });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getFundEvaluationsResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getFundEvaluationsResponse;
+  return apiFetch<getFundEvaluationsResponse>(
+    getGetFundEvaluationsUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export type getFundScoresResponse200 = {
@@ -439,19 +397,10 @@ export const getFundScores = async (
   params?: GetFundScoresParams,
   options?: RequestInit,
 ): Promise<getFundScoresResponse> => {
-  const res = await fetch(getGetFundScoresUrl(fundId, params), {
+  return apiFetch<getFundScoresResponse>(getGetFundScoresUrl(fundId, params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getFundScoresResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getFundScoresResponse;
 };
 
 export type listUniversesResponse200 = {
@@ -494,19 +443,10 @@ export const listUniverses = async (
   params?: ListUniversesParams,
   options?: RequestInit,
 ): Promise<listUniversesResponse> => {
-  const res = await fetch(getListUniversesUrl(params), {
+  return apiFetch<listUniversesResponse>(getListUniversesUrl(params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listUniversesResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as listUniversesResponse;
 };
 
 export type getUniverseResponse200 = {
@@ -537,19 +477,10 @@ export const getUniverse = async (
   universeId: string,
   options?: RequestInit,
 ): Promise<getUniverseResponse> => {
-  const res = await fetch(getGetUniverseUrl(universeId), {
+  return apiFetch<getUniverseResponse>(getGetUniverseUrl(universeId), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getUniverseResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getUniverseResponse;
 };
 
 export type listPortfoliosResponse200 = {
@@ -592,19 +523,10 @@ export const listPortfolios = async (
   params?: ListPortfoliosParams,
   options?: RequestInit,
 ): Promise<listPortfoliosResponse> => {
-  const res = await fetch(getListPortfoliosUrl(params), {
+  return apiFetch<listPortfoliosResponse>(getListPortfoliosUrl(params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listPortfoliosResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as listPortfoliosResponse;
 };
 
 export type getPortfolioResponse200 = {
@@ -635,19 +557,10 @@ export const getPortfolio = async (
   id: string,
   options?: RequestInit,
 ): Promise<getPortfolioResponse> => {
-  const res = await fetch(getGetPortfolioUrl(id), {
+  return apiFetch<getPortfolioResponse>(getGetPortfolioUrl(id), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getPortfolioResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getPortfolioResponse;
 };
 
 export type submitOptimizationResponse202 = {
@@ -681,21 +594,12 @@ export const submitOptimization = async (
   optimizationRequest: OptimizationRequest,
   options?: RequestInit,
 ): Promise<submitOptimizationResponse> => {
-  const res = await fetch(getSubmitOptimizationUrl(id), {
+  return apiFetch<submitOptimizationResponse>(getSubmitOptimizationUrl(id), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
     body: JSON.stringify(optimizationRequest),
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: submitOptimizationResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as submitOptimizationResponse;
 };
 
 export type getOptimizationResponse200 = {
@@ -727,19 +631,13 @@ export const getOptimization = async (
   optimizationId: string,
   options?: RequestInit,
 ): Promise<getOptimizationResponse> => {
-  const res = await fetch(getGetOptimizationUrl(id, optimizationId), {
-    ...options,
-    method: "GET",
-  });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOptimizationResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getOptimizationResponse;
+  return apiFetch<getOptimizationResponse>(
+    getGetOptimizationUrl(id, optimizationId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export type getDecisionResponse200 = {
@@ -770,19 +668,10 @@ export const getDecision = async (
   decisionId: string,
   options?: RequestInit,
 ): Promise<getDecisionResponse> => {
-  const res = await fetch(getGetDecisionUrl(decisionId), {
+  return apiFetch<getDecisionResponse>(getGetDecisionUrl(decisionId), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getDecisionResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getDecisionResponse;
 };
 
 export type reviewDecisionResponse200 = {
@@ -814,21 +703,12 @@ export const reviewDecision = async (
   decisionReviewRequest: DecisionReviewRequest,
   options?: RequestInit,
 ): Promise<reviewDecisionResponse> => {
-  const res = await fetch(getReviewDecisionUrl(decisionId), {
+  return apiFetch<reviewDecisionResponse>(getReviewDecisionUrl(decisionId), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
     body: JSON.stringify(decisionReviewRequest),
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: reviewDecisionResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as reviewDecisionResponse;
 };
 
 export type createBacktestResponse201 = {
@@ -859,21 +739,12 @@ export const createBacktest = async (
   backtestCreateRequest: BacktestCreateRequest,
   options?: RequestInit,
 ): Promise<createBacktestResponse> => {
-  const res = await fetch(getCreateBacktestUrl(), {
+  return apiFetch<createBacktestResponse>(getCreateBacktestUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
     body: JSON.stringify(backtestCreateRequest),
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createBacktestResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as createBacktestResponse;
 };
 
 export type validateBacktestResponse200 = {
@@ -904,19 +775,10 @@ export const validateBacktest = async (
   id: string,
   options?: RequestInit,
 ): Promise<validateBacktestResponse> => {
-  const res = await fetch(getValidateBacktestUrl(id), {
+  return apiFetch<validateBacktestResponse>(getValidateBacktestUrl(id), {
     ...options,
     method: "POST",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: validateBacktestResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as validateBacktestResponse;
 };
 
 export type runBacktestResponse202 = {
@@ -947,19 +809,10 @@ export const runBacktest = async (
   id: string,
   options?: RequestInit,
 ): Promise<runBacktestResponse> => {
-  const res = await fetch(getRunBacktestUrl(id), {
+  return apiFetch<runBacktestResponse>(getRunBacktestUrl(id), {
     ...options,
     method: "POST",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: runBacktestResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as runBacktestResponse;
 };
 
 export type getBacktestStatusResponse200 = {
@@ -991,19 +844,10 @@ export const getBacktestStatus = async (
   id: string,
   options?: RequestInit,
 ): Promise<getBacktestStatusResponse> => {
-  const res = await fetch(getGetBacktestStatusUrl(id), {
+  return apiFetch<getBacktestStatusResponse>(getGetBacktestStatusUrl(id), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getBacktestStatusResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getBacktestStatusResponse;
 };
 
 export type getBacktestResultResponse200 = {
@@ -1035,19 +879,10 @@ export const getBacktestResult = async (
   id: string,
   options?: RequestInit,
 ): Promise<getBacktestResultResponse> => {
-  const res = await fetch(getGetBacktestResultUrl(id), {
+  return apiFetch<getBacktestResultResponse>(getGetBacktestResultUrl(id), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getBacktestResultResponse["data"] = body ? JSON.parse(body) : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getBacktestResultResponse;
 };
 
 export type getBacktestPerformanceResponse200 = {
@@ -1096,21 +931,13 @@ export const getBacktestPerformance = async (
   params?: GetBacktestPerformanceParams,
   options?: RequestInit,
 ): Promise<getBacktestPerformanceResponse> => {
-  const res = await fetch(getGetBacktestPerformanceUrl(id, params), {
-    ...options,
-    method: "GET",
-  });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getBacktestPerformanceResponse["data"] = body
-    ? JSON.parse(body)
-    : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getBacktestPerformanceResponse;
+  return apiFetch<getBacktestPerformanceResponse>(
+    getGetBacktestPerformanceUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export type getBacktestBiasCheckResponse200 = {
@@ -1143,19 +970,11 @@ export const getBacktestBiasCheck = async (
   id: string,
   options?: RequestInit,
 ): Promise<getBacktestBiasCheckResponse> => {
-  const res = await fetch(getGetBacktestBiasCheckUrl(id), {
-    ...options,
-    method: "GET",
-  });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getBacktestBiasCheckResponse["data"] = body
-    ? JSON.parse(body)
-    : {};
-  return {
-    data,
-    status: res.status,
-    headers: res.headers,
-  } as getBacktestBiasCheckResponse;
+  return apiFetch<getBacktestBiasCheckResponse>(
+    getGetBacktestBiasCheckUrl(id),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
