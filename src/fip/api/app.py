@@ -10,12 +10,29 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from fastapi.utils import create_model_field
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
 from fip.api.contracts import ErrorBody, ErrorEnvelope, ResponseMeta
 from fip.api.errors import ApiError
 from fip.api.routers import commands, operations, reads
+from fip.api.schemas import (
+    BacktestPayloadModel,
+    DecisionPayloadModel,
+    EvaluationPayloadModel,
+    FundListPayloadModel,
+    FundPayloadModel,
+    NavSeriesPayloadModel,
+    OptimizationPayloadModel,
+    PortfolioListPayloadModel,
+    PortfolioPayloadModel,
+    ScorePayloadModel,
+    SessionPayloadModel,
+    TypedEnvelope,
+    UniverseListPayloadModel,
+    UniversePayloadModel,
+)
 from fip.settings import settings
 
 
@@ -30,7 +47,7 @@ def create_api_engine(database_url: str) -> Engine:
     return create_engine(database_url, future=True)
 
 
-def create_app(*, persistent_operations: bool = False) -> FastAPI:
+def create_app(*, persistent_operations: bool = False, strict_contracts: bool = False) -> FastAPI:
     engine = create_api_engine(settings.database_url)
 
     @asynccontextmanager
@@ -90,6 +107,34 @@ def create_app(*, persistent_operations: bool = False) -> FastAPI:
     for route in app.routes:
         if isinstance(route, APIRoute):
             route.response_model_exclude_none = True
+    if strict_contracts:
+        models: dict[str, object] = {
+            "getSession": SessionPayloadModel,
+            "listFunds": list[FundListPayloadModel],
+            "getFund": FundPayloadModel,
+            "getFundNavSeries": NavSeriesPayloadModel,
+            "getFundEvaluations": EvaluationPayloadModel,
+            "getFundScores": ScorePayloadModel,
+            "listUniverses": list[UniverseListPayloadModel],
+            "getUniverse": UniversePayloadModel,
+            "listPortfolios": list[PortfolioListPayloadModel],
+            "getPortfolio": PortfolioPayloadModel,
+            "getOptimization": OptimizationPayloadModel,
+            "getDecision": DecisionPayloadModel,
+            "getBacktestStatus": BacktestPayloadModel,
+            "getBacktestResult": BacktestPayloadModel,
+            "getBacktestPerformance": BacktestPayloadModel,
+            "getBacktestBiasCheck": BacktestPayloadModel,
+        }
+        for route in app.routes:
+            operation_id = getattr(route, "operation_id", None)
+            if isinstance(route, APIRoute) and operation_id in models:
+                model_type: Any = models[operation_id]
+                envelope = TypedEnvelope[model_type]
+                route.response_model = envelope
+                route.response_field = create_model_field(
+                    name=f"Response_{route.unique_id}", type_=envelope, mode="serialization"
+                )
 
     def openapi() -> dict[str, Any]:
         if app.openapi_schema is None:
@@ -100,4 +145,4 @@ def create_app(*, persistent_operations: bool = False) -> FastAPI:
     return app
 
 
-app = create_app(persistent_operations=True)
+app = create_app(persistent_operations=True, strict_contracts=True)
