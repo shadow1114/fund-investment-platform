@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
@@ -414,4 +414,364 @@ class EvaluationPayloadModel(FundEvaluationModel):
 
 
 class ScorePayloadModel(FundScoreModel):
+    pass
+
+
+class UniverseSummaryModel(StrictModel):
+    universe_id: str
+    strategy_id: str
+    decision_at: str
+    universe_strategy: Literal["A", "B", "UNKNOWN"]
+    member_count: int
+    eligibility_rules_version: str
+    scoring_policy_version: str | None
+
+
+class UniverseConditionModel(StrictModel):
+    condition: str
+    actual: Any
+    result: Literal["PASS", "FAIL", "UNKNOWN"]
+    gap: float | None = None
+
+
+class UniverseMemberModel(StrictModel):
+    fund_id: str
+    selection_status: Literal["SELECTED", "REJECTED", "UNKNOWN"]
+    total_score: float | None
+    total_score_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    total_score_reason: str | None
+    rank: int | None
+    rank_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    rank_reason: str | None
+    percentile: float | None
+    percentile_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    percentile_reason: str | None
+    fund_tier: str | None = None
+    investment_eligibility: Literal[
+        "FULLY_ELIGIBLE", "HOLD_ONLY", "LIMITED", "EXIT_ONLY", "NOT_TRADABLE", "UNKNOWN"
+    ]
+    passed_conditions: list[UniverseConditionModel]
+    failed_conditions: list[UniverseConditionModel]
+
+
+class UniverseModel(StrictModel):
+    universe_id: str
+    decision_at: str
+    universe_strategy: Literal["A", "B", "UNKNOWN"]
+    members: list[UniverseMemberModel]
+    excluded: list[UniverseMemberModel]
+
+
+class UniversePayloadModel(UniverseModel):
+    pass
+
+
+class PortfolioSummaryModel(StrictModel):
+    portfolio_id: str
+    portfolio_name: str
+    portfolio_type: str
+    status: Literal["DRAFT", "ACTIVE", "SUSPENDED", "CLOSED", "UNKNOWN"]
+    base_currency: str
+    portfolio_version: str
+
+
+class PortfolioModel(PortfolioSummaryModel):
+    risk_profile: str
+    portfolio_benchmark: BenchmarkModel
+    portfolio_rule_version: str
+
+
+class PortfolioPayloadModel(PortfolioModel):
+    pass
+
+
+class WeightModel(StrictModel):
+    fund_id: str
+    weight: float
+
+
+class OptimizationRequestModel(StrictModel):
+    decision_at: str
+    universe_id: str
+    portfolio_rule_version: str
+    return_estimate_version: str
+    risk_model_version: str
+    mode: Literal["REBALANCE"]
+
+
+class OptimizationModel(StrictModel):
+    optimization_id: str
+    optimization_status: Literal[
+        "OPTIMAL", "INFEASIBLE", "UNBOUNDED", "NOT_CONVERGED", "NUMERICAL_ERROR", "UNKNOWN"
+    ]
+    target_weights: list[WeightModel] | None
+    objective_value: float | None
+    objective_value_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    objective_value_reason: str | None
+    binding_constraints: list[str]
+    conflicting_constraints: list[str]
+    shadow_prices: dict[str, float]
+    post_optimization_risk: "PostOptimizationRiskModel"
+    excluded_candidates: list[dict[str, str]]
+    solve_path: str
+
+
+class PostOptimizationRiskModel(StrictModel):
+    portfolio_volatility: float | None
+    portfolio_volatility_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    portfolio_volatility_reason: str | None
+
+
+class OptimizationPayloadModel(OptimizationModel):
+    pass
+
+
+class DecisionReviewModel(StrictModel):
+    action: Literal["APPROVED", "REJECTED", "OVERRIDDEN", "UNKNOWN"]
+    reason: str
+    reviewed_by: str
+    reviewed_at: datetime
+
+
+class DecisionModel(StrictModel):
+    decision_id: str
+    portfolio_id: str
+    optimization_id: str
+    decision_status: Literal[
+        "PROPOSED", "APPROVED", "REJECTED", "OVERRIDDEN", "EXPIRED", "SUPERSEDED", "UNKNOWN"
+    ]
+    proposed_weights: list[WeightModel]
+    review: DecisionReviewModel | None
+    final_weights: list[WeightModel] | None
+
+
+class DecisionPayloadModel(DecisionModel):
+    pass
+
+
+class MoneyModel(StrictModel):
+    amount: str
+    currency: str
+
+
+class ValidationIssueModel(StrictModel):
+    code: str
+    message: str
+    detail: dict[str, Any] | None = None
+
+
+class BacktestCreatedPayloadModel(StrictModel):
+    backtest_id: str
+    status: Literal["CREATED", "UNKNOWN"]
+    created_at: datetime
+
+
+class BacktestValidationModel(StrictModel):
+    validation_result: Literal["PASS", "PASS_WITH_WARNINGS", "UNKNOWN"]
+    warm_up_end_date: str
+    effective_period: dict[str, str]
+    in_sample_length_days: int
+    out_of_sample_length_days: int
+    warnings: list[ValidationIssueModel]
+    blocking_issues: list[ValidationIssueModel]
+
+
+class BacktestRunPayloadModel(StrictModel):
+    operation_id: str
+    backtest_id: str
+    status: Literal["RUNNING", "UNKNOWN"]
+
+
+class BacktestStatusProgressModel(StrictModel):
+    current_decision_date: str | None
+    completed_periods: int
+    total_periods: int | None
+    total_periods_is_estimate: bool
+
+
+class BacktestStatusModel(StrictModel):
+    backtest_id: str
+    status: Literal[
+        "CREATED", "VALIDATING_CONFIGURATION", "RUNNING", "VALIDATING_RESULTS", "COMPLETED",
+        "FAILED", "INVALID", "CANCELLED", "ABORTED", "UNKNOWN",
+    ]
+    validation_status: Literal["VALID", "WARNING", "INVALID", "UNKNOWN"] | None
+    progress: BacktestStatusProgressModel
+    started_at: datetime | None
+
+
+class PerformanceMetricsModel(StrictModel):
+    total_return: float
+    annualized_return: float
+    volatility: float
+    max_drawdown: float
+    sharpe_ratio: float | None
+    sharpe_ratio_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    sharpe_ratio_reason: str | None
+
+
+class BacktestSummaryModel(StrictModel):
+    portfolio: PerformanceMetricsModel
+    benchmark: PerformanceMetricsModel
+    equal_weight_baseline: PerformanceMetricsModel | None
+    equal_weight_baseline_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    equal_weight_baseline_reason: str | None
+
+
+class ExcessReturnModel(StrictModel):
+    vs_benchmark: float | None
+    vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    vs_benchmark_reason: str | None
+    vs_equal_weight: float | None
+    vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    vs_equal_weight_reason: str | None
+
+
+class SignificanceLayerBaseModel(StrictModel):
+    passed: bool | None
+    passed_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    passed_reason: str | None
+
+
+class StatisticalSignificanceLayerModel(SignificanceLayerBaseModel):
+    bootstrap_ci_lower_vs_benchmark: float | None
+    bootstrap_ci_lower_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    bootstrap_ci_lower_vs_benchmark_reason: str | None
+    bootstrap_ci_lower_vs_equal_weight: float | None
+    bootstrap_ci_lower_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    bootstrap_ci_lower_vs_equal_weight_reason: str | None
+
+
+class EffectSizeSignificanceLayerModel(SignificanceLayerBaseModel):
+    ir_vs_benchmark: float | None
+    ir_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    ir_vs_benchmark_reason: str | None
+    ir_vs_equal_weight: float | None
+    ir_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    ir_vs_equal_weight_reason: str | None
+    delta_sharpe_vs_benchmark: float | None
+    delta_sharpe_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    delta_sharpe_vs_benchmark_reason: str | None
+    delta_sharpe_vs_equal_weight: float | None
+    delta_sharpe_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    delta_sharpe_vs_equal_weight_reason: str | None
+
+
+class RobustnessSignificanceLayerModel(SignificanceLayerBaseModel):
+    outperform_ratio_vs_benchmark: float | None
+    outperform_ratio_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    outperform_ratio_vs_benchmark_reason: str | None
+    outperform_ratio_vs_equal_weight: float | None
+    outperform_ratio_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    outperform_ratio_vs_equal_weight_reason: str | None
+
+
+class EconomicSignificanceLayerModel(SignificanceLayerBaseModel):
+    annualized_return_improvement_vs_benchmark: float | None
+    annualized_return_improvement_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    annualized_return_improvement_vs_benchmark_reason: str | None
+    annualized_return_improvement_vs_equal_weight: float | None
+    annualized_return_improvement_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    annualized_return_improvement_vs_equal_weight_reason: str | None
+    max_drawdown_improvement_vs_benchmark: float | None
+    max_drawdown_improvement_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    max_drawdown_improvement_vs_benchmark_reason: str | None
+    max_drawdown_improvement_vs_equal_weight: float | None
+    max_drawdown_improvement_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    max_drawdown_improvement_vs_equal_weight_reason: str | None
+
+
+class SignificanceLayersModel(StrictModel):
+    statistical: StatisticalSignificanceLayerModel
+    effect_size: EffectSizeSignificanceLayerModel
+    robustness: RobustnessSignificanceLayerModel
+    economic: EconomicSignificanceLayerModel
+
+
+class SignificanceVerdictModel(StrictModel):
+    overall: Literal["SIGNIFICANT", "NOT_SIGNIFICANT", "CANNOT_DETERMINE", "UNKNOWN"]
+    thresholds_status: Literal["CALIBRATED", "PENDING_CALIBRATION", "UNKNOWN"]
+    layers: SignificanceLayersModel
+
+
+class BacktestResultModel(StrictModel):
+    backtest_id: str
+    status: str
+    validation_status: Literal["VALID", "WARNING", "INVALID", "UNKNOWN"]
+    backtest_mode: Literal["HISTORICAL_FIDELITY", "CURRENT_RULE", "UNKNOWN"]
+    period: dict[str, str]
+    initial_capital: MoneyModel
+    final_value: MoneyModel
+    summary: BacktestSummaryModel
+    excess_return: ExcessReturnModel
+    significance_verdict: SignificanceVerdictModel
+    validation_summary: dict[str, list[str]]
+
+
+class BacktestResultPayloadModel(BacktestResultModel):
+    pass
+
+
+class SeriesPointModel(StrictModel):
+    date: str
+    value: float | int | str | None
+    value_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    value_reason: str | None
+
+
+class CumulativeReturnSeriesModel(StrictModel):
+    portfolio: list[SeriesPointModel]
+    benchmark: list[SeriesPointModel]
+    equal_weight_baseline: list[SeriesPointModel] | None
+    equal_weight_baseline_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    equal_weight_baseline_reason: str | None
+
+
+class BacktestSeriesModel(StrictModel):
+    portfolio_value: list[SeriesPointModel]
+    cumulative_return: CumulativeReturnSeriesModel
+    drawdown: list[SeriesPointModel]
+    rolling_sharpe: list[SeriesPointModel]
+    rolling_excess_return: list[SeriesPointModel]
+
+
+class BacktestPerformanceModel(StrictModel):
+    segment: Literal["FULL", "IN_SAMPLE", "OUT_OF_SAMPLE", "UNKNOWN"]
+    series: BacktestSeriesModel
+
+
+class BiasCheckModel(StrictModel):
+    status: Literal["PASS", "FAIL", "NOT_VERIFIED", "PARTIALLY_MODELED", "NOT_MODELED", "UNKNOWN"]
+    violations: list[str] | None = None
+    reason: str | None = None
+    affected_periods: int | None = None
+    availability_quality_distribution: dict[str, float] | None = None
+    unmodeled_costs: list[str] | None = None
+
+
+class PointInTimeBiasCheckModel(BiasCheckModel):
+    availability_quality_distribution: dict[str, float]
+
+
+class TransactionCostBiasCheckModel(BiasCheckModel):
+    unmodeled_costs: list[str]
+
+
+class BacktestBiasChecksModel(StrictModel):
+    look_ahead_bias: BiasCheckModel
+    survivorship_bias: BiasCheckModel
+    tradability_bias: BiasCheckModel
+    point_in_time: PointInTimeBiasCheckModel
+    transaction_cost: TransactionCostBiasCheckModel
+    subscription_redemption_lag: BiasCheckModel
+
+
+class BacktestBiasCheckModel(StrictModel):
+    backtest_id: str
+    checks: BacktestBiasChecksModel
+    snapshot_summary: dict[str, Any]
+    data_limitations: list[str]
+
+
+class BacktestBiasCheckPayloadModel(BacktestBiasCheckModel):
     pass
