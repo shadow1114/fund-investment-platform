@@ -40,7 +40,7 @@
 - Modify: `docs/10-api/06-m17-frontend-contracts.md`
 
 **Interfaces:**
-- Define one registry keyed by operation ID for the 19 domain operations `getFund`, `getFundNavSeries`, `getFundEvaluations`, `getFundScores`, `listUniverses`, `getUniverse`, `listPortfolios`, `getPortfolio`, `submitOptimization`, `getOptimization`, `getDecision`, `reviewDecision`, `createBacktest`, `validateBacktest`, `runBacktest`, `getBacktestStatus`, `getBacktestResult`, `getBacktestPerformance`, and `getBacktestBiasCheck`. `getSession` and `getOperation` stay on their already-frozen shared models and are asserted separately.
+- Define one registry keyed by operation ID for the 20 domain operations `listFunds`, `getFund`, `getFundNavSeries`, `getFundEvaluations`, `getFundScores`, `listUniverses`, `getUniverse`, `listPortfolios`, `getPortfolio`, `submitOptimization`, `getOptimization`, `getDecision`, `reviewDecision`, `createBacktest`, `validateBacktest`, `runBacktest`, `getBacktestStatus`, `getBacktestResult`, `getBacktestPerformance`, and `getBacktestBiasCheck`. `getSession` and `getOperation` stay on their already-frozen shared models and are asserted separately.
 - Record the exact root response component and nested components for each operation, including `Fund` → `Benchmark` → `BenchmarkComponent`/`Fee`, `FundEvaluation` → `DataCompleteness`/`FactorResult`, `FundScore` → `SubScores`/`ScoreAttribution`, `Universe` → `UniverseCondition`/`UniverseMember`, `Optimization` → `Weight`/`PostOptimizationRisk`, `Decision` → `DecisionReview`, and `BacktestResult` → `PerformanceMetrics`/`BacktestSummary`/significance layers/series.
 - The inventory test parses the YAML and fails if an operation points to an unregistered response component or if a registered component is not reachable from an operation.
 
@@ -199,7 +199,7 @@ git commit -m "feat: model universe portfolio optimization decision and backtest
 **Interfaces:**
 - Replace the current common payload fallback with `RESPONSE_MODEL_REGISTRY[operation_id]`, whose values are the strict payload/envelope classes from Tasks 2–3.
 - Route adapters return model instances or validate repository dictionaries through the selected model before serialization; a malformed nested repository row produces the existing stable `500` error envelope and request ID.
-- The registry covers all 19 operation IDs from Task 1 and has a test that fails on missing, duplicate, or generic response bindings.
+- The registry covers all 20 domain operation IDs from Task 1 and has a test that fails on missing, duplicate, or generic response bindings.
 
 - [ ] **Step 1: Add failing route-binding tests**
 
@@ -346,7 +346,7 @@ git commit -m "docs: freeze plan7 response contract modeling"
 
 ## Completion Criteria
 
-- All 19 frozen response operations have endpoint-specific strict models and recursive validation.
+- All 20 frozen domain response operations have endpoint-specific strict models and recursive validation.
 - No public Plan-7 response payload uses the former broad nested `dict[str, object]` fields.
 - OpenAPI, Python serialization, generated TypeScript, API tests, frontend consumers, and PostgreSQL fixtures agree on names, nullability, enums, and nested structure.
 - `make plan7-check` passes locally with PostgreSQL and without Docker.
