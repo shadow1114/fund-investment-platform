@@ -215,3 +215,55 @@ class TypedEnvelope(BaseModel, Generic[T]):
 
 class ReadEnvelopeModel(SuccessEnvelopeModel):
     """Strict envelope used by all frozen read endpoints."""
+
+
+class SessionPayloadModel(ReadPayloadModel):
+    pass
+
+
+class FundListPayloadModel(ReadPayloadModel):
+    pass
+
+
+class FundPayloadModel(ReadPayloadModel):
+    pass
+
+
+class NavSeriesPayloadModel(ReadPayloadModel):
+    pass
+
+
+class EvaluationPayloadModel(ReadPayloadModel):
+    pass
+
+
+class ScorePayloadModel(ReadPayloadModel):
+    pass
+
+
+class UniverseListPayloadModel(ReadPayloadModel):
+    pass
+
+
+class UniversePayloadModel(ReadPayloadModel):
+    pass
+
+
+class PortfolioListPayloadModel(ReadPayloadModel):
+    pass
+
+
+class PortfolioPayloadModel(ReadPayloadModel):
+    pass
+
+
+class OptimizationPayloadModel(ReadPayloadModel):
+    pass
+
+
+class DecisionPayloadModel(ReadPayloadModel):
+    pass
+
+
+class BacktestPayloadModel(ReadPayloadModel):
+    pass
