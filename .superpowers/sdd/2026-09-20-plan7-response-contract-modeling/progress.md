@@ -10,7 +10,7 @@ Complete strict nested response models and freeze parity across the Python API, 
 - [x] Task 2 — fund, NAV, evaluation, and score models
 - [x] Task 3 — universe, portfolio, optimization, decision, and backtest models
 - [x] Task 4 — endpoint response binding
-- [ ] Task 5 — frontend generated type synchronization
+- [x] Task 5 — frontend generated type synchronization
 - [ ] Task 6 — PostgreSQL/API/frontend acceptance and freeze
 
 ## Compatibility decisions
