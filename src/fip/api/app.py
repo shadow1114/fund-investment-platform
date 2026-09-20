@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +18,7 @@ from sqlalchemy.engine import Engine
 from fip.api.contracts import ErrorBody, ErrorEnvelope, ResponseMeta
 from fip.api.errors import ApiError
 from fip.api.health import router as health_router
+from fip.api.limits import LocalRateLimiter
 from fip.api.observability import MetricsRegistry, RequestEventSink, event_for
 from fip.api.routers import commands, operations, reads
 from fip.api.schemas import (
@@ -77,6 +79,7 @@ def create_app(
     app.state.persistent_operations = persistent_operations
     app.state.metrics = MetricsRegistry()
     app.state.request_events = RequestEventSink(app.state.metrics)
+    app.state.rate_limiter = LocalRateLimiter(runtime_settings.rate_limit_per_minute)
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -85,6 +88,40 @@ def create_app(
         from time import perf_counter
 
         started_at = perf_counter()
+        if request.url.path.startswith("/api/v1"):
+            principal_key = request.headers.get("X-User-ID") or (request.client.host if request.client else "unknown")
+            decision = app.state.rate_limiter.allow(principal_key, request.url.path)
+            if not decision.allowed:
+                response = JSONResponse(
+                    status_code=429,
+                    headers={"Retry-After": str(decision.retry_after_seconds)},
+                    content=ErrorEnvelope(
+                        error=ErrorBody(
+                            code="RATE_LIMITED",
+                            message="Request rate limit exceeded",
+                            details={"retry_after": decision.retry_after_seconds},
+                        ),
+                        meta=ResponseMeta(request_id=request_id),
+                    ).model_dump(mode="json"),
+                )
+                app.state.request_events.emit(event_for(request, response, started_at))
+                return response
+            query_values = parse_qs(request.url.query)
+            page_size = query_values.get("page_size", [None])[0]
+            if page_size is not None and page_size.isdigit() and int(page_size) > runtime_settings.max_page_size:
+                response = JSONResponse(
+                    status_code=422,
+                    content=ErrorEnvelope(
+                        error=ErrorBody(
+                            code="VALIDATION_ERROR",
+                            message="Request validation failed",
+                            details={"page_size": [f"must be <= {runtime_settings.max_page_size}"]},
+                        ),
+                        meta=ResponseMeta(request_id=request_id),
+                    ).model_dump(mode="json"),
+                )
+                app.state.request_events.emit(event_for(request, response, started_at))
+                return response
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         app.state.request_events.emit(event_for(request, response, started_at))

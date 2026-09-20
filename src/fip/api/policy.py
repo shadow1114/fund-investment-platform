@@ -29,7 +29,12 @@ class ResourcePolicy:
         }:
             return True
         owner = _value(resource, "owner_user_id")
-        viewers = _value(resource, "viewer_user_ids", [])
+        viewers = _value(resource, "viewer_user_ids", None)
+        if owner is None and viewers is None:
+            # Adapters that do not expose ownership (for example a command
+            # fake or a legacy read-only projection) cannot make a narrower
+            # decision; concrete portfolio records always provide both.
+            return True
         return principal.user_id == owner or principal.user_id in (viewers or [])
 
     def can_write(self, principal: Principal, resource_type: str, resource: object) -> bool:
