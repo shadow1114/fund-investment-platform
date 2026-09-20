@@ -16,6 +16,8 @@ Vite 启动后打开终端显示的本地地址。首次执行浏览器测试时
 
 `npm run api:generate` 从 `openapi/m17.yaml` 重新生成 `src/api/generated/`；不要手改生成文件。修改冻结契约时先同步契约文档与 OpenAPI，再重新生成并运行检查。
 
+Plan-7 的 `src/api/response-contracts.test.ts` 会编译并验证基金、评价、评分、宇宙和回测响应的嵌套字段；根目录 `make plan7-check` 还会执行对应的 PostgreSQL/API 契约验收。
+
 若仓库位于含中文的路径、当前终端又设置了 `LC_ALL=C`，Python 虚拟环境可能在导入阶段报 ASCII 解码错误。此时在仓库根目录使用 `LC_ALL=en_US.UTF-8 make check`；这只调整本次检查进程的 locale。
 
 ### API 地址与测试数据

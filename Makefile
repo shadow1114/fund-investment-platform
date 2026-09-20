@@ -2,7 +2,7 @@ PY := .venv/bin/python
 PYTEST := .venv/bin/pytest
 export PATH := .venv/bin:$(PATH)
 
-.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-health-check worker-dev api-check plan6-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
+.PHONY: test test-unit test-integration test-api-integration test-fitness test-contract lint typecheck check migrate api-dev api-health-check worker-dev api-check plan6-check plan7-check frontend-install frontend-dev frontend-api frontend-build frontend-test frontend-e2e frontend-lint frontend-check
 
 test-unit:
 	$(PYTEST) tests/unit -v
@@ -42,6 +42,12 @@ plan6-check:
 	LC_ALL=en_US.UTF-8 make api-check
 	LC_ALL=en_US.UTF-8 make test-api-integration
 	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/integration/test_job_worker_postgres.py tests/integration/test_api_policy_postgres.py tests/integration/test_plan6_acceptance.py -q -m integration
+	LC_ALL=en_US.UTF-8 make frontend-check
+
+plan7-check:
+	LC_ALL=en_US.UTF-8 make api-check
+	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/api/test_contract_inventory.py tests/api/test_response_contract_models.py tests/api/test_nested_contracts.py tests/api/test_endpoint_response_binding.py tests/integration/test_response_contract_postgres.py -q -m 'not integration'
+	LC_ALL=en_US.UTF-8 PYTHONPATH=src .venv/bin/pytest tests/integration/test_response_contract_postgres.py -q -m integration
 	LC_ALL=en_US.UTF-8 make frontend-check
 
 lint:

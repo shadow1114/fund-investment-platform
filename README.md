@@ -16,6 +16,8 @@ Plan-6 增加本地作业进程：`make worker-dev` 轮询 PostgreSQL 中的计�
 
 Plan-6 完整验收使用 `make plan6-check`，会依次运行 Python/API/PostgreSQL/Worker 检查和前端检查。
 
+Plan-7 响应契约验收使用 `make plan7-check`，会检查 20 个领域操作的嵌套模型、PostgreSQL 可用性、OpenAPI 生成类型和前端全套校验。该命令只使用本地命令与 PostgreSQL，不启动 Docker。
+
 ## 前端
 
 本地启动：
