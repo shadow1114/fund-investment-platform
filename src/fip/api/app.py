@@ -16,6 +16,8 @@ from sqlalchemy.engine import Engine
 
 from fip.api.contracts import ErrorBody, ErrorEnvelope, ResponseMeta
 from fip.api.errors import ApiError
+from fip.api.health import router as health_router
+from fip.api.observability import MetricsRegistry, RequestEventSink, event_for
 from fip.api.routers import commands, operations, reads
 from fip.api.schemas import (
     BacktestPayloadModel,
@@ -73,13 +75,19 @@ def create_app(
     app.state.api_engine = engine
     app.state.settings = runtime_settings
     app.state.persistent_operations = persistent_operations
+    app.state.metrics = MetricsRegistry()
+    app.state.request_events = RequestEventSink(app.state.metrics)
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
+        from time import perf_counter
+
+        started_at = perf_counter()
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        app.state.request_events.emit(event_for(request, response, started_at))
         return response
 
     @app.exception_handler(ApiError)
@@ -111,6 +119,7 @@ def create_app(
     app.include_router(reads.router, prefix="/api/v1")
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
+    app.include_router(health_router)
     for route in app.routes:
         if isinstance(route, APIRoute):
             route.response_model_exclude_none = True
