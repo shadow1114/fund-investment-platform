@@ -2,6 +2,20 @@
 
 基金投资平台的领域逻辑、数据处理、M1.7 前端和冻结契约 API server 位于本仓库。API 层使用 FastAPI，路径由 `frontend/openapi/m17.yaml` 冻结投影驱动。
 
+## 🚀 一键快速启动
+
+在仓库根目录直接运行一键启动脚本（同时拉起后端 FastAPI 与前端 Vite）：
+
+```sh
+./start.sh
+```
+
+- 🖥️ 前端界面：`http://localhost:5173`
+- 🔌 后端 API：`http://127.0.0.1:8000`
+- 📖 API 文档：`http://127.0.0.1:8000/docs`
+
+详细架构说明、参数选项、分步手动调试指南请参阅 [本地完整启动指南 (docs/STARTUP_GUIDE.md)](docs/STARTUP_GUIDE.md)。
+
 ## API/Web server
 
 安装依赖后，在仓库根目录启动：
