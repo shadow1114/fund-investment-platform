@@ -221,47 +221,11 @@ class SessionPayloadModel(ReadPayloadModel):
     pass
 
 
-class FundListPayloadModel(ReadPayloadModel):
-    pass
-
-
-class FundPayloadModel(ReadPayloadModel):
-    pass
-
-
-class NavSeriesPayloadModel(ReadPayloadModel):
-    pass
-
-
-class EvaluationPayloadModel(ReadPayloadModel):
-    pass
-
-
-class ScorePayloadModel(ReadPayloadModel):
-    pass
-
-
 class UniverseListPayloadModel(ReadPayloadModel):
     pass
 
 
-class UniversePayloadModel(ReadPayloadModel):
-    pass
-
-
 class PortfolioListPayloadModel(ReadPayloadModel):
-    pass
-
-
-class PortfolioPayloadModel(ReadPayloadModel):
-    pass
-
-
-class OptimizationPayloadModel(ReadPayloadModel):
-    pass
-
-
-class DecisionPayloadModel(ReadPayloadModel):
     pass
 
 
@@ -775,3 +739,86 @@ class BacktestBiasCheckModel(StrictModel):
 
 class BacktestBiasCheckPayloadModel(BacktestBiasCheckModel):
     pass
+
+
+class PositionViewModel(StrictModel):
+    fund_id: str
+    state: str
+    shares: float
+    cost_basis: float
+    market_price: float
+    market_value: float
+    weight: float
+    holding_days: int
+
+
+class LivePortfolioViewModel(StrictModel):
+    portfolio_id: str
+    as_of_date: str
+    status: str
+    cash_balance: float
+    total_equity: float
+    has_pending_execution: bool
+    target_positions: list[PositionViewModel]
+    pending_positions: list[PositionViewModel]
+    actual_positions: list[PositionViewModel]
+    last_rebalanced_at: str | None = None
+
+
+class ExecutionReportRequest(StrictModel):
+    report_id: str
+    fund_id: str
+    direction: Literal["BUY", "SELL"]
+    requested_shares: float
+    filled_shares: float
+    filled_price: float
+    fee: float = 0.0
+    status: Literal["SUBMITTED", "PARTIALLY_FILLED", "FILLED", "REJECTED", "EXPIRED"]
+    rebalance_id: str | None = None
+
+
+class ExecutionReportResponse(StrictModel):
+    report_id: str
+    portfolio_id: str
+    status: str
+    has_pending_execution: bool
+    total_equity: float
+    cash_balance: float
+
+
+class EvaluateRebalanceRequest(StrictModel):
+    decision_at: str
+    prices: dict[str, float]
+    fund_drift_threshold: float = 0.03
+    category_drift_threshold: float = 0.05
+    min_trade_threshold: float = 0.005
+    fee_rate: float = 0.0015
+    expected_annualized_improvement: float = 0.02
+
+
+class RebalanceTradeViewModel(StrictModel):
+    fund_id: str
+    direction: str
+    target_weight: float
+    current_weight: float
+    weight_delta: float
+    target_shares: float
+    delta_shares: float
+    estimated_amount: float
+    eligibility_status: str
+    is_filtered: bool
+    unachieved_reason: str | None = None
+
+
+class RebalanceProposalViewModel(StrictModel):
+    is_triggered: bool
+    trigger_types: list[str]
+    primary_trigger: str | None
+    recompute_scope: str | None
+    decision_outcome: str
+    turnover: float
+    estimated_cost: float
+    expected_improvement: float
+    trades: list[RebalanceTradeViewModel]
+    unachieved_targets: dict[str, str]
+    explainability_summary: str

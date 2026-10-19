@@ -20,7 +20,7 @@ from fip.api.errors import ApiError
 from fip.api.health import router as health_router
 from fip.api.limits import LocalRateLimiter
 from fip.api.observability import MetricsRegistry, RequestEventSink, event_for
-from fip.api.routers import commands, operations, reads
+from fip.api.routers import commands, operations, reads, rebalance
 from fip.api.schemas import (
     BacktestPayloadModel,
     BacktestBiasCheckPayloadModel,
@@ -65,8 +65,14 @@ def create_app(
     settings_override: Any | None = None,
     persistent_operations: bool = False,
     strict_contracts: bool = False,
+    enable_m2_rebalance: bool | None = None,
 ) -> FastAPI:
     runtime_settings = settings_override or settings
+    m2_enabled = (
+        enable_m2_rebalance
+        if enable_m2_rebalance is not None
+        else getattr(runtime_settings, "enable_m2_rebalance", False)
+    )
     engine = create_api_engine(runtime_settings.database_url)
 
     @asynccontextmanager
@@ -171,6 +177,8 @@ def create_app(
     app.include_router(reads.router, prefix="/api/v1")
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
+    if m2_enabled:
+        app.include_router(rebalance.router, prefix="/api/v1")
     app.include_router(health_router)
     for route in app.routes:
         if isinstance(route, APIRoute):

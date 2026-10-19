@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     max_page_size: int = Field(default=100, ge=1, le=500)
     rate_limit_per_minute: int = Field(default=120, gt=0)
     require_verified_principal: bool = False
+    enable_m2_rebalance: bool = False
 
     @model_validator(mode="after")
     def production_requires_verified_principal(self) -> "Settings":
