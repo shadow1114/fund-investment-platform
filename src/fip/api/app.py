@@ -22,7 +22,6 @@ from fip.api.limits import LocalRateLimiter
 from fip.api.observability import MetricsRegistry, RequestEventSink, event_for
 from fip.api.routers import commands, operations, reads, rebalance
 from fip.api.schemas import (
-    BacktestPayloadModel,
     BacktestBiasCheckPayloadModel,
     BacktestCreatedPayloadModel,
     BacktestPerformanceModel,
@@ -31,13 +30,13 @@ from fip.api.schemas import (
     BacktestStatusModel,
     BacktestValidationModel,
     DecisionPayloadModel,
+    DecisionReviewOutcomeModel,
     EvaluationPayloadModel,
     FundListPayloadModel,
     FundPayloadModel,
     NavSeriesPayloadModel,
-    DecisionReviewOutcomeModel,
-    OptimizationSubmissionModel,
     OptimizationPayloadModel,
+    OptimizationSubmissionModel,
     PortfolioListPayloadModel,
     PortfolioPayloadModel,
     ScorePayloadModel,

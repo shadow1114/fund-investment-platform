@@ -475,7 +475,7 @@ class OptimizationModel(StrictModel):
     binding_constraints: list[str]
     conflicting_constraints: list[str]
     shadow_prices: dict[str, float]
-    post_optimization_risk: "PostOptimizationRiskModel"
+    post_optimization_risk: PostOptimizationRiskModel
     excluded_candidates: list[dict[str, str]]
     solve_path: str
 
@@ -591,57 +591,60 @@ class ExcessReturnModel(StrictModel):
     vs_equal_weight_reason: str | None
 
 
+SignificanceStatus = Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+
+
 class SignificanceLayerBaseModel(StrictModel):
     passed: bool | None
-    passed_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    passed_status: SignificanceStatus
     passed_reason: str | None
 
 
 class StatisticalSignificanceLayerModel(SignificanceLayerBaseModel):
     bootstrap_ci_lower_vs_benchmark: float | None
-    bootstrap_ci_lower_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    bootstrap_ci_lower_vs_benchmark_status: SignificanceStatus
     bootstrap_ci_lower_vs_benchmark_reason: str | None
     bootstrap_ci_lower_vs_equal_weight: float | None
-    bootstrap_ci_lower_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    bootstrap_ci_lower_vs_equal_weight_status: SignificanceStatus
     bootstrap_ci_lower_vs_equal_weight_reason: str | None
 
 
 class EffectSizeSignificanceLayerModel(SignificanceLayerBaseModel):
     ir_vs_benchmark: float | None
-    ir_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    ir_vs_benchmark_status: SignificanceStatus
     ir_vs_benchmark_reason: str | None
     ir_vs_equal_weight: float | None
-    ir_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    ir_vs_equal_weight_status: SignificanceStatus
     ir_vs_equal_weight_reason: str | None
     delta_sharpe_vs_benchmark: float | None
-    delta_sharpe_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    delta_sharpe_vs_benchmark_status: SignificanceStatus
     delta_sharpe_vs_benchmark_reason: str | None
     delta_sharpe_vs_equal_weight: float | None
-    delta_sharpe_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    delta_sharpe_vs_equal_weight_status: SignificanceStatus
     delta_sharpe_vs_equal_weight_reason: str | None
 
 
 class RobustnessSignificanceLayerModel(SignificanceLayerBaseModel):
     outperform_ratio_vs_benchmark: float | None
-    outperform_ratio_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    outperform_ratio_vs_benchmark_status: SignificanceStatus
     outperform_ratio_vs_benchmark_reason: str | None
     outperform_ratio_vs_equal_weight: float | None
-    outperform_ratio_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    outperform_ratio_vs_equal_weight_status: SignificanceStatus
     outperform_ratio_vs_equal_weight_reason: str | None
 
 
 class EconomicSignificanceLayerModel(SignificanceLayerBaseModel):
     annualized_return_improvement_vs_benchmark: float | None
-    annualized_return_improvement_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    annualized_return_improvement_vs_benchmark_status: SignificanceStatus
     annualized_return_improvement_vs_benchmark_reason: str | None
     annualized_return_improvement_vs_equal_weight: float | None
-    annualized_return_improvement_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    annualized_return_improvement_vs_equal_weight_status: SignificanceStatus
     annualized_return_improvement_vs_equal_weight_reason: str | None
     max_drawdown_improvement_vs_benchmark: float | None
-    max_drawdown_improvement_vs_benchmark_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    max_drawdown_improvement_vs_benchmark_status: SignificanceStatus
     max_drawdown_improvement_vs_benchmark_reason: str | None
     max_drawdown_improvement_vs_equal_weight: float | None
-    max_drawdown_improvement_vs_equal_weight_status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
+    max_drawdown_improvement_vs_equal_weight_status: SignificanceStatus
     max_drawdown_improvement_vs_equal_weight_reason: str | None
 
 

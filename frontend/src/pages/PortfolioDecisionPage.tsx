@@ -34,10 +34,12 @@ import { ErrorState } from "../components/ErrorState";
 import { OperationProgress } from "../components/OperationProgress";
 import { ProvenanceBar } from "../components/ProvenanceBar";
 import { DecisionReviewPanel } from "../features/portfolio/DecisionReviewPanel";
+import { LivePortfolioPanel } from "../features/portfolio/LivePortfolioPanel";
 import { OptimizationForm } from "../features/portfolio/OptimizationForm";
 import { OptimizationResult } from "../features/portfolio/OptimizationResult";
 import { PortfolioList } from "../features/portfolio/PortfolioList";
 import { PortfolioOverview } from "../features/portfolio/PortfolioOverview";
+import { RebalancingPanel } from "../features/portfolio/RebalancingPanel";
 
 type Props = { pollIntervalMs?: number };
 
@@ -140,6 +142,9 @@ const PortfolioDetail = ({
     useState<string>();
   const [decisionInput, setDecisionInput] = useState("");
   const [decisionId, setDecisionId] = useState<string>();
+  const [activeTab, setActiveTab] = useState<
+    "optimization" | "live" | "rebalance"
+  >("optimization");
 
   const portfolioQuery = useQuery({
     queryKey: queryKeys.portfolio(portfolioId),
@@ -253,91 +258,172 @@ const PortfolioDetail = ({
       <Link to="/portfolios">返回组合列表</Link>
       <PortfolioOverview portfolio={portfolioQuery.data.data} />
       <ProvenanceBar meta={provenanceMeta(portfolioQuery.data.meta)} />
-      <OptimizationForm
-        portfolioRuleVersion={portfolioQuery.data.data.portfolio_rule_version}
-        pending={submitMutation.isPending}
-        onSubmit={(request) => submitMutation.mutate(request)}
-      />
-      {submitMutation.error && <ErrorState error={submitMutation.error} />}
-      {operationId && (
-        <OperationProgress
-          operationId={operationId}
-          resultRef={operationQuery.data?.result_ref}
-          pollIntervalMs={pollIntervalMs}
-        />
-      )}
-      {operationQuery.error && <ErrorState error={operationQuery.error} />}
-      {operationQuery.data?.status === "COMPLETED" &&
-        operationQuery.data.result_ref &&
-        !resultOptimizationId && (
-          <p role="alert">优化结果引用与当前组合不匹配。</p>
-        )}
-      {optimizationQuery.isPending && resultOptimizationId && (
-        <p role="status">正在读取优化结果…</p>
-      )}
-      {optimizationQuery.error && (
-        <ErrorState error={optimizationQuery.error} />
-      )}
-      {optimizationQuery.data && (
-        <OptimizationResult
-          optimization={optimizationQuery.data.data}
-          meta={optimizationQuery.data.meta}
-        />
-      )}
 
-      <section aria-label="决策查询">
-        <h2>读取决策快照</h2>
-        <label>
-          决策 ID
-          <input
-            value={decisionInput}
-            onChange={(event) => setDecisionInput(event.target.value)}
-          />
-        </label>
+      <nav
+        aria-label="组合功能导航"
+        style={{
+          display: "flex",
+          gap: "1rem",
+          margin: "1.5rem 0 1rem 0",
+          borderBottom: "2px solid #e2e8f0",
+          paddingBottom: "0.25rem",
+        }}
+      >
         <button
-          disabled={!decisionInput.trim()}
-          onClick={() => {
-            const nextDecisionId = decisionInput.trim();
-            // Reloading the same ID must not discard a successful POST review
-            // while the GET snapshot is still cached (and may be stale).
-            if (nextDecisionId !== decisionId) reviewMutation.reset();
-            setDecisionId(nextDecisionId);
+          type="button"
+          onClick={() => setActiveTab("optimization")}
+          style={{
+            padding: "0.5rem 1rem",
+            fontWeight: activeTab === "optimization" ? "bold" : "normal",
+            borderBottom:
+              activeTab === "optimization"
+                ? "3px solid #2563eb"
+                : "transparent",
+            background: "none",
+            borderTop: "none",
+            borderLeft: "none",
+            borderRight: "none",
+            cursor: "pointer",
+            fontSize: "1rem",
           }}
         >
-          加载决策
+          组合优化与决策
         </button>
-      </section>
-      {sessionQuery.isPending && <p role="status">正在校验复核权限…</p>}
-      {sessionQuery.error && <ErrorState error={sessionQuery.error} />}
-      {sessionQuery.data && !canReview && <p>当前会话无决策复核权限。</p>}
-      {decisionQuery.isPending && decisionId && (
-        <p role="status">正在读取决策…</p>
+        <button
+          type="button"
+          onClick={() => setActiveTab("live")}
+          style={{
+            padding: "0.5rem 1rem",
+            fontWeight: activeTab === "live" ? "bold" : "normal",
+            borderBottom:
+              activeTab === "live" ? "3px solid #2563eb" : "transparent",
+            background: "none",
+            borderTop: "none",
+            borderLeft: "none",
+            borderRight: "none",
+            cursor: "pointer",
+            fontSize: "1rem",
+          }}
+        >
+          实盘三态持仓（Stage ⑨）
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("rebalance")}
+          style={{
+            padding: "0.5rem 1rem",
+            fontWeight: activeTab === "rebalance" ? "bold" : "normal",
+            borderBottom:
+              activeTab === "rebalance" ? "3px solid #2563eb" : "transparent",
+            background: "none",
+            borderTop: "none",
+            borderLeft: "none",
+            borderRight: "none",
+            cursor: "pointer",
+            fontSize: "1rem",
+          }}
+        >
+          动态调仓与评估（Stage ⑩）
+        </button>
+      </nav>
+
+      {activeTab === "live" && <LivePortfolioPanel portfolioId={portfolioId} />}
+
+      {activeTab === "rebalance" && (
+        <RebalancingPanel portfolioId={portfolioId} />
       )}
-      {decisionQuery.error && <ErrorState error={decisionQuery.error} />}
-      {decision && (
+
+      {activeTab === "optimization" && (
         <>
-          {decisionQuery.data?.meta && (
-            <ProvenanceBar meta={provenanceMeta(decisionQuery.data.meta)} />
-          )}
-          <DecisionReviewPanel
-            key={decision.decision_id}
-            decision={decision}
-            reviewResult={reviewResult}
-            reviewAction={
-              reviewIsCurrent
-                ? reviewMutation.variables?.request.action
-                : undefined
+          <OptimizationForm
+            portfolioRuleVersion={
+              portfolioQuery.data.data.portfolio_rule_version
             }
-            canReview={canReview}
-            pending={reviewIsCurrent && reviewMutation.isPending}
-            error={reviewIsCurrent ? reviewMutation.error : null}
-            onReview={(request) =>
-              reviewMutation.mutate({
-                reviewedDecisionId: decision.decision_id,
-                request,
-              })
-            }
+            pending={submitMutation.isPending}
+            onSubmit={(request) => submitMutation.mutate(request)}
           />
+          {submitMutation.error && <ErrorState error={submitMutation.error} />}
+          {operationId && (
+            <OperationProgress
+              operationId={operationId}
+              resultRef={operationQuery.data?.result_ref}
+              pollIntervalMs={pollIntervalMs}
+            />
+          )}
+          {operationQuery.error && <ErrorState error={operationQuery.error} />}
+          {operationQuery.data?.status === "COMPLETED" &&
+            operationQuery.data.result_ref &&
+            !resultOptimizationId && (
+              <p role="alert">优化结果引用与当前组合不匹配。</p>
+            )}
+          {optimizationQuery.isPending && resultOptimizationId && (
+            <p role="status">正在读取优化结果…</p>
+          )}
+          {optimizationQuery.error && (
+            <ErrorState error={optimizationQuery.error} />
+          )}
+          {optimizationQuery.data && (
+            <OptimizationResult
+              optimization={optimizationQuery.data.data}
+              meta={optimizationQuery.data.meta}
+            />
+          )}
+
+          <section aria-label="决策查询">
+            <h2>读取决策快照</h2>
+            <label>
+              决策 ID
+              <input
+                value={decisionInput}
+                onChange={(event) => setDecisionInput(event.target.value)}
+              />
+            </label>
+            <button
+              disabled={!decisionInput.trim()}
+              onClick={() => {
+                const nextDecisionId = decisionInput.trim();
+                // Reloading the same ID must not discard a successful POST review
+                // while the GET snapshot is still cached (and may be stale).
+                if (nextDecisionId !== decisionId) reviewMutation.reset();
+                setDecisionId(nextDecisionId);
+              }}
+            >
+              加载决策
+            </button>
+          </section>
+          {sessionQuery.isPending && <p role="status">正在校验复核权限…</p>}
+          {sessionQuery.error && <ErrorState error={sessionQuery.error} />}
+          {sessionQuery.data && !canReview && <p>当前会话无决策复核权限。</p>}
+          {decisionQuery.isPending && decisionId && (
+            <p role="status">正在读取决策…</p>
+          )}
+          {decisionQuery.error && <ErrorState error={decisionQuery.error} />}
+          {decision && (
+            <>
+              {decisionQuery.data?.meta && (
+                <ProvenanceBar meta={provenanceMeta(decisionQuery.data.meta)} />
+              )}
+              <DecisionReviewPanel
+                key={decision.decision_id}
+                decision={decision}
+                reviewResult={reviewResult}
+                reviewAction={
+                  reviewIsCurrent
+                    ? reviewMutation.variables?.request.action
+                    : undefined
+                }
+                canReview={canReview}
+                pending={reviewIsCurrent && reviewMutation.isPending}
+                error={reviewIsCurrent ? reviewMutation.error : null}
+                onReview={(request) =>
+                  reviewMutation.mutate({
+                    reviewedDecisionId: decision.decision_id,
+                    request,
+                  })
+                }
+              />
+            </>
+          )}
         </>
       )}
     </section>
