@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import get_args, get_origin
-
 from fip.api.app import create_app
 from fip.api.schemas import (
     BacktestBiasCheckPayloadModel,

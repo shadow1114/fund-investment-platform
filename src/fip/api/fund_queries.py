@@ -50,6 +50,48 @@ def _row_date(value: object) -> str | None:
 
 
 def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
+    classification = row.get("classification")
+    for dimension in (
+        "asset_class",
+        "strategy",
+        "geography",
+        "product_structure",
+        "market_attributes",
+    ):
+        choices = filters.get(dimension)
+        if choices:
+            if not isinstance(classification, Mapping):
+                return False
+            result = classification.get(dimension)
+            if not isinstance(result, Mapping) or result.get("status") != "CONFIRMED":
+                return False
+            value = result.get("value")
+            values = [value] if isinstance(value, str) else value
+            if not isinstance(values, list | tuple) or not set(values).intersection(
+                cast(Sequence[str], choices)
+            ):
+                return False
+    statuses = filters.get("classification_status")
+    if statuses:
+        present = (
+            {
+                v.get("status")
+                for k, v in classification.items()
+                if k
+                in {
+                    "asset_class",
+                    "strategy",
+                    "geography",
+                    "product_structure",
+                    "market_attributes",
+                }
+                and isinstance(v, Mapping)
+            }
+            if isinstance(classification, Mapping)
+            else {"UNKNOWN"}
+        )
+        if not present.intersection(cast(Sequence[str], statuses)):
+            return False
     name = filters.get("fund_name")
     if isinstance(name, str) and name.casefold() not in str(row.get("fund_name", "")).casefold():
         return False
@@ -124,6 +166,12 @@ class FundQueries:
         self,
         *,
         fund_name: str | None,
+        asset_class: Sequence[str] | None = None,
+        strategy: Sequence[str] | None = None,
+        geography: Sequence[str] | None = None,
+        product_structure: Sequence[str] | None = None,
+        market_attributes: Sequence[str] | None = None,
+        classification_status: Sequence[str] | None = None,
         fund_type: Sequence[str] | None,
         management_company_id: str | None,
         manager_id: str | None,
@@ -140,6 +188,12 @@ class FundQueries:
         order: str,
     ) -> QueryResult:
         filters: dict[str, object] = {
+            "asset_class": _as_tuple(asset_class),
+            "strategy": _as_tuple(strategy),
+            "geography": _as_tuple(geography),
+            "product_structure": _as_tuple(product_structure),
+            "market_attributes": _as_tuple(market_attributes),
+            "classification_status": _as_tuple(classification_status),
             "fund_name": fund_name,
             "fund_type": _as_tuple(fund_type),
             "management_company_id": management_company_id,
@@ -152,6 +206,16 @@ class FundQueries:
             "aum_max": aum_max,
             "as_of_date": _as_iso(as_of_date),
         }
+        for key in (
+            "asset_class",
+            "strategy",
+            "geography",
+            "product_structure",
+            "market_attributes",
+            "classification_status",
+        ):
+            if filters[key] is None:
+                del filters[key]
         rows = [dict(row) for row in self._repository.list(**filters)]
         if (
             management_company_id is not None

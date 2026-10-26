@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from fip.api.auth import get_principal
+from fip.api.context import Principal
 from fip.api.contracts import success
-from fip.api.errors import NotFoundError
+from fip.api.errors import ForbiddenError, NotFoundError
 from fip.api.operations import PersistentOperationService
 from fip.api.routers.commands import registry
 from fip.api.schemas import OperationModel, TypedEnvelope
+from fip.platform.jobs.models import CalculationJob
+
+# FastAPI dependency declarations intentionally live in signatures.
+# ruff: noqa: B008
 
 router = APIRouter()
 
@@ -17,12 +24,29 @@ router = APIRouter()
     operation_id="getOperation",
     response_model=TypedEnvelope[OperationModel],
 )
-def get_operation(operation_id: str, request: Request) -> dict[str, object]:
+def get_operation(
+    operation_id: str,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+) -> dict[str, object]:
     session: Session | None = None
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         try:
             record = PersistentOperationService(session).get(operation_id)
+            if record is not None and record.kind in {
+                "fund_basic_info_ingest",
+                "fund_nav_ingest",
+            }:
+                job = session.execute(
+                    select(CalculationJob).where(CalculationJob.execution_id == operation_id)
+                ).scalar_one_or_none()
+                if (
+                    job is not None
+                    and not principal.can_manage_data_ingestion
+                    and (job.job_payload or {}).get("actor") != principal.user_id
+                ):
+                    raise ForbiddenError()
         finally:
             session.close()
     else:

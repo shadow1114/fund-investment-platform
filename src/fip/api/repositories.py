@@ -392,6 +392,8 @@ class FundRepository(RepositoryAdapter):
             "fund_id": fund.fund_code,
             "fund_name": fund.product_name,
             "share_class": share_class.share_class_code,
+            "classification": SqlClassificationPitRepository(
+                self._session(), visible_until).snapshot(fund.id),
             "fund_classification": classification.classification_code
             if classification
             else "UNKNOWN",

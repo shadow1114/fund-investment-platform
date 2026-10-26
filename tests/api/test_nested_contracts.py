@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
 
 from fip.api.schemas import (
     BacktestBiasCheckPayloadModel,
@@ -113,19 +113,119 @@ def valid_backtest_result() -> dict[str, object]:
         "status": "COMPLETED",
         "validation_status": "VALID",
         "backtest_mode": "HISTORICAL_FIDELITY",
-        "period": {"start_date": "2020-01-01", "end_date": "2024-12-31", "warm_up_end_date": "2020-02-01"},
+        "period": {
+            "start_date": "2020-01-01",
+            "end_date": "2024-12-31",
+            "warm_up_end_date": "2020-02-01",
+        },
         "initial_capital": {"amount": "100000", "currency": "CNY"},
         "final_value": {"amount": "110000", "currency": "CNY"},
-        "summary": {"portfolio": metric, "benchmark": metric, "equal_weight_baseline": None, "equal_weight_baseline_status": "UNAVAILABLE", "equal_weight_baseline_reason": "NOT_REQUESTED"},
-        "excess_return": {"vs_benchmark": 0.01, "vs_benchmark_status": "VALID", "vs_benchmark_reason": None, "vs_equal_weight": None, "vs_equal_weight_status": "UNAVAILABLE", "vs_equal_weight_reason": "NOT_REQUESTED"},
-        "significance_verdict": {"overall": "CANNOT_DETERMINE", "thresholds_status": "UNKNOWN", "layers": {"statistical": {**layer, "bootstrap_ci_lower_vs_benchmark": None, "bootstrap_ci_lower_vs_benchmark_status": "UNAVAILABLE", "bootstrap_ci_lower_vs_benchmark_reason": "NO_DATA", "bootstrap_ci_lower_vs_equal_weight": None, "bootstrap_ci_lower_vs_equal_weight_status": "UNAVAILABLE", "bootstrap_ci_lower_vs_equal_weight_reason": "NO_DATA"}, "effect_size": {**layer, "ir_vs_benchmark": None, "ir_vs_benchmark_status": "UNAVAILABLE", "ir_vs_benchmark_reason": "NO_DATA", "ir_vs_equal_weight": None, "ir_vs_equal_weight_status": "UNAVAILABLE", "ir_vs_equal_weight_reason": "NO_DATA", "delta_sharpe_vs_benchmark": None, "delta_sharpe_vs_benchmark_status": "UNAVAILABLE", "delta_sharpe_vs_benchmark_reason": "NO_DATA", "delta_sharpe_vs_equal_weight": None, "delta_sharpe_vs_equal_weight_status": "UNAVAILABLE", "delta_sharpe_vs_equal_weight_reason": "NO_DATA"}, "robustness": {**layer, "outperform_ratio_vs_benchmark": None, "outperform_ratio_vs_benchmark_status": "UNAVAILABLE", "outperform_ratio_vs_benchmark_reason": "NO_DATA", "outperform_ratio_vs_equal_weight": None, "outperform_ratio_vs_equal_weight_status": "UNAVAILABLE", "outperform_ratio_vs_equal_weight_reason": "NO_DATA"}, "economic": {**layer, "annualized_return_improvement_vs_benchmark": None, "annualized_return_improvement_vs_benchmark_status": "UNAVAILABLE", "annualized_return_improvement_vs_benchmark_reason": "NO_DATA", "annualized_return_improvement_vs_equal_weight": None, "annualized_return_improvement_vs_equal_weight_status": "UNAVAILABLE", "annualized_return_improvement_vs_equal_weight_reason": "NO_DATA", "max_drawdown_improvement_vs_benchmark": None, "max_drawdown_improvement_vs_benchmark_status": "UNAVAILABLE", "max_drawdown_improvement_vs_benchmark_reason": "NO_DATA", "max_drawdown_improvement_vs_equal_weight": None, "max_drawdown_improvement_vs_equal_weight_status": "UNAVAILABLE", "max_drawdown_improvement_vs_equal_weight_reason": "NO_DATA"}}},
+        "summary": {
+            "portfolio": metric,
+            "benchmark": metric,
+            "equal_weight_baseline": None,
+            "equal_weight_baseline_status": "UNAVAILABLE",
+            "equal_weight_baseline_reason": "NOT_REQUESTED",
+        },
+        "excess_return": {
+            "vs_benchmark": 0.01,
+            "vs_benchmark_status": "VALID",
+            "vs_benchmark_reason": None,
+            "vs_equal_weight": None,
+            "vs_equal_weight_status": "UNAVAILABLE",
+            "vs_equal_weight_reason": "NOT_REQUESTED",
+        },
+        "significance_verdict": {
+            "overall": "CANNOT_DETERMINE",
+            "thresholds_status": "UNKNOWN",
+            "layers": {
+                "statistical": {
+                    **layer,
+                    "bootstrap_ci_lower_vs_benchmark": None,
+                    "bootstrap_ci_lower_vs_benchmark_status": "UNAVAILABLE",
+                    "bootstrap_ci_lower_vs_benchmark_reason": "NO_DATA",
+                    "bootstrap_ci_lower_vs_equal_weight": None,
+                    "bootstrap_ci_lower_vs_equal_weight_status": "UNAVAILABLE",
+                    "bootstrap_ci_lower_vs_equal_weight_reason": "NO_DATA",
+                },
+                "effect_size": {
+                    **layer,
+                    "ir_vs_benchmark": None,
+                    "ir_vs_benchmark_status": "UNAVAILABLE",
+                    "ir_vs_benchmark_reason": "NO_DATA",
+                    "ir_vs_equal_weight": None,
+                    "ir_vs_equal_weight_status": "UNAVAILABLE",
+                    "ir_vs_equal_weight_reason": "NO_DATA",
+                    "delta_sharpe_vs_benchmark": None,
+                    "delta_sharpe_vs_benchmark_status": "UNAVAILABLE",
+                    "delta_sharpe_vs_benchmark_reason": "NO_DATA",
+                    "delta_sharpe_vs_equal_weight": None,
+                    "delta_sharpe_vs_equal_weight_status": "UNAVAILABLE",
+                    "delta_sharpe_vs_equal_weight_reason": "NO_DATA",
+                },
+                "robustness": {
+                    **layer,
+                    "outperform_ratio_vs_benchmark": None,
+                    "outperform_ratio_vs_benchmark_status": "UNAVAILABLE",
+                    "outperform_ratio_vs_benchmark_reason": "NO_DATA",
+                    "outperform_ratio_vs_equal_weight": None,
+                    "outperform_ratio_vs_equal_weight_status": "UNAVAILABLE",
+                    "outperform_ratio_vs_equal_weight_reason": "NO_DATA",
+                },
+                "economic": {
+                    **layer,
+                    "annualized_return_improvement_vs_benchmark": None,
+                    "annualized_return_improvement_vs_benchmark_status": "UNAVAILABLE",
+                    "annualized_return_improvement_vs_benchmark_reason": "NO_DATA",
+                    "annualized_return_improvement_vs_equal_weight": None,
+                    "annualized_return_improvement_vs_equal_weight_status": "UNAVAILABLE",
+                    "annualized_return_improvement_vs_equal_weight_reason": "NO_DATA",
+                    "max_drawdown_improvement_vs_benchmark": None,
+                    "max_drawdown_improvement_vs_benchmark_status": "UNAVAILABLE",
+                    "max_drawdown_improvement_vs_benchmark_reason": "NO_DATA",
+                    "max_drawdown_improvement_vs_equal_weight": None,
+                    "max_drawdown_improvement_vs_equal_weight_status": "UNAVAILABLE",
+                    "max_drawdown_improvement_vs_equal_weight_reason": "NO_DATA",
+                },
+            },
+        },
         "validation_summary": {"warnings": [], "invalid_reasons": []},
     }
 
 
 def valid_bias_check() -> dict[str, object]:
-    bias = {"status": "PASS", "violations": [], "reason": "ok", "affected_periods": 0, "unmodeled_costs": []}
-    return {"backtest_id": "B-1", "checks": {"look_ahead_bias": bias, "survivorship_bias": bias, "tradability_bias": bias, "point_in_time": {**bias, "availability_quality_distribution": {"EXACT": 1.0, "DERIVED": 0.0, "INFERRED": 0.0}}, "transaction_cost": bias, "subscription_redemption_lag": bias}, "snapshot_summary": {"snapshot_periods": 1, "rebuilt_periods": 1, "total_periods": 1, "rebuilt_period_list": ["2024-01-01"]}, "data_limitations": []}
+    bias = {
+        "status": "PASS",
+        "violations": [],
+        "reason": "ok",
+        "affected_periods": 0,
+        "unmodeled_costs": [],
+    }
+    return {
+        "backtest_id": "B-1",
+        "checks": {
+            "look_ahead_bias": bias,
+            "survivorship_bias": bias,
+            "tradability_bias": bias,
+            "point_in_time": {
+                **bias,
+                "availability_quality_distribution": {
+                    "EXACT": 1.0,
+                    "DERIVED": 0.0,
+                    "INFERRED": 0.0,
+                },
+            },
+            "transaction_cost": bias,
+            "subscription_redemption_lag": bias,
+        },
+        "snapshot_summary": {
+            "snapshot_periods": 1,
+            "rebuilt_periods": 1,
+            "total_periods": 1,
+            "rebuilt_period_list": ["2024-01-01"],
+        },
+        "data_limitations": [],
+    }
 
 
 @pytest.mark.parametrize(

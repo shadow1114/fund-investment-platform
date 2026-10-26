@@ -17,7 +17,7 @@ from fip.services.data_service.grouping import (
 )
 def test_trailing_single_letter_is_a_share_class(display_name, product, cls):
     result = split_share_class_name(display_name)
-    assert result.status is GroupingStatus.CONFIRMED
+    assert result.status is GroupingStatus.UNCONFIRMED
     assert result.product_name == product
     assert result.share_class_code == cls
 

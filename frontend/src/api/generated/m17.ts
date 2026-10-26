@@ -18,15 +18,26 @@ import type {
   DecisionReviewRequest,
   DecisionReviewResponseResponse,
   ErrorResponseResponse,
+  FundBasicInfoHistoryListResponseResponse,
   FundEvaluationResponseResponse,
+  FundIngestionBatchRequest,
+  FundIngestionListResponseResponse,
+  FundIngestionRequest,
+  FundIngestionResponseResponse,
+  FundIngestionSubmissionResponseResponse,
   FundListResponseResponse,
   FundResponseResponse,
   FundScoreResponseResponse,
   GetBacktestPerformanceParams,
+  GetClassificationHistoryParams,
+  GetClassificationReviewParams,
+  GetFundBasicInfoHistoryParams,
   GetFundEvaluationsParams,
   GetFundNavSeriesParams,
   GetFundParams,
   GetFundScoresParams,
+  ListClassificationReviewsParams,
+  ListFundIngestionsParams,
   ListFundsParams,
   ListPortfoliosParams,
   ListUniversesParams,
@@ -37,7 +48,13 @@ import type {
   OptimizationSubmissionResponseResponse,
   PortfolioListResponseResponse,
   PortfolioResponseResponse,
+  ReviewSubmission,
   SessionResponseResponse,
+  TypedEnvelopeCatalogPayload,
+  TypedEnvelopeListClassificationHistoryPayload,
+  TypedEnvelopeListReviewCasePayload,
+  TypedEnvelopeReviewCasePayload,
+  TypedEnvelopeReviewOutcome,
   UniverseListResponseResponse,
   UniverseResponseResponse,
 } from "./m17.schemas";
@@ -291,6 +308,237 @@ export const getFundNavSeries = async (
 ): Promise<getFundNavSeriesResponse> => {
   return apiFetch<getFundNavSeriesResponse>(
     getGetFundNavSeriesUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export type submitFundIngestionResponse202 = {
+  data: FundIngestionSubmissionResponseResponse;
+  status: 202;
+};
+
+export type submitFundIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type submitFundIngestionResponseSuccess =
+  submitFundIngestionResponse202 & {
+    headers: Headers;
+  };
+export type submitFundIngestionResponseError =
+  submitFundIngestionResponseDefault & {
+    headers: Headers;
+  };
+
+export type submitFundIngestionResponse =
+  submitFundIngestionResponseSuccess | submitFundIngestionResponseError;
+
+export const getSubmitFundIngestionUrl = (fundId: string) => {
+  return `/api/v1/funds/${fundId}/ingestions`;
+};
+
+export const submitFundIngestion = async (
+  fundId: string,
+  fundIngestionRequest: FundIngestionRequest,
+  options?: RequestInit,
+): Promise<submitFundIngestionResponse> => {
+  return apiFetch<submitFundIngestionResponse>(
+    getSubmitFundIngestionUrl(fundId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(fundIngestionRequest),
+    },
+  );
+};
+
+export type listFundIngestionsResponse200 = {
+  data: FundIngestionListResponseResponse;
+  status: 200;
+};
+
+export type listFundIngestionsResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listFundIngestionsResponseSuccess =
+  listFundIngestionsResponse200 & {
+    headers: Headers;
+  };
+export type listFundIngestionsResponseError =
+  listFundIngestionsResponseDefault & {
+    headers: Headers;
+  };
+
+export type listFundIngestionsResponse =
+  listFundIngestionsResponseSuccess | listFundIngestionsResponseError;
+
+export const getListFundIngestionsUrl = (
+  fundId: string,
+  params?: ListFundIngestionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/funds/${fundId}/ingestions?${stringifiedParams}`
+    : `/api/v1/funds/${fundId}/ingestions`;
+};
+
+export const listFundIngestions = async (
+  fundId: string,
+  params?: ListFundIngestionsParams,
+  options?: RequestInit,
+): Promise<listFundIngestionsResponse> => {
+  return apiFetch<listFundIngestionsResponse>(
+    getListFundIngestionsUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export type submitFundIngestionBatchResponse202 = {
+  data: FundIngestionSubmissionResponseResponse;
+  status: 202;
+};
+
+export type submitFundIngestionBatchResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type submitFundIngestionBatchResponseSuccess =
+  submitFundIngestionBatchResponse202 & {
+    headers: Headers;
+  };
+export type submitFundIngestionBatchResponseError =
+  submitFundIngestionBatchResponseDefault & {
+    headers: Headers;
+  };
+
+export type submitFundIngestionBatchResponse =
+  | submitFundIngestionBatchResponseSuccess
+  | submitFundIngestionBatchResponseError;
+
+export const getSubmitFundIngestionBatchUrl = () => {
+  return `/api/v1/fund-ingestions`;
+};
+
+export const submitFundIngestionBatch = async (
+  fundIngestionBatchRequest: FundIngestionBatchRequest,
+  options?: RequestInit,
+): Promise<submitFundIngestionBatchResponse> => {
+  return apiFetch<submitFundIngestionBatchResponse>(
+    getSubmitFundIngestionBatchUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(fundIngestionBatchRequest),
+    },
+  );
+};
+
+export type getFundBasicInfoHistoryResponse200 = {
+  data: FundBasicInfoHistoryListResponseResponse;
+  status: 200;
+};
+
+export type getFundBasicInfoHistoryResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getFundBasicInfoHistoryResponseSuccess =
+  getFundBasicInfoHistoryResponse200 & {
+    headers: Headers;
+  };
+export type getFundBasicInfoHistoryResponseError =
+  getFundBasicInfoHistoryResponseDefault & {
+    headers: Headers;
+  };
+
+export type getFundBasicInfoHistoryResponse =
+  getFundBasicInfoHistoryResponseSuccess | getFundBasicInfoHistoryResponseError;
+
+export const getGetFundBasicInfoHistoryUrl = (
+  fundId: string,
+  params?: GetFundBasicInfoHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/funds/${fundId}/basic-info-history?${stringifiedParams}`
+    : `/api/v1/funds/${fundId}/basic-info-history`;
+};
+
+export const getFundBasicInfoHistory = async (
+  fundId: string,
+  params?: GetFundBasicInfoHistoryParams,
+  options?: RequestInit,
+): Promise<getFundBasicInfoHistoryResponse> => {
+  return apiFetch<getFundBasicInfoHistoryResponse>(
+    getGetFundBasicInfoHistoryUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export type getFundIngestionResponse200 = {
+  data: FundIngestionResponseResponse;
+  status: 200;
+};
+
+export type getFundIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getFundIngestionResponseSuccess = getFundIngestionResponse200 & {
+  headers: Headers;
+};
+export type getFundIngestionResponseError = getFundIngestionResponseDefault & {
+  headers: Headers;
+};
+
+export type getFundIngestionResponse =
+  getFundIngestionResponseSuccess | getFundIngestionResponseError;
+
+export const getGetFundIngestionUrl = (operationId: string) => {
+  return `/api/v1/ingestions/${operationId}`;
+};
+
+export const getFundIngestion = async (
+  operationId: string,
+  options?: RequestInit,
+): Promise<getFundIngestionResponse> => {
+  return apiFetch<getFundIngestionResponse>(
+    getGetFundIngestionUrl(operationId),
     {
       ...options,
       method: "GET",
@@ -975,6 +1223,267 @@ export const getBacktestBiasCheck = async (
     {
       ...options,
       method: "GET",
+    },
+  );
+};
+
+/**
+ * @summary Catalog
+ */
+export type getClassificationCatalogResponse200 = {
+  data: TypedEnvelopeCatalogPayload;
+  status: 200;
+};
+
+export type getClassificationCatalogResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getClassificationCatalogResponseSuccess =
+  getClassificationCatalogResponse200 & {
+    headers: Headers;
+  };
+export type getClassificationCatalogResponseError =
+  getClassificationCatalogResponseDefault & {
+    headers: Headers;
+  };
+
+export type getClassificationCatalogResponse =
+  | getClassificationCatalogResponseSuccess
+  | getClassificationCatalogResponseError;
+
+export const getGetClassificationCatalogUrl = () => {
+  return `/api/v1/fund-classifications/catalog`;
+};
+
+export const getClassificationCatalog = async (
+  options?: RequestInit,
+): Promise<getClassificationCatalogResponse> => {
+  return apiFetch<getClassificationCatalogResponse>(
+    getGetClassificationCatalogUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+/**
+ * @summary History
+ */
+export type getClassificationHistoryResponse200 = {
+  data: TypedEnvelopeListClassificationHistoryPayload;
+  status: 200;
+};
+
+export type getClassificationHistoryResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getClassificationHistoryResponseSuccess =
+  getClassificationHistoryResponse200 & {
+    headers: Headers;
+  };
+export type getClassificationHistoryResponseError =
+  getClassificationHistoryResponseDefault & {
+    headers: Headers;
+  };
+
+export type getClassificationHistoryResponse =
+  | getClassificationHistoryResponseSuccess
+  | getClassificationHistoryResponseError;
+
+export const getGetClassificationHistoryUrl = (
+  fundId: string,
+  params?: GetClassificationHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/funds/${fundId}/classification-history?${stringifiedParams}`
+    : `/api/v1/funds/${fundId}/classification-history`;
+};
+
+export const getClassificationHistory = async (
+  fundId: string,
+  params?: GetClassificationHistoryParams,
+  options?: RequestInit,
+): Promise<getClassificationHistoryResponse> => {
+  return apiFetch<getClassificationHistoryResponse>(
+    getGetClassificationHistoryUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+/**
+ * @summary List Reviews
+ */
+export type listClassificationReviewsResponse200 = {
+  data: TypedEnvelopeListReviewCasePayload;
+  status: 200;
+};
+
+export type listClassificationReviewsResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listClassificationReviewsResponseSuccess =
+  listClassificationReviewsResponse200 & {
+    headers: Headers;
+  };
+export type listClassificationReviewsResponseError =
+  listClassificationReviewsResponseDefault & {
+    headers: Headers;
+  };
+
+export type listClassificationReviewsResponse =
+  | listClassificationReviewsResponseSuccess
+  | listClassificationReviewsResponseError;
+
+export const getListClassificationReviewsUrl = (
+  params?: ListClassificationReviewsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/classification-reviews?${stringifiedParams}`
+    : `/api/v1/classification-reviews`;
+};
+
+export const listClassificationReviews = async (
+  params?: ListClassificationReviewsParams,
+  options?: RequestInit,
+): Promise<listClassificationReviewsResponse> => {
+  return apiFetch<listClassificationReviewsResponse>(
+    getListClassificationReviewsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+/**
+ * @summary Get Review
+ */
+export type getClassificationReviewResponse200 = {
+  data: TypedEnvelopeReviewCasePayload;
+  status: 200;
+};
+
+export type getClassificationReviewResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getClassificationReviewResponseSuccess =
+  getClassificationReviewResponse200 & {
+    headers: Headers;
+  };
+export type getClassificationReviewResponseError =
+  getClassificationReviewResponseDefault & {
+    headers: Headers;
+  };
+
+export type getClassificationReviewResponse =
+  getClassificationReviewResponseSuccess | getClassificationReviewResponseError;
+
+export const getGetClassificationReviewUrl = (
+  caseId: number,
+  params?: GetClassificationReviewParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/classification-reviews/${caseId}?${stringifiedParams}`
+    : `/api/v1/classification-reviews/${caseId}`;
+};
+
+export const getClassificationReview = async (
+  caseId: number,
+  params?: GetClassificationReviewParams,
+  options?: RequestInit,
+): Promise<getClassificationReviewResponse> => {
+  return apiFetch<getClassificationReviewResponse>(
+    getGetClassificationReviewUrl(caseId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+/**
+ * @summary Review
+ */
+export type reviewClassificationResponse200 = {
+  data: TypedEnvelopeReviewOutcome;
+  status: 200;
+};
+
+export type reviewClassificationResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type reviewClassificationResponseSuccess =
+  reviewClassificationResponse200 & {
+    headers: Headers;
+  };
+export type reviewClassificationResponseError =
+  reviewClassificationResponseDefault & {
+    headers: Headers;
+  };
+
+export type reviewClassificationResponse =
+  reviewClassificationResponseSuccess | reviewClassificationResponseError;
+
+export const getReviewClassificationUrl = (caseId: number) => {
+  return `/api/v1/classification-reviews/${caseId}/review`;
+};
+
+export const reviewClassification = async (
+  caseId: number,
+  reviewSubmission: ReviewSubmission,
+  options?: RequestInit,
+): Promise<reviewClassificationResponse> => {
+  return apiFetch<reviewClassificationResponse>(
+    getReviewClassificationUrl(caseId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reviewSubmission),
     },
   );
 };

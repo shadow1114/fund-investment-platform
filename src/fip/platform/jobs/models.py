@@ -2,7 +2,7 @@ import datetime as dt
 from enum import StrEnum
 
 from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -46,6 +46,8 @@ class CalculationJob(Base):
     decision_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     result_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    result_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(execution_status_enum, nullable=False)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -57,6 +59,8 @@ class CalculationJob(Base):
     last_error_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

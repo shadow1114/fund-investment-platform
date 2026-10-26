@@ -1,3 +1,12 @@
+import {
+  classificationCatalog,
+  emptyClassificationHistory,
+} from "../../test/classificationFixtures";
+import {
+  fundBasicInfoHistoryEnvelope,
+  fundIngestionListEnvelope,
+  sessionEnvelope,
+} from "../../test/contractFixtures";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -32,6 +41,19 @@ const baseMeta = {
 };
 
 const server = setupServer(
+  http.get("/api/v1/session", () => HttpResponse.json(sessionEnvelope)),
+  http.get("/api/v1/funds/:fundId/ingestions", () =>
+    HttpResponse.json(fundIngestionListEnvelope),
+  ),
+  http.get("/api/v1/funds/:fundId/basic-info-history", () =>
+    HttpResponse.json(fundBasicInfoHistoryEnvelope),
+  ),
+  http.get("/api/v1/fund-classifications/catalog", () =>
+    HttpResponse.json(classificationCatalog),
+  ),
+  http.get("/api/v1/funds/:fundId/classification-history", () =>
+    HttpResponse.json(emptyClassificationHistory),
+  ),
   http.get("/api/v1/funds/000001", () =>
     HttpResponse.json({
       data: {

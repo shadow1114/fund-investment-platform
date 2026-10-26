@@ -82,6 +82,8 @@ class JobExecutor:
             return None
         job.claimed_by = worker_id
         job.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
+        if job.started_at is None:
+            job.started_at = now
         session.flush()
         return job
 
@@ -96,6 +98,7 @@ class JobExecutor:
         job.error_code = outcome.error_code
         job.error_detail = outcome.error_message
         job.last_error_at = now if outcome.error_code else None
+        job.finished_at = now
         job.claimed_by = None
         job.lease_expires_at = None
         session.flush()

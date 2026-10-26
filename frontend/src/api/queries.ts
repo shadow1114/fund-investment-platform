@@ -7,6 +7,7 @@ import {
   getBacktestStatus,
   getDecision,
   getFund,
+  getFundBasicInfoHistory,
   getFundEvaluations,
   getFundNavSeries,
   getFundScores,
@@ -16,6 +17,7 @@ import {
   getSession,
   getUniverse,
   listFunds,
+  listFundIngestions,
   listPortfolios,
   listUniverses,
 } from "./generated/m17";
@@ -43,6 +45,10 @@ export const queryKeys = {
     ["api", "funds", fundId, "evaluations", params] as const,
   fundScores: (fundId: string, params?: GetFundScoresParams) =>
     ["api", "funds", fundId, "scores", params] as const,
+  fundIngestions: (fundId: string) =>
+    ["api", "funds", fundId, "ingestions"] as const,
+  fundBasicInfoHistory: (fundId: string, asOfDate?: string) =>
+    ["api", "funds", fundId, "basic-info-history", asOfDate] as const,
   universes: (params?: ListUniversesParams) =>
     ["api", "fund-universes", params] as const,
   universe: (universeId: string) =>
@@ -73,6 +79,30 @@ export const queryKeys = {
   operation: (operationId: string) =>
     ["api", "operations", operationId] as const,
 };
+
+export const getFundBasicInfoHistoryQueryOptions = (
+  fundId: string,
+  asOfDate?: string,
+) =>
+  queryOptions({
+    queryKey: queryKeys.fundBasicInfoHistory(fundId, asOfDate),
+    queryFn: async () =>
+      unwrapResponse(
+        await getFundBasicInfoHistory(fundId, {
+          as_of_date: asOfDate,
+          limit: 20,
+        }),
+      ),
+    enabled: Boolean(fundId),
+  });
+
+export const getFundIngestionsQueryOptions = (fundId: string) =>
+  queryOptions({
+    queryKey: queryKeys.fundIngestions(fundId),
+    queryFn: async () =>
+      unwrapResponse(await listFundIngestions(fundId, { limit: 20 })),
+    enabled: Boolean(fundId),
+  });
 
 export const getSessionQueryOptions = () =>
   queryOptions({

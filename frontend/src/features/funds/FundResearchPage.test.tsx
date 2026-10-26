@@ -1,3 +1,8 @@
+import {
+  classificationCatalog,
+  emptyClassificationHistory,
+} from "../../test/classificationFixtures";
+import { sessionEnvelope } from "../../test/contractFixtures";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -41,6 +46,13 @@ const listEnvelope = {
 };
 
 const server = setupServer(
+  http.get("/api/v1/session", () => HttpResponse.json(sessionEnvelope)),
+  http.get("/api/v1/fund-classifications/catalog", () =>
+    HttpResponse.json(classificationCatalog),
+  ),
+  http.get("/api/v1/funds/:fundId/classification-history", () =>
+    HttpResponse.json(emptyClassificationHistory),
+  ),
   http.get("/api/v1/funds", ({ request }) => {
     requests.push(new URL(request.url));
     return HttpResponse.json(listEnvelope);
@@ -98,6 +110,30 @@ describe("FundResearchPage", () => {
     expect(
       screen.getByRole("link", { name: "Alpha 稳健基金" }),
     ).toHaveAttribute("href", "/funds/000001?as_of_date=2026-09-16");
+  });
+
+  it("keeps all classification ANY filters in URL requests and query identity", async () => {
+    const user = userEvent.setup();
+    renderPage(
+      "/funds?asset_class=EQUITY,BOND&strategy=ACTIVE&geography=CN,US&product_structure=ETF&market_attributes=QDII&classification_status=CONFLICT",
+    );
+    await screen.findByText("Alpha 稳健基金");
+    expect(requests[0].searchParams.get("asset_class")).toBe("EQUITY,BOND");
+    expect(requests[0].searchParams.get("geography")).toBe("CN,US");
+    await user.deselectOptions(
+      screen.getByRole("listbox", { name: "资产类别" }),
+      ["EQUITY"],
+    );
+    await user.selectOptions(
+      await screen.findByRole("listbox", { name: "资产类别" }),
+      ["BOND"],
+    );
+    await user.click(screen.getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].searchParams.get("asset_class")).toBe("BOND");
+    expect(requests[1].searchParams.get("classification_status")).toBe(
+      "CONFLICT",
+    );
   });
 
   it("uses server pagination metadata and preserves filters on the next page", async () => {

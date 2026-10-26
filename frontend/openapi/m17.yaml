@@ -28,55 +28,89 @@ paths:
     get:
       operationId: listFunds
       parameters:
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-        - { $ref: "#/components/parameters/Sort" }
-        - { $ref: "#/components/parameters/Order" }
-        - { $ref: "#/components/parameters/AsOfDate" }
-        - { name: fund_name, in: query, schema: { type: string } }
-        - {
-            name: fund_type,
-            in: query,
-            style: form,
-            explode: false,
-            schema: { type: array, items: { type: string } },
-          }
-        - { name: management_company_id, in: query, schema: { type: string } }
-        - { name: manager_id, in: query, schema: { type: string } }
-        - {
-            name: lifecycle_status,
-            in: query,
-            style: form,
-            explode: false,
-            schema:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/LifecycleStatus" },
-              },
-          }
-        - {
-            name: investment_eligibility,
-            in: query,
-            style: form,
-            explode: false,
-            schema:
-              {
-                type: array,
-                items: { $ref: "#/components/schemas/InvestmentEligibility" },
-              },
-          }
-        - {
-            name: inception_date_from,
-            in: query,
-            schema: { type: string, format: date },
-          }
-        - {
-            name: inception_date_to,
-            in: query,
-            schema: { type: string, format: date },
-          }
-        - { name: aum_min, in: query, schema: { type: number } }
-        - { name: aum_max, in: query, schema: { type: number } }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
+        - $ref: "#/components/parameters/AsOfDate"
+        - name: fund_name
+          in: query
+          schema:
+            type: string
+        - name: fund_type
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: management_company_id
+          in: query
+          schema:
+            type: string
+        - name: manager_id
+          in: query
+          schema:
+            type: string
+        - name: lifecycle_status
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/LifecycleStatus"
+        - name: investment_eligibility
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/InvestmentEligibility"
+        - name: inception_date_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: inception_date_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: aum_min
+          in: query
+          schema:
+            type: number
+        - name: aum_max
+          in: query
+          schema:
+            type: number
+        - name: asset_class
+          in: query
+          schema:
+            type: string
+        - name: strategy
+          in: query
+          schema:
+            type: string
+        - name: geography
+          in: query
+          schema:
+            type: string
+        - name: product_structure
+          in: query
+          schema:
+            type: string
+        - name: market_attributes
+          in: query
+          schema:
+            type: string
+        - name: classification_status
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/FundListResponse"
@@ -86,8 +120,8 @@ paths:
     get:
       operationId: getFund
       parameters:
-        - { $ref: "#/components/parameters/FundId" }
-        - { $ref: "#/components/parameters/AsOfDate" }
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/AsOfDate"
       responses:
         "200":
           $ref: "#/components/responses/FundResponse"
@@ -97,32 +131,115 @@ paths:
     get:
       operationId: getFundNavSeries
       parameters:
-        - { $ref: "#/components/parameters/FundId" }
-        - { $ref: "#/components/parameters/DateFrom" }
-        - { $ref: "#/components/parameters/DateTo" }
-        - { $ref: "#/components/parameters/AsOfDate" }
-        - {
-            name: frequency,
-            in: query,
-            schema: { type: string, enum: [DAILY, WEEKLY, MONTHLY] },
-          }
-        - {
-            name: nav_type,
-            in: query,
-            schema: { type: string, enum: [ADJUSTED, RAW], default: ADJUSTED },
-          }
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+        - $ref: "#/components/parameters/AsOfDate"
+        - name: frequency
+          in: query
+          schema:
+            type: string
+            enum:
+              - DAILY
+              - WEEKLY
+              - MONTHLY
+        - name: nav_type
+          in: query
+          schema:
+            type: string
+            enum:
+              - ADJUSTED
+              - RAW
+            default: ADJUSTED
       responses:
         "200":
           $ref: "#/components/responses/NavSeriesResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/funds/{fund_id}/ingestions:
+    post:
+      operationId: submitFundIngestion
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundIngestionRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/FundIngestionSubmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      operationId: listFundIngestions
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          $ref: "#/components/responses/FundIngestionListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/fund-ingestions:
+    post:
+      operationId: submitFundIngestionBatch
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundIngestionBatchRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/FundIngestionSubmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/funds/{fund_id}/basic-info-history:
+    get:
+      operationId: getFundBasicInfoHistory
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/AsOfDate"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          $ref: "#/components/responses/FundBasicInfoHistoryListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/ingestions/{operation_id}:
+    get:
+      operationId: getFundIngestion
+      parameters:
+        - $ref: "#/components/parameters/OperationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/FundIngestionResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /api/v1/funds/{fund_id}/evaluations:
     get:
       operationId: getFundEvaluations
       parameters:
-        - { $ref: "#/components/parameters/FundId" }
-        - { $ref: "#/components/parameters/EvaluationPeriod" }
-        - { $ref: "#/components/parameters/AsOfDate" }
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/EvaluationPeriod"
+        - $ref: "#/components/parameters/AsOfDate"
       responses:
         "200":
           $ref: "#/components/responses/FundEvaluationResponse"
@@ -132,9 +249,9 @@ paths:
     get:
       operationId: getFundScores
       parameters:
-        - { $ref: "#/components/parameters/FundId" }
-        - { $ref: "#/components/parameters/EvaluationPeriod" }
-        - { $ref: "#/components/parameters/AsOfDate" }
+        - $ref: "#/components/parameters/FundId"
+        - $ref: "#/components/parameters/EvaluationPeriod"
+        - $ref: "#/components/parameters/AsOfDate"
       responses:
         "200":
           $ref: "#/components/responses/FundScoreResponse"
@@ -144,17 +261,19 @@ paths:
     get:
       operationId: listUniverses
       parameters:
-        - { name: strategy_id, in: query, schema: { type: string } }
-        - {
-            name: decision_at,
-            in: query,
-            schema: { type: string, format: date },
-          }
-        - {
-            name: eligibility_rules_version,
-            in: query,
-            schema: { type: string },
-          }
+        - name: strategy_id
+          in: query
+          schema:
+            type: string
+        - name: decision_at
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: eligibility_rules_version
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           $ref: "#/components/responses/UniverseListResponse"
@@ -164,7 +283,7 @@ paths:
     get:
       operationId: getUniverse
       parameters:
-        - { $ref: "#/components/parameters/UniverseId" }
+        - $ref: "#/components/parameters/UniverseId"
       responses:
         "200":
           $ref: "#/components/responses/UniverseResponse"
@@ -174,10 +293,10 @@ paths:
     get:
       operationId: listPortfolios
       parameters:
-        - { $ref: "#/components/parameters/Page" }
-        - { $ref: "#/components/parameters/PageSize" }
-        - { $ref: "#/components/parameters/Sort" }
-        - { $ref: "#/components/parameters/Order" }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/Order"
       responses:
         "200":
           $ref: "#/components/responses/PortfolioListResponse"
@@ -187,7 +306,7 @@ paths:
     get:
       operationId: getPortfolio
       parameters:
-        - { $ref: "#/components/parameters/PortfolioId" }
+        - $ref: "#/components/parameters/PortfolioId"
       responses:
         "200":
           $ref: "#/components/responses/PortfolioResponse"
@@ -197,8 +316,8 @@ paths:
     post:
       operationId: submitOptimization
       parameters:
-        - { $ref: "#/components/parameters/PortfolioId" }
-        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - $ref: "#/components/parameters/PortfolioId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -214,8 +333,8 @@ paths:
     get:
       operationId: getOptimization
       parameters:
-        - { $ref: "#/components/parameters/PortfolioId" }
-        - { $ref: "#/components/parameters/OptimizationId" }
+        - $ref: "#/components/parameters/PortfolioId"
+        - $ref: "#/components/parameters/OptimizationId"
       responses:
         "200":
           $ref: "#/components/responses/OptimizationResponse"
@@ -225,7 +344,7 @@ paths:
     get:
       operationId: getDecision
       parameters:
-        - { $ref: "#/components/parameters/DecisionId" }
+        - $ref: "#/components/parameters/DecisionId"
       responses:
         "200":
           $ref: "#/components/responses/DecisionResponse"
@@ -235,7 +354,7 @@ paths:
     post:
       operationId: reviewDecision
       parameters:
-        - { $ref: "#/components/parameters/DecisionId" }
+        - $ref: "#/components/parameters/DecisionId"
       requestBody:
         required: true
         content:
@@ -265,7 +384,7 @@ paths:
     post:
       operationId: validateBacktest
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
+        - $ref: "#/components/parameters/BacktestId"
       responses:
         "200":
           $ref: "#/components/responses/BacktestValidationResponse"
@@ -275,8 +394,8 @@ paths:
     post:
       operationId: runBacktest
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
-        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - $ref: "#/components/parameters/BacktestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "202":
           $ref: "#/components/responses/BacktestRunResponse"
@@ -286,7 +405,7 @@ paths:
     get:
       operationId: getBacktestStatus
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
+        - $ref: "#/components/parameters/BacktestId"
       responses:
         "200":
           $ref: "#/components/responses/BacktestStatusResponse"
@@ -296,7 +415,7 @@ paths:
     get:
       operationId: getBacktestResult
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
+        - $ref: "#/components/parameters/BacktestId"
       responses:
         "200":
           $ref: "#/components/responses/BacktestResultResponse"
@@ -306,22 +425,29 @@ paths:
     get:
       operationId: getBacktestPerformance
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
-        - { $ref: "#/components/parameters/DateFrom" }
-        - { $ref: "#/components/parameters/DateTo" }
-        - { name: frequency, in: query, schema: { type: string } }
-        - {
-            name: segment,
-            in: query,
-            schema: { type: string, enum: [FULL, IN_SAMPLE, OUT_OF_SAMPLE] },
-          }
-        - {
-            name: include_series,
-            in: query,
-            style: form,
-            explode: false,
-            schema: { type: array, items: { type: string } },
-          }
+        - $ref: "#/components/parameters/BacktestId"
+        - $ref: "#/components/parameters/DateFrom"
+        - $ref: "#/components/parameters/DateTo"
+        - name: frequency
+          in: query
+          schema:
+            type: string
+        - name: segment
+          in: query
+          schema:
+            type: string
+            enum:
+              - FULL
+              - IN_SAMPLE
+              - OUT_OF_SAMPLE
+        - name: include_series
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
       responses:
         "200":
           $ref: "#/components/responses/BacktestPerformanceResponse"
@@ -331,206 +457,382 @@ paths:
     get:
       operationId: getBacktestBiasCheck
       parameters:
-        - { $ref: "#/components/parameters/BacktestId" }
+        - $ref: "#/components/parameters/BacktestId"
       responses:
         "200":
           $ref: "#/components/responses/BacktestBiasCheckResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /api/v1/fund-classifications/catalog:
+    get:
+      summary: Catalog
+      operationId: getClassificationCatalog
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypedEnvelope_CatalogPayload_"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/funds/{fund_id}/classification-history:
+    get:
+      summary: History
+      operationId: getClassificationHistory
+      parameters:
+        - name: fund_id
+          in: path
+          required: true
+          schema:
+            type: string
+            title: Fund Id
+        - name: decision_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date
+              - type: "null"
+            title: Decision At
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypedEnvelope_list_ClassificationHistoryPayload__"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/classification-reviews:
+    get:
+      summary: List Reviews
+      operationId: listClassificationReviews
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            title: Page
+        - name: page_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 500
+            minimum: 1
+            default: 20
+            title: Page Size
+        - name: status
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+            default: PENDING
+            title: Status
+        - name: decision_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date
+              - type: "null"
+            title: Decision At
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypedEnvelope_list_ReviewCasePayload__"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/classification-reviews/{case_id}:
+    get:
+      summary: Get Review
+      operationId: getClassificationReview
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Case Id
+        - name: decision_at
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                format: date
+              - type: "null"
+            title: Decision At
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypedEnvelope_ReviewCasePayload_"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/classification-reviews/{case_id}/review:
+    post:
+      summary: Review
+      operationId: reviewClassification
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            title: Case Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewSubmission"
+      responses:
+        "200":
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypedEnvelope_ReviewOutcome_"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
 components:
   parameters:
     Page:
-      {
-        name: page,
-        in: query,
-        schema: { type: integer, minimum: 1, default: 1 },
-      }
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
     PageSize:
-      {
-        name: page_size,
-        in: query,
-        schema: { type: integer, minimum: 1, maximum: 500, default: 50 },
-      }
-    Sort: { name: sort, in: query, schema: { type: string } }
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
     Order:
-      { name: order, in: query, schema: { type: string, enum: [asc, desc] } }
+      name: order
+      in: query
+      schema:
+        type: string
+        enum:
+          - asc
+          - desc
     AsOfDate:
-      { name: as_of_date, in: query, schema: { type: string, format: date } }
+      name: as_of_date
+      in: query
+      schema:
+        type: string
+        format: date
     DateFrom:
-      { name: date_from, in: query, schema: { type: string, format: date } }
-    DateTo: { name: date_to, in: query, schema: { type: string, format: date } }
+      name: date_from
+      in: query
+      schema:
+        type: string
+        format: date
+    DateTo:
+      name: date_to
+      in: query
+      schema:
+        type: string
+        format: date
     EvaluationPeriod:
-      {
-        name: evaluation_period,
-        in: query,
-        schema: { type: string, enum: [1M, 3M, 6M, 1Y, 3Y, 5Y] },
-      }
+      name: evaluation_period
+      in: query
+      schema:
+        type: string
+        enum:
+          - 1M
+          - 3M
+          - 6M
+          - 1Y
+          - 3Y
+          - 5Y
     FundId:
-      { name: fund_id, in: path, required: true, schema: { type: string } }
+      name: fund_id
+      in: path
+      required: true
+      schema:
+        type: string
     UniverseId:
-      { name: universe_id, in: path, required: true, schema: { type: string } }
+      name: universe_id
+      in: path
+      required: true
+      schema:
+        type: string
     PortfolioId:
-      { name: id, in: path, required: true, schema: { type: string } }
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
     OptimizationId:
-      {
-        name: optimization_id,
-        in: path,
-        required: true,
-        schema: { type: string },
-      }
+      name: optimization_id
+      in: path
+      required: true
+      schema:
+        type: string
     DecisionId:
-      { name: decision_id, in: path, required: true, schema: { type: string } }
-    BacktestId: { name: id, in: path, required: true, schema: { type: string } }
+      name: decision_id
+      in: path
+      required: true
+      schema:
+        type: string
+    BacktestId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
     OperationId:
-      { name: operation_id, in: path, required: true, schema: { type: string } }
+      name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
     IdempotencyKey:
-      {
-        name: Idempotency-Key,
-        in: header,
-        required: true,
-        schema: { type: string, format: uuid },
-      }
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     ErrorResponse:
       description: Unified error envelope.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     SessionResponse:
-      {
-        description: Current authenticated session.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/SessionEnvelope" } },
-          },
-      }
+      description: Current authenticated session.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SessionEnvelope"
     OperationResponse:
-      {
-        description: Asynchronous operation progress.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/OperationEnvelope" } },
-          },
-      }
+      description: Asynchronous operation progress.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OperationEnvelope"
+    FundIngestionSubmissionResponse:
+      description: Accepted fund data ingestion job.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundIngestionSubmissionEnvelope"
+    FundIngestionListResponse:
+      description: Recent ingestion jobs for a fund.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundIngestionListEnvelope"
+    FundIngestionResponse:
+      description: Fund data ingestion job status and item results.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundIngestionEnvelope"
+    FundBasicInfoHistoryListResponse:
+      description: Versioned fund overview snapshots visible at the requested date.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundBasicInfoHistoryListEnvelope"
     FundListResponse:
-      {
-        description: Paginated funds.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/FundListEnvelope" } },
-          },
-      }
+      description: Paginated funds.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundListEnvelope"
     FundResponse:
-      {
-        description: Fund detail.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/FundEnvelope" } },
-          },
-      }
+      description: Fund detail.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundEnvelope"
     NavSeriesResponse:
-      {
-        description: Fund NAV series.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/NavSeriesEnvelope" } },
-          },
-      }
+      description: Fund NAV series.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NavSeriesEnvelope"
     FundEvaluationResponse:
-      {
-        description: Fund evaluation.,
-        content:
-          {
-            application/json:
-              {
-                schema: { $ref: "#/components/schemas/FundEvaluationEnvelope" },
-              },
-          },
-      }
+      description: Fund evaluation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundEvaluationEnvelope"
     FundScoreResponse:
-      {
-        description: Fund score.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/FundScoreEnvelope" } },
-          },
-      }
+      description: Fund score.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundScoreEnvelope"
     UniverseListResponse:
-      {
-        description: Fund universes.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/UniverseListEnvelope" } },
-          },
-      }
+      description: Fund universes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UniverseListEnvelope"
     UniverseResponse:
-      {
-        description: Fund universe snapshot.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/UniverseEnvelope" } },
-          },
-      }
+      description: Fund universe snapshot.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UniverseEnvelope"
     PortfolioListResponse:
-      {
-        description: Paginated portfolios.,
-        content:
-          {
-            application/json:
-              {
-                schema: { $ref: "#/components/schemas/PortfolioListEnvelope" },
-              },
-          },
-      }
+      description: Paginated portfolios.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PortfolioListEnvelope"
     PortfolioResponse:
-      {
-        description: Portfolio detail.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/PortfolioEnvelope" } },
-          },
-      }
+      description: Portfolio detail.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PortfolioEnvelope"
     OptimizationSubmissionResponse:
-      {
-        description: Accepted optimization.,
-        content:
-          {
-            application/json:
-              {
-                schema:
-                  {
-                    $ref: "#/components/schemas/OptimizationSubmissionEnvelope",
-                  },
-              },
-          },
-      }
+      description: Accepted optimization.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OptimizationSubmissionEnvelope"
     OptimizationResponse:
-      {
-        description: Optimization result.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/OptimizationEnvelope" } },
-          },
-      }
+      description: Optimization result.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OptimizationEnvelope"
     DecisionResponse:
-      {
-        description: Immutable decision snapshot.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/DecisionEnvelope" } },
-          },
-      }
+      description: Immutable decision snapshot.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DecisionEnvelope"
     DecisionReviewResponse:
       description: Completed decision review with original and final weights.
       content:
@@ -538,1669 +840,3398 @@ components:
           schema:
             $ref: "#/components/schemas/DecisionReviewOutcomeEnvelope"
     BacktestCreatedResponse:
-      {
-        description: Created backtest.,
-        content:
-          {
-            application/json:
-              {
-                schema:
-                  { $ref: "#/components/schemas/BacktestCreatedEnvelope" },
-              },
-          },
-      }
+      description: Created backtest.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestCreatedEnvelope"
     BacktestValidationResponse:
-      {
-        description: Backtest configuration validation.,
-        content:
-          {
-            application/json:
-              {
-                schema:
-                  { $ref: "#/components/schemas/BacktestValidationEnvelope" },
-              },
-          },
-      }
+      description: Backtest configuration validation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestValidationEnvelope"
     BacktestRunResponse:
-      {
-        description: Accepted backtest run.,
-        content:
-          {
-            application/json:
-              { schema: { $ref: "#/components/schemas/BacktestRunEnvelope" } },
-          },
-      }
+      description: Accepted backtest run.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestRunEnvelope"
     BacktestStatusResponse:
-      {
-        description: Backtest status.,
-        content:
-          {
-            application/json:
-              {
-                schema: { $ref: "#/components/schemas/BacktestStatusEnvelope" },
-              },
-          },
-      }
+      description: Backtest status.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestStatusEnvelope"
     BacktestResultResponse:
-      {
-        description: Backtest result summary.,
-        content:
-          {
-            application/json:
-              {
-                schema: { $ref: "#/components/schemas/BacktestResultEnvelope" },
-              },
-          },
-      }
+      description: Backtest result summary.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestResultEnvelope"
     BacktestPerformanceResponse:
-      {
-        description: Backtest performance series.,
-        content:
-          {
-            application/json:
-              {
-                schema:
-                  { $ref: "#/components/schemas/BacktestPerformanceEnvelope" },
-              },
-          },
-      }
+      description: Backtest performance series.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestPerformanceEnvelope"
     BacktestBiasCheckResponse:
-      {
-        description: Backtest bias checks.,
-        content:
-          {
-            application/json:
-              {
-                schema:
-                  { $ref: "#/components/schemas/BacktestBiasCheckEnvelope" },
-              },
-          },
-      }
+      description: Backtest bias checks.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BacktestBiasCheckEnvelope"
   schemas:
     Error:
       type: object
-      required: [code, message, details]
+      required:
+        - code
+        - message
+        - details
       properties:
-        code: { type: string }
-        message: { type: string }
-        details: { type: object, additionalProperties: true }
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
     ErrorEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { type: "null" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/Error" }
+        data:
+          type: "null"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/Error"
     Pagination:
       type: object
-      required: [page, page_size, total_items, total_pages]
+      required:
+        - page
+        - page_size
+        - total_items
+        - total_pages
       properties:
-        page: { type: integer }
-        page_size: { type: integer }
-        total_items: { type: integer }
-        total_pages: { type: integer }
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_items:
+          type: integer
+        total_pages:
+          type: integer
     VersionReferences:
       type: object
-      additionalProperties: { type: string }
+      additionalProperties:
+        type: string
     AvailabilityQualityDistribution:
       type: object
-      required: [EXACT, DERIVED, INFERRED]
+      required:
+        - EXACT
+        - DERIVED
+        - INFERRED
       properties:
-        EXACT: { type: number }
-        DERIVED: { type: number }
-        INFERRED: { type: number }
+        EXACT:
+          type: number
+        DERIVED:
+          type: number
+        INFERRED:
+          type: number
     ResponseMeta:
       type: object
       properties:
-        request_id: { type: string }
-        as_of_date: { type: string, format: date }
-        data_version: { type: string }
-        versions: { $ref: "#/components/schemas/VersionReferences" }
-        is_point_in_time: { type: boolean }
-        pagination: { $ref: "#/components/schemas/Pagination" }
+        request_id:
+          type: string
+        as_of_date:
+          type: string
+          format: date
+        data_version:
+          type: string
+        versions:
+          $ref: "#/components/schemas/VersionReferences"
+        is_point_in_time:
+          type: boolean
+        pagination:
+          $ref: "#/components/schemas/Pagination"
         availability_quality_distribution:
-          { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
+          $ref: "#/components/schemas/AvailabilityQualityDistribution"
       additionalProperties: true
-    EmptyError: { type: "null" }
+    EmptyError:
+      type: "null"
     MetricStatus:
       type: string
-      enum: [VALID, UNAVAILABLE, EXCLUDED, UNKNOWN]
+      enum:
+        - VALID
+        - UNAVAILABLE
+        - EXCLUDED
+        - UNKNOWN
     NullableMetric:
-      description: A numeric metric whose unavailable state is never represented as zero.
+      description:
+        A numeric metric whose unavailable state is never represented as
+        zero.
       type: object
-      required: [value, status, reason]
+      required:
+        - value
+        - status
+        - reason
       properties:
-        value: { type: [number, "null"] }
-        status: { $ref: "#/components/schemas/MetricStatus" }
-        reason: { type: [string, "null"] }
+        value:
+          type:
+            - number
+            - "null"
+        status:
+          $ref: "#/components/schemas/MetricStatus"
+        reason:
+          type:
+            - string
+            - "null"
     Session:
       type: object
-      required: [user_id, roles, capabilities]
+      required:
+        - user_id
+        - roles
+        - capabilities
       properties:
-        user_id: { type: string }
+        user_id:
+          type: string
         roles:
           type: array
           items:
-            {
-              type: string,
-              enum:
-                [
-                  Researcher,
-                  Portfolio Manager,
-                  Quant Researcher,
-                  Operations,
-                  Administrator,
-                ],
-            }
+            type: string
+            enum:
+              - Researcher
+              - Portfolio Manager
+              - Quant Researcher
+              - Operations
+              - Administrator
         capabilities:
           type: object
-          required: [can_review_decisions]
+          required:
+            - can_review_decisions
+            - can_manage_data_ingestion
           properties:
-            can_review_decisions: { type: boolean }
+            can_review_decisions:
+              type: boolean
+            can_review_classifications:
+              type: boolean
+            can_manage_data_ingestion:
+              type: boolean
     SessionEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Session" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Session"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     Operation:
       type: object
-      required: [operation_id, status, progress, result_ref, failure]
+      required:
+        - operation_id
+        - status
+        - progress
+        - result_ref
+        - failure
       properties:
-        operation_id: { type: string }
+        operation_id:
+          type: string
         status:
-          {
-            type: string,
-            enum: [RUNNING, COMPLETED, BLOCKED, FAILED, CANCELLED, UNKNOWN],
-          }
+          type: string
+          enum:
+            - RUNNING
+            - COMPLETED
+            - BLOCKED
+            - FAILED
+            - CANCELLED
+            - UNKNOWN
         progress:
           anyOf:
             - type: object
-              required: [completed, total, unit]
+              required:
+                - completed
+                - total
+                - unit
               properties:
-                completed: { type: integer }
-                total: { type: [integer, "null"] }
-                unit: { type: string }
+                completed:
+                  type: integer
+                total:
+                  type:
+                    - integer
+                    - "null"
+                unit:
+                  type: string
             - type: "null"
-        result_ref: { type: [string, "null"] }
+        result_ref:
+          type:
+            - string
+            - "null"
         failure:
           anyOf:
             - type: object
-              required: [code, message]
+              required:
+                - code
+                - message
               properties:
-                code: { type: string }
-                message: { type: string }
+                code:
+                  type: string
+                message:
+                  type: string
             - type: "null"
     OperationEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Operation" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Operation"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    FundIngestionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - dataset
+      properties:
+        dataset:
+          type: string
+          enum:
+            - BASIC_INFO
+            - NAV
+    FundIngestionBatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - dataset
+        - fund_ids
+      properties:
+        dataset:
+          type: string
+          enum:
+            - BASIC_INFO
+            - NAV
+        fund_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+    FundIngestionSubmission:
+      type: object
+      additionalProperties: false
+      required:
+        - operation_id
+        - fund_id
+        - fund_ids
+        - dataset
+        - status
+      properties:
+        operation_id:
+          type: string
+        fund_id:
+          type: string
+        fund_ids:
+          type: array
+          items:
+            type: string
+        dataset:
+          type: string
+          enum:
+            - BASIC_INFO
+            - NAV
+        status:
+          type: string
+          enum:
+            - RUNNING
+            - COMPLETED
+            - BLOCKED
+            - FAILED
+            - CANCELLED
+    FundIngestionItem:
+      type: object
+      additionalProperties: true
+    FundIngestionTask:
+      type: object
+      additionalProperties: false
+      required:
+        - operation_id
+        - fund_id
+        - fund_ids
+        - dataset
+        - source
+        - actor
+        - status
+        - requested_count
+        - created_at
+        - items
+      properties:
+        operation_id:
+          type: string
+        fund_id:
+          type: string
+        fund_ids:
+          type: array
+          items:
+            type: string
+        dataset:
+          type: string
+          enum:
+            - BASIC_INFO
+            - NAV
+        source:
+          type: string
+        actor:
+          type: string
+        status:
+          type: string
+          enum:
+            - RUNNING
+            - COMPLETED
+            - BLOCKED
+            - FAILED
+            - CANCELLED
+        task_status:
+          type:
+            - string
+            - "null"
+          enum:
+            - SUCCESS
+            - PARTIAL_SUCCESS
+            - FAILED
+            - null
+        requested_count:
+          type: integer
+        success_count:
+          type:
+            - integer
+            - "null"
+        failure_count:
+          type:
+            - integer
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        finished_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FundIngestionItem"
+        failure:
+          type:
+            - string
+            - "null"
+    FundBasicInfoHistory:
+      type: object
+      additionalProperties: false
+      required:
+        - fund_id
+        - version
+        - raw_fields
+        - normalized_fields
+        - source
+        - adapter_version
+        - library_version
+        - available_at
+        - availability_quality
+      properties:
+        fund_id:
+          type: string
+        version:
+          type: integer
+        raw_fields:
+          type: object
+          additionalProperties: true
+        normalized_fields:
+          type: object
+          additionalProperties: true
+        source:
+          type: string
+        adapter_version:
+          type: string
+        library_version:
+          type: string
+        available_at:
+          type: string
+          format: date-time
+        availability_quality:
+          type: string
+          enum:
+            - INFERRED
+    FundIngestionSubmissionEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: "#/components/schemas/FundIngestionSubmission"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    FundIngestionListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FundIngestionTask"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    FundIngestionEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          $ref: "#/components/schemas/FundIngestionTask"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    FundBasicInfoHistoryListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FundBasicInfoHistory"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     LifecycleStatus:
-      {
-        type: string,
-        enum:
-          [
-            NORMAL,
-            SUSPENDED_SUBSCRIPTION,
-            LIQUIDATED,
-            MERGED,
-            TRANSFORMED,
-            UNKNOWN,
-          ],
-      }
+      type: string
+      enum:
+        - NORMAL
+        - SUSPENDED_SUBSCRIPTION
+        - LIQUIDATED
+        - MERGED
+        - TRANSFORMED
+        - UNKNOWN
     InvestmentEligibility:
-      {
-        type: string,
-        enum:
-          [
-            FULLY_ELIGIBLE,
-            HOLD_ONLY,
-            LIMITED,
-            EXIT_ONLY,
-            NOT_TRADABLE,
-            UNKNOWN,
-          ],
-      }
+      type: string
+      enum:
+        - FULLY_ELIGIBLE
+        - HOLD_ONLY
+        - LIMITED
+        - EXIT_ONLY
+        - NOT_TRADABLE
+        - UNKNOWN
     FundSummary:
       type: object
       required:
-        [
-          fund_id,
-          fund_name,
-          share_class,
-          fund_classification,
-          management_company_id,
-          inception_date,
-          lifecycle_status,
-          investment_eligibility,
-        ]
+        - fund_id
+        - fund_name
+        - share_class
+        - fund_classification
+        - management_company_id
+        - inception_date
+        - lifecycle_status
+        - investment_eligibility
       properties:
-        fund_id: { type: string }
-        fund_name: { type: string }
-        share_class: { type: string }
-        fund_classification: { type: string }
-        management_company_id: { type: string }
-        inception_date: { type: string, format: date }
-        lifecycle_status: { $ref: "#/components/schemas/LifecycleStatus" }
+        fund_id:
+          type: string
+        fund_name:
+          type: string
+        share_class:
+          type: string
+        fund_classification:
+          type: string
+        management_company_id:
+          type: string
+        inception_date:
+          type: string
+          format: date
+        lifecycle_status:
+          $ref: "#/components/schemas/LifecycleStatus"
         investment_eligibility:
-          { $ref: "#/components/schemas/InvestmentEligibility" }
+          $ref: "#/components/schemas/InvestmentEligibility"
+        classification:
+          anyOf:
+            - $ref: "#/components/schemas/ClassificationPayloadModel"
+            - type: "null"
     BenchmarkComponent:
       type: object
-      required: [benchmark_id, weight]
+      required:
+        - benchmark_id
+        - weight
       properties:
-        benchmark_id: { type: string }
-        weight: { type: number }
+        benchmark_id:
+          type: string
+        weight:
+          type: number
     Benchmark:
       type: object
       required:
-        [
-          benchmark_id,
-          benchmark_name,
-          benchmark_type,
-          mapping_version,
-          components,
-        ]
+        - benchmark_id
+        - benchmark_name
+        - benchmark_type
+        - mapping_version
+        - components
       properties:
-        benchmark_id: { type: string }
-        benchmark_name: { type: string }
-        benchmark_type: { type: string }
-        mapping_version: { type: string }
+        benchmark_id:
+          type: string
+        benchmark_name:
+          type: string
+        benchmark_type:
+          type: string
+        mapping_version:
+          type: string
         components:
-          type: [array, "null"]
-          items: { $ref: "#/components/schemas/BenchmarkComponent" }
+          type:
+            - array
+            - "null"
+          items:
+            $ref: "#/components/schemas/BenchmarkComponent"
     Fee:
       type: object
       required:
-        [
-          expense_type,
-          expense_rate,
-          included_in_nav,
-          included_in_backtest,
-          inclusion_source,
-        ]
+        - expense_type
+        - expense_rate
+        - included_in_nav
+        - included_in_backtest
+        - inclusion_source
       properties:
-        expense_type: { type: string }
-        expense_rate: { type: number }
-        included_in_nav: { type: string, enum: ["TRUE", "FALSE", UNKNOWN] }
-        included_in_backtest: { type: boolean }
-        inclusion_source: { type: string }
+        expense_type:
+          type: string
+        expense_rate:
+          type: number
+        included_in_nav:
+          type: string
+          enum:
+            - "TRUE"
+            - "FALSE"
+            - UNKNOWN
+        included_in_backtest:
+          type: boolean
+        inclusion_source:
+          type: string
     Fund:
       allOf:
-        - { $ref: "#/components/schemas/FundSummary" }
+        - $ref: "#/components/schemas/FundSummary"
         - type: object
           required:
-            [classification_version, manager_ids, benchmark, fee_structure]
+            - classification_version
+            - manager_ids
+            - benchmark
+            - fee_structure
           properties:
-            classification_version: { type: string }
-            manager_ids: { type: array, items: { type: string } }
-            benchmark: { $ref: "#/components/schemas/Benchmark" }
+            classification_version:
+              type: string
+            manager_ids:
+              type: array
+              items:
+                type: string
+            benchmark:
+              $ref: "#/components/schemas/Benchmark"
             fee_structure:
-              { type: array, items: { $ref: "#/components/schemas/Fee" } }
+              type: array
+              items:
+                $ref: "#/components/schemas/Fee"
     FundListMeta:
       required:
-        [
-          as_of_date,
-          data_version,
-          versions,
-          is_point_in_time,
-          pagination,
-          availability_quality_distribution,
-        ]
+        - as_of_date
+        - data_version
+        - versions
+        - is_point_in_time
+        - pagination
+        - availability_quality_distribution
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              as_of_date,
-              data_version,
-              versions,
-              is_point_in_time,
-              pagination,
-              availability_quality_distribution,
-            ]
+            - as_of_date
+            - data_version
+            - versions
+            - is_point_in_time
+            - pagination
+            - availability_quality_distribution
           properties:
-            as_of_date: { type: string, format: date }
-            data_version: { type: string }
-            versions: { $ref: "#/components/schemas/VersionReferences" }
-            is_point_in_time: { type: boolean }
-            pagination: { $ref: "#/components/schemas/Pagination" }
+            as_of_date:
+              type: string
+              format: date
+            data_version:
+              type: string
+            versions:
+              $ref: "#/components/schemas/VersionReferences"
+            is_point_in_time:
+              type: boolean
+            pagination:
+              $ref: "#/components/schemas/Pagination"
             availability_quality_distribution:
-              { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
+              $ref: "#/components/schemas/AvailabilityQualityDistribution"
     FundListEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
         data:
-          { type: array, items: { $ref: "#/components/schemas/FundSummary" } }
-        meta: { $ref: "#/components/schemas/FundListMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+          type: array
+          items:
+            $ref: "#/components/schemas/FundSummary"
+        meta:
+          $ref: "#/components/schemas/FundListMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     FundEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Fund" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Fund"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     NavPoint:
       type: object
-      required: [date, nav, nav_status, nav_reason]
+      required:
+        - date
+        - nav
+        - nav_status
+        - nav_reason
       properties:
-        date: { type: string, format: date }
-        nav: { type: [number, "null"] }
-        nav_status: { $ref: "#/components/schemas/MetricStatus" }
-        nav_reason: { type: [string, "null"] }
-        reason_code: { type: [string, "null"] }
+        date:
+          type: string
+          format: date
+        nav:
+          type:
+            - number
+            - "null"
+        nav_status:
+          $ref: "#/components/schemas/MetricStatus"
+        nav_reason:
+          type:
+            - string
+            - "null"
+        reason_code:
+          type:
+            - string
+            - "null"
     NavSeries:
       type: object
-      required: [fund_id, points]
+      required:
+        - fund_id
+        - points
       properties:
-        fund_id: { type: string }
+        fund_id:
+          type: string
         points:
-          { type: array, items: { $ref: "#/components/schemas/NavPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/NavPoint"
     NavSeriesMeta:
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              nav_type,
-              adjustment_convention,
-              adjustment_rule_version,
-              unavailable_count,
-            ]
+            - nav_type
+            - adjustment_convention
+            - adjustment_rule_version
+            - unavailable_count
           properties:
-            nav_type: { type: string, enum: [ADJUSTED, RAW, UNKNOWN] }
-            adjustment_convention: { type: string, const: BACKWARD }
-            adjustment_rule_version: { type: string }
-            unavailable_count: { type: integer }
+            nav_type:
+              type: string
+              enum:
+                - ADJUSTED
+                - RAW
+                - UNKNOWN
+            adjustment_convention:
+              type: string
+              const: BACKWARD
+            adjustment_rule_version:
+              type: string
+            unavailable_count:
+              type: integer
     NavSeriesEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/NavSeries" }
-        meta: { $ref: "#/components/schemas/NavSeriesMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/NavSeries"
+        meta:
+          $ref: "#/components/schemas/NavSeriesMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     DataCompleteness:
       type: object
-      required: [available, expected]
+      required:
+        - available
+        - expected
       properties:
-        available: { type: integer }
-        expected: { type: integer }
+        available:
+          type: integer
+        expected:
+          type: integer
     FactorResult:
       type: object
       required:
-        [
-          factor_id,
-          window,
-          raw_value,
-          normalized_value,
-          status,
-          reason_code,
-          direction,
-        ]
+        - factor_id
+        - window
+        - raw_value
+        - normalized_value
+        - status
+        - reason_code
+        - direction
       properties:
-        factor_id: { type: string }
-        window: { type: string }
-        raw_value: { type: [number, "null"] }
-        normalized_value: { type: [number, "null"] }
-        status: { $ref: "#/components/schemas/MetricStatus" }
-        reason_code: { type: [string, "null"] }
+        factor_id:
+          type: string
+        window:
+          type: string
+        raw_value:
+          type:
+            - number
+            - "null"
+        normalized_value:
+          type:
+            - number
+            - "null"
+        status:
+          $ref: "#/components/schemas/MetricStatus"
+        reason_code:
+          type:
+            - string
+            - "null"
         direction:
-          { type: string, enum: [HIGHER_IS_BETTER, LOWER_IS_BETTER, UNKNOWN] }
+          type: string
+          enum:
+            - HIGHER_IS_BETTER
+            - LOWER_IS_BETTER
+            - UNKNOWN
     FundEvaluation:
       type: object
       required:
-        [
-          fund_id,
-          evaluation_period,
-          as_of_date,
-          evaluation_status,
-          evaluation_profile,
-          data_completeness,
-          factor_results,
-        ]
+        - fund_id
+        - evaluation_period
+        - as_of_date
+        - evaluation_status
+        - evaluation_profile
+        - data_completeness
+        - factor_results
       properties:
-        fund_id: { type: string }
-        evaluation_period: { type: string }
-        as_of_date: { type: string, format: date }
+        fund_id:
+          type: string
+        evaluation_period:
+          type: string
+        as_of_date:
+          type: string
+          format: date
         evaluation_status:
-          {
-            type: string,
-            enum: [NOT_ELIGIBLE, COMPLETED, PARTIAL, FAILED, UNKNOWN],
-          }
-        evaluation_profile: { type: string }
-        data_completeness: { $ref: "#/components/schemas/DataCompleteness" }
+          type: string
+          enum:
+            - NOT_ELIGIBLE
+            - COMPLETED
+            - PARTIAL
+            - FAILED
+            - UNKNOWN
+        evaluation_profile:
+          type: string
+        data_completeness:
+          $ref: "#/components/schemas/DataCompleteness"
         factor_results:
-          { type: array, items: { $ref: "#/components/schemas/FactorResult" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/FactorResult"
     FundEvaluationMeta:
       required:
-        [
-          is_point_in_time,
-          peer_group_id,
-          peer_group_version,
-          evaluation_policy_version,
-          factor_version,
-          data_version,
-        ]
+        - is_point_in_time
+        - peer_group_id
+        - peer_group_version
+        - evaluation_policy_version
+        - factor_version
+        - data_version
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              is_point_in_time,
-              peer_group_id,
-              peer_group_version,
-              evaluation_policy_version,
-              factor_version,
-              data_version,
-            ]
+            - is_point_in_time
+            - peer_group_id
+            - peer_group_version
+            - evaluation_policy_version
+            - factor_version
+            - data_version
           properties:
-            is_point_in_time: { type: boolean }
-            peer_group_id: { type: string }
-            peer_group_version: { type: string }
-            evaluation_policy_version: { type: string }
-            factor_version: { type: string }
-            data_version: { type: string }
+            is_point_in_time:
+              type: boolean
+            peer_group_id:
+              type: string
+            peer_group_version:
+              type: string
+            evaluation_policy_version:
+              type: string
+            factor_version:
+              type: string
+            data_version:
+              type: string
     FundEvaluationEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/FundEvaluation" }
-        meta: { $ref: "#/components/schemas/FundEvaluationMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/FundEvaluation"
+        meta:
+          $ref: "#/components/schemas/FundEvaluationMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     SubScores:
       type: object
       required:
-        [
-          return_score,
-          return_score_status,
-          return_score_reason,
-          risk_score,
-          risk_score_status,
-          risk_score_reason,
-          risk_adjusted_score,
-          risk_adjusted_score_status,
-          risk_adjusted_score_reason,
-          stability_score,
-          stability_score_status,
-          stability_score_reason,
-          relative_performance_score,
-          relative_performance_score_status,
-          relative_performance_score_reason,
-        ]
+        - return_score
+        - return_score_status
+        - return_score_reason
+        - risk_score
+        - risk_score_status
+        - risk_score_reason
+        - risk_adjusted_score
+        - risk_adjusted_score_status
+        - risk_adjusted_score_reason
+        - stability_score
+        - stability_score_status
+        - stability_score_reason
+        - relative_performance_score
+        - relative_performance_score_status
+        - relative_performance_score_reason
       properties:
-        return_score: { type: [number, "null"] }
-        return_score_status: { $ref: "#/components/schemas/MetricStatus" }
-        return_score_reason: { type: [string, "null"] }
-        risk_score: { type: [number, "null"] }
-        risk_score_status: { $ref: "#/components/schemas/MetricStatus" }
-        risk_score_reason: { type: [string, "null"] }
-        risk_adjusted_score: { type: [number, "null"] }
+        return_score:
+          type:
+            - number
+            - "null"
+        return_score_status:
+          $ref: "#/components/schemas/MetricStatus"
+        return_score_reason:
+          type:
+            - string
+            - "null"
+        risk_score:
+          type:
+            - number
+            - "null"
+        risk_score_status:
+          $ref: "#/components/schemas/MetricStatus"
+        risk_score_reason:
+          type:
+            - string
+            - "null"
+        risk_adjusted_score:
+          type:
+            - number
+            - "null"
         risk_adjusted_score_status:
-          { $ref: "#/components/schemas/MetricStatus" }
-        risk_adjusted_score_reason: { type: [string, "null"] }
-        stability_score: { type: [number, "null"] }
-        stability_score_status: { $ref: "#/components/schemas/MetricStatus" }
-        stability_score_reason: { type: [string, "null"] }
-        relative_performance_score: { type: [number, "null"] }
+          $ref: "#/components/schemas/MetricStatus"
+        risk_adjusted_score_reason:
+          type:
+            - string
+            - "null"
+        stability_score:
+          type:
+            - number
+            - "null"
+        stability_score_status:
+          $ref: "#/components/schemas/MetricStatus"
+        stability_score_reason:
+          type:
+            - string
+            - "null"
+        relative_performance_score:
+          type:
+            - number
+            - "null"
         relative_performance_score_status:
-          { $ref: "#/components/schemas/MetricStatus" }
-        relative_performance_score_reason: { type: [string, "null"] }
+          $ref: "#/components/schemas/MetricStatus"
+        relative_performance_score_reason:
+          type:
+            - string
+            - "null"
     ScoreAttribution:
       type: object
-      required: [factor_id, status, raw_value, reason_code, weight]
+      required:
+        - factor_id
+        - status
+        - raw_value
+        - reason_code
+        - weight
       properties:
-        factor_id: { type: string }
-        window: { type: string }
-        raw_value: { type: [number, "null"] }
-        normalized_value: { type: [number, "null"] }
+        factor_id:
+          type: string
+        window:
+          type: string
+        raw_value:
+          type:
+            - number
+            - "null"
+        normalized_value:
+          type:
+            - number
+            - "null"
         direction:
-          { type: string, enum: [HIGHER_IS_BETTER, LOWER_IS_BETTER, UNKNOWN] }
-        status: { $ref: "#/components/schemas/MetricStatus" }
-        reason_code: { type: [string, "null"] }
-        exclusion_reason: { type: [string, "null"] }
-        effectiveness_verdict: { type: string, enum: [VALID, INVALID, UNKNOWN] }
-        weight: { type: number }
-        original_weight: { type: number }
+          type: string
+          enum:
+            - HIGHER_IS_BETTER
+            - LOWER_IS_BETTER
+            - UNKNOWN
+        status:
+          $ref: "#/components/schemas/MetricStatus"
+        reason_code:
+          type:
+            - string
+            - "null"
+        exclusion_reason:
+          type:
+            - string
+            - "null"
+        effectiveness_verdict:
+          type: string
+          enum:
+            - VALID
+            - INVALID
+            - UNKNOWN
+        weight:
+          type: number
+        original_weight:
+          type: number
         weight_source:
-          { type: string, enum: [PROFILE_FIXED_V1, OPTIMIZED, UNKNOWN] }
-        weighted_contribution: { type: number }
-        sub_score: { type: string }
+          type: string
+          enum:
+            - PROFILE_FIXED_V1
+            - OPTIMIZED
+            - UNKNOWN
+        weighted_contribution:
+          type: number
+        sub_score:
+          type: string
         reallocated_to:
           type: array
           items:
             type: object
-            required: [factor_id, delta_weight]
+            required:
+              - factor_id
+              - delta_weight
             properties:
-              factor_id: { type: string }
-              delta_weight: { type: number }
+              factor_id:
+                type: string
+              delta_weight:
+                type: number
     FundScore:
       type: object
       required:
-        [
-          fund_id,
-          evaluation_period,
-          as_of_date,
-          total_score,
-          total_score_status,
-          total_score_reason,
-          sub_scores,
-          attribution,
-          data_completeness,
-          score_status,
-        ]
+        - fund_id
+        - evaluation_period
+        - as_of_date
+        - total_score
+        - total_score_status
+        - total_score_reason
+        - sub_scores
+        - attribution
+        - data_completeness
+        - score_status
       properties:
-        fund_id: { type: string }
-        evaluation_period: { type: string }
-        as_of_date: { type: string, format: date }
-        total_score: { type: [number, "null"] }
-        total_score_status: { $ref: "#/components/schemas/MetricStatus" }
-        total_score_reason: { type: [string, "null"] }
-        sub_scores: { $ref: "#/components/schemas/SubScores" }
+        fund_id:
+          type: string
+        evaluation_period:
+          type: string
+        as_of_date:
+          type: string
+          format: date
+        total_score:
+          type:
+            - number
+            - "null"
+        total_score_status:
+          $ref: "#/components/schemas/MetricStatus"
+        total_score_reason:
+          type:
+            - string
+            - "null"
+        sub_scores:
+          $ref: "#/components/schemas/SubScores"
         attribution:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/ScoreAttribution" },
-          }
-        data_completeness: { $ref: "#/components/schemas/DataCompleteness" }
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoreAttribution"
+        data_completeness:
+          $ref: "#/components/schemas/DataCompleteness"
         score_status:
-          {
-            type: string,
-            enum: [COMPLETED, PARTIAL, VALIDATION_PENDING, FAILED, UNKNOWN],
-          }
+          type: string
+          enum:
+            - COMPLETED
+            - PARTIAL
+            - VALIDATION_PENDING
+            - FAILED
+            - UNKNOWN
     FundScoreMeta:
       required:
-        [
-          peer_group_id,
-          peer_group_version,
-          scoring_policy_version,
-          evaluation_policy_version,
-          factor_version,
-          data_version,
-        ]
+        - peer_group_id
+        - peer_group_version
+        - scoring_policy_version
+        - evaluation_policy_version
+        - factor_version
+        - data_version
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              peer_group_id,
-              peer_group_version,
-              scoring_policy_version,
-              evaluation_policy_version,
-              factor_version,
-              data_version,
-            ]
+            - peer_group_id
+            - peer_group_version
+            - scoring_policy_version
+            - evaluation_policy_version
+            - factor_version
+            - data_version
           properties:
-            peer_group_id: { type: string }
-            peer_group_version: { type: string }
-            scoring_policy_version: { type: string }
-            evaluation_policy_version: { type: string }
-            factor_version: { type: string }
-            data_version: { type: string }
+            peer_group_id:
+              type: string
+            peer_group_version:
+              type: string
+            scoring_policy_version:
+              type: string
+            evaluation_policy_version:
+              type: string
+            factor_version:
+              type: string
+            data_version:
+              type: string
     FundScoreEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/FundScore" }
-        meta: { $ref: "#/components/schemas/FundScoreMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/FundScore"
+        meta:
+          $ref: "#/components/schemas/FundScoreMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     UniverseSummary:
       type: object
       required:
-        [
-          universe_id,
-          strategy_id,
-          decision_at,
-          universe_strategy,
-          member_count,
-          eligibility_rules_version,
-          scoring_policy_version,
-        ]
+        - universe_id
+        - strategy_id
+        - decision_at
+        - universe_strategy
+        - member_count
+        - eligibility_rules_version
+        - scoring_policy_version
       properties:
-        universe_id: { type: string }
-        strategy_id: { type: string }
-        decision_at: { type: string, format: date }
-        universe_strategy: { type: string, enum: [A, B, UNKNOWN] }
-        member_count: { type: integer }
-        eligibility_rules_version: { type: string }
-        scoring_policy_version: { type: [string, "null"] }
+        universe_id:
+          type: string
+        strategy_id:
+          type: string
+        decision_at:
+          type: string
+          format: date
+        universe_strategy:
+          type: string
+          enum:
+            - A
+            - B
+            - UNKNOWN
+        member_count:
+          type: integer
+        eligibility_rules_version:
+          type: string
+        scoring_policy_version:
+          type:
+            - string
+            - "null"
     UniverseCondition:
       type: object
-      required: [condition, actual, result]
+      required:
+        - condition
+        - actual
+        - result
       properties:
-        condition: { type: string }
+        condition:
+          type: string
         actual: {}
-        result: { type: string, enum: [PASS, FAIL, UNKNOWN] }
-        gap: { type: number }
+        result:
+          type: string
+          enum:
+            - PASS
+            - FAIL
+            - UNKNOWN
+        gap:
+          type: number
     UniverseMember:
       type: object
       required:
-        [
-          fund_id,
-          selection_status,
-          total_score,
-          total_score_status,
-          total_score_reason,
-          rank,
-          rank_status,
-          rank_reason,
-          percentile,
-          percentile_status,
-          percentile_reason,
-          passed_conditions,
-          failed_conditions,
-        ]
+        - fund_id
+        - selection_status
+        - total_score
+        - total_score_status
+        - total_score_reason
+        - rank
+        - rank_status
+        - rank_reason
+        - percentile
+        - percentile_status
+        - percentile_reason
+        - passed_conditions
+        - failed_conditions
       properties:
-        fund_id: { type: string }
-        selection_status: { type: string, enum: [SELECTED, REJECTED, UNKNOWN] }
-        total_score: { type: [number, "null"] }
-        total_score_status: { $ref: "#/components/schemas/MetricStatus" }
-        total_score_reason: { type: [string, "null"] }
-        rank: { type: [integer, "null"] }
-        rank_status: { $ref: "#/components/schemas/MetricStatus" }
-        rank_reason: { type: [string, "null"] }
-        percentile: { type: [number, "null"] }
-        percentile_status: { $ref: "#/components/schemas/MetricStatus" }
-        percentile_reason: { type: [string, "null"] }
-        fund_tier: { type: [string, "null"] }
+        fund_id:
+          type: string
+        selection_status:
+          type: string
+          enum:
+            - SELECTED
+            - REJECTED
+            - UNKNOWN
+        total_score:
+          type:
+            - number
+            - "null"
+        total_score_status:
+          $ref: "#/components/schemas/MetricStatus"
+        total_score_reason:
+          type:
+            - string
+            - "null"
+        rank:
+          type:
+            - integer
+            - "null"
+        rank_status:
+          $ref: "#/components/schemas/MetricStatus"
+        rank_reason:
+          type:
+            - string
+            - "null"
+        percentile:
+          type:
+            - number
+            - "null"
+        percentile_status:
+          $ref: "#/components/schemas/MetricStatus"
+        percentile_reason:
+          type:
+            - string
+            - "null"
+        fund_tier:
+          type:
+            - string
+            - "null"
         investment_eligibility:
-          { $ref: "#/components/schemas/InvestmentEligibility" }
+          $ref: "#/components/schemas/InvestmentEligibility"
         passed_conditions:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/UniverseCondition" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/UniverseCondition"
         failed_conditions:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/UniverseCondition" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/UniverseCondition"
     Universe:
       type: object
-      required: [universe_id, decision_at, universe_strategy, members, excluded]
+      required:
+        - universe_id
+        - decision_at
+        - universe_strategy
+        - members
+        - excluded
       properties:
-        universe_id: { type: string }
-        decision_at: { type: string, format: date }
-        universe_strategy: { type: string, enum: [A, B, UNKNOWN] }
+        universe_id:
+          type: string
+        decision_at:
+          type: string
+          format: date
+        universe_strategy:
+          type: string
+          enum:
+            - A
+            - B
+            - UNKNOWN
         members:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/UniverseMember" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/UniverseMember"
         excluded:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/UniverseMember" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/UniverseMember"
     UniverseListEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
         data:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/UniverseSummary" },
-          }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+          type: array
+          items:
+            $ref: "#/components/schemas/UniverseSummary"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     UniverseEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Universe" }
-        meta: { $ref: "#/components/schemas/UniverseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Universe"
+        meta:
+          $ref: "#/components/schemas/UniverseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     UniverseMeta:
-      required: [eligibility_rules_version, scoring_policy_version]
+      required:
+        - eligibility_rules_version
+        - scoring_policy_version
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
-          required: [eligibility_rules_version, scoring_policy_version]
+          required:
+            - eligibility_rules_version
+            - scoring_policy_version
           properties:
-            eligibility_rules_version: { type: string }
-            scoring_policy_version: { type: [string, "null"] }
+            eligibility_rules_version:
+              type: string
+            scoring_policy_version:
+              type:
+                - string
+                - "null"
     PortfolioSummary:
       type: object
       required:
-        [
-          portfolio_id,
-          portfolio_name,
-          portfolio_type,
-          status,
-          base_currency,
-          portfolio_version,
-        ]
+        - portfolio_id
+        - portfolio_name
+        - portfolio_type
+        - status
+        - base_currency
+        - portfolio_version
       properties:
-        portfolio_id: { type: string }
-        portfolio_name: { type: string }
-        portfolio_type: { type: string }
+        portfolio_id:
+          type: string
+        portfolio_name:
+          type: string
+        portfolio_type:
+          type: string
         status:
-          { type: string, enum: [DRAFT, ACTIVE, SUSPENDED, CLOSED, UNKNOWN] }
-        base_currency: { type: string }
-        portfolio_version: { type: string }
+          type: string
+          enum:
+            - DRAFT
+            - ACTIVE
+            - SUSPENDED
+            - CLOSED
+            - UNKNOWN
+        base_currency:
+          type: string
+        portfolio_version:
+          type: string
     Portfolio:
       allOf:
-        - { $ref: "#/components/schemas/PortfolioSummary" }
+        - $ref: "#/components/schemas/PortfolioSummary"
         - type: object
-          required: [risk_profile, portfolio_benchmark, portfolio_rule_version]
+          required:
+            - risk_profile
+            - portfolio_benchmark
+            - portfolio_rule_version
           properties:
-            risk_profile: { type: string }
-            portfolio_benchmark: { $ref: "#/components/schemas/Benchmark" }
-            portfolio_rule_version: { type: string }
+            risk_profile:
+              type: string
+            portfolio_benchmark:
+              $ref: "#/components/schemas/Benchmark"
+            portfolio_rule_version:
+              type: string
     PortfolioListMeta:
-      required: [versions, is_point_in_time, pagination]
+      required:
+        - versions
+        - is_point_in_time
+        - pagination
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
-          required: [versions, is_point_in_time, pagination]
+          required:
+            - versions
+            - is_point_in_time
+            - pagination
           properties:
-            versions: { $ref: "#/components/schemas/VersionReferences" }
-            is_point_in_time: { type: boolean }
-            pagination: { $ref: "#/components/schemas/Pagination" }
+            versions:
+              $ref: "#/components/schemas/VersionReferences"
+            is_point_in_time:
+              type: boolean
+            pagination:
+              $ref: "#/components/schemas/Pagination"
     PortfolioListEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
         data:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/PortfolioSummary" },
-          }
-        meta: { $ref: "#/components/schemas/PortfolioListMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+          type: array
+          items:
+            $ref: "#/components/schemas/PortfolioSummary"
+        meta:
+          $ref: "#/components/schemas/PortfolioListMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     PortfolioEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Portfolio" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Portfolio"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     Weight:
       type: object
-      required: [fund_id, weight]
+      required:
+        - fund_id
+        - weight
       properties:
-        fund_id: { type: string }
-        weight: { type: number }
+        fund_id:
+          type: string
+        weight:
+          type: number
     OptimizationRequest:
       type: object
       required:
-        [
-          decision_at,
-          universe_id,
-          portfolio_rule_version,
-          return_estimate_version,
-          risk_model_version,
-          mode,
-        ]
+        - decision_at
+        - universe_id
+        - portfolio_rule_version
+        - return_estimate_version
+        - risk_model_version
+        - mode
       properties:
-        decision_at: { type: string, format: date }
-        universe_id: { type: string }
-        portfolio_rule_version: { type: string }
-        return_estimate_version: { type: string }
-        risk_model_version: { type: string }
-        mode: { type: string, enum: [REBALANCE] }
+        decision_at:
+          type: string
+          format: date
+        universe_id:
+          type: string
+        portfolio_rule_version:
+          type: string
+        return_estimate_version:
+          type: string
+        risk_model_version:
+          type: string
+        mode:
+          type: string
+          enum:
+            - REBALANCE
     OptimizationSubmission:
       type: object
-      required: [operation_id, status, optimization_id]
+      required:
+        - operation_id
+        - status
+        - optimization_id
       properties:
-        operation_id: { type: string }
-        status: { type: string, enum: [RUNNING, UNKNOWN] }
-        optimization_id: { type: string }
+        operation_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - RUNNING
+            - UNKNOWN
+        optimization_id:
+          type: string
     OptimizationSubmissionEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/OptimizationSubmission" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/OptimizationSubmission"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     Optimization:
       type: object
       required:
-        [
-          optimization_id,
-          optimization_status,
-          target_weights,
-          objective_value,
-          objective_value_status,
-          objective_value_reason,
-          binding_constraints,
-          conflicting_constraints,
-          shadow_prices,
-          post_optimization_risk,
-          excluded_candidates,
-          solve_path,
-        ]
+        - optimization_id
+        - optimization_status
+        - target_weights
+        - objective_value
+        - objective_value_status
+        - objective_value_reason
+        - binding_constraints
+        - conflicting_constraints
+        - shadow_prices
+        - post_optimization_risk
+        - excluded_candidates
+        - solve_path
       properties:
-        optimization_id: { type: string }
+        optimization_id:
+          type: string
         optimization_status:
-          {
-            type: string,
-            enum:
-              [
-                OPTIMAL,
-                INFEASIBLE,
-                UNBOUNDED,
-                NOT_CONVERGED,
-                NUMERICAL_ERROR,
-                UNKNOWN,
-              ],
-          }
+          type: string
+          enum:
+            - OPTIMAL
+            - INFEASIBLE
+            - UNBOUNDED
+            - NOT_CONVERGED
+            - NUMERICAL_ERROR
+            - UNKNOWN
         target_weights:
           description: Null for every non-OPTIMAL result.
-          type: [array, "null"]
-          items: { $ref: "#/components/schemas/Weight" }
-        objective_value: { type: [number, "null"] }
-        objective_value_status: { $ref: "#/components/schemas/MetricStatus" }
-        objective_value_reason: { type: [string, "null"] }
-        binding_constraints: { type: array, items: { type: string } }
-        conflicting_constraints: { type: array, items: { type: string } }
-        shadow_prices: { type: object, additionalProperties: { type: number } }
+          type:
+            - array
+            - "null"
+          items:
+            $ref: "#/components/schemas/Weight"
+        objective_value:
+          type:
+            - number
+            - "null"
+        objective_value_status:
+          $ref: "#/components/schemas/MetricStatus"
+        objective_value_reason:
+          type:
+            - string
+            - "null"
+        binding_constraints:
+          type: array
+          items:
+            type: string
+        conflicting_constraints:
+          type: array
+          items:
+            type: string
+        shadow_prices:
+          type: object
+          additionalProperties:
+            type: number
         post_optimization_risk:
-          { $ref: "#/components/schemas/PostOptimizationRisk" }
+          $ref: "#/components/schemas/PostOptimizationRisk"
         excluded_candidates:
           type: array
           items:
             type: object
-            required: [fund_id, reason]
+            required:
+              - fund_id
+              - reason
             properties:
-              fund_id: { type: string }
-              reason: { type: string }
-        solve_path: { type: string }
+              fund_id:
+                type: string
+              reason:
+                type: string
+        solve_path:
+          type: string
       allOf:
         - if:
             properties:
-              optimization_status: { const: OPTIMAL }
+              optimization_status:
+                const: OPTIMAL
           then:
             properties:
               target_weights:
                 type: array
-                items: { $ref: "#/components/schemas/Weight" }
+                items:
+                  $ref: "#/components/schemas/Weight"
           else:
             properties:
-              target_weights: { type: "null" }
+              target_weights:
+                type: "null"
     PostOptimizationRisk:
       type: object
       required:
-        [
-          portfolio_volatility,
-          portfolio_volatility_status,
-          portfolio_volatility_reason,
-        ]
+        - portfolio_volatility
+        - portfolio_volatility_status
+        - portfolio_volatility_reason
       properties:
-        portfolio_volatility: { type: [number, "null"] }
+        portfolio_volatility:
+          type:
+            - number
+            - "null"
         portfolio_volatility_status:
-          { $ref: "#/components/schemas/MetricStatus" }
-        portfolio_volatility_reason: { type: [string, "null"] }
+          $ref: "#/components/schemas/MetricStatus"
+        portfolio_volatility_reason:
+          type:
+            - string
+            - "null"
     OptimizationMeta:
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              portfolio_rule_version,
-              return_estimate_version,
-              risk_model_version,
-              code_version,
-            ]
+            - portfolio_rule_version
+            - return_estimate_version
+            - risk_model_version
+            - code_version
           properties:
-            portfolio_rule_version: { type: string }
-            return_estimate_version: { type: string }
-            risk_model_version: { type: string }
-            code_version: { type: string }
-            random_seed: { type: integer }
+            portfolio_rule_version:
+              type: string
+            return_estimate_version:
+              type: string
+            risk_model_version:
+              type: string
+            code_version:
+              type: string
+            random_seed:
+              type: integer
     OptimizationEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Optimization" }
-        meta: { $ref: "#/components/schemas/OptimizationMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Optimization"
+        meta:
+          $ref: "#/components/schemas/OptimizationMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     DecisionReview:
       type: object
-      required: [action, reason, reviewed_by, reviewed_at]
+      required:
+        - action
+        - reason
+        - reviewed_by
+        - reviewed_at
       properties:
         action:
-          { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN, UNKNOWN] }
-        reason: { type: string }
-        reviewed_by: { type: string }
-        reviewed_at: { type: string, format: date-time }
+          type: string
+          enum:
+            - APPROVED
+            - REJECTED
+            - OVERRIDDEN
+            - UNKNOWN
+        reason:
+          type: string
+        reviewed_by:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
     Decision:
       type: object
       required:
-        [
-          decision_id,
-          portfolio_id,
-          optimization_id,
-          decision_status,
-          proposed_weights,
-          review,
-          final_weights,
-        ]
+        - decision_id
+        - portfolio_id
+        - optimization_id
+        - decision_status
+        - proposed_weights
+        - review
+        - final_weights
       properties:
-        decision_id: { type: string }
-        portfolio_id: { type: string }
-        optimization_id: { type: string }
+        decision_id:
+          type: string
+        portfolio_id:
+          type: string
+        optimization_id:
+          type: string
         decision_status:
-          {
-            type: string,
-            enum:
-              [
-                PROPOSED,
-                APPROVED,
-                REJECTED,
-                OVERRIDDEN,
-                EXPIRED,
-                SUPERSEDED,
-                UNKNOWN,
-              ],
-          }
+          type: string
+          enum:
+            - PROPOSED
+            - APPROVED
+            - REJECTED
+            - OVERRIDDEN
+            - EXPIRED
+            - SUPERSEDED
+            - UNKNOWN
         proposed_weights:
-          { type: array, items: { $ref: "#/components/schemas/Weight" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/Weight"
         review:
           anyOf:
-            - { $ref: "#/components/schemas/DecisionReview" }
-            - { type: "null" }
+            - $ref: "#/components/schemas/DecisionReview"
+            - type: "null"
         final_weights:
-          type: [array, "null"]
-          items: { $ref: "#/components/schemas/Weight" }
+          type:
+            - array
+            - "null"
+          items:
+            $ref: "#/components/schemas/Weight"
     DecisionReviewRequest:
       type: object
-      required: [action, reason]
+      required:
+        - action
+        - reason
       properties:
-        action: { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN] }
-        reason: { type: string, minLength: 1 }
+        action:
+          type: string
+          enum:
+            - APPROVED
+            - REJECTED
+            - OVERRIDDEN
+        reason:
+          type: string
+          minLength: 1
         overridden_weights:
-          { type: array, items: { $ref: "#/components/schemas/Weight" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/Weight"
     DecisionEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/Decision" }
-        meta: { $ref: "#/components/schemas/DecisionMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/Decision"
+        meta:
+          $ref: "#/components/schemas/DecisionMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     DecisionReviewOutcome:
       type: object
       required:
-        [
-          decision_id,
-          decision_status,
-          reviewed_by,
-          reviewed_at,
-          reason,
-          original_weights,
-          final_weights,
-        ]
+        - decision_id
+        - decision_status
+        - reviewed_by
+        - reviewed_at
+        - reason
+        - original_weights
+        - final_weights
       properties:
-        decision_id: { type: string }
+        decision_id:
+          type: string
         decision_status:
-          { type: string, enum: [APPROVED, REJECTED, OVERRIDDEN, UNKNOWN] }
-        reviewed_by: { type: string }
-        reviewed_at: { type: string, format: date-time }
-        reason: { type: string }
+          type: string
+          enum:
+            - APPROVED
+            - REJECTED
+            - OVERRIDDEN
+            - UNKNOWN
+        reviewed_by:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
         original_weights:
           type: array
-          items: { $ref: "#/components/schemas/Weight" }
+          items:
+            $ref: "#/components/schemas/Weight"
         final_weights:
-          type: [array, "null"]
-          items: { $ref: "#/components/schemas/Weight" }
+          type:
+            - array
+            - "null"
+          items:
+            $ref: "#/components/schemas/Weight"
     DecisionReviewOutcomeEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/DecisionReviewOutcome" }
+        data:
+          $ref: "#/components/schemas/DecisionReviewOutcome"
         meta:
           type: object
-          required: [audit_id]
+          required:
+            - audit_id
           properties:
-            audit_id: { type: string }
-            request_id: { type: string }
-        error: { $ref: "#/components/schemas/EmptyError" }
+            audit_id:
+              type: string
+            request_id:
+              type: string
+        error:
+          $ref: "#/components/schemas/EmptyError"
     DecisionMeta:
-      required: [versions, is_point_in_time]
+      required:
+        - versions
+        - is_point_in_time
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
-          required: [versions, is_point_in_time]
+          required:
+            - versions
+            - is_point_in_time
           properties:
-            versions: { $ref: "#/components/schemas/VersionReferences" }
-            is_point_in_time: { type: boolean }
+            versions:
+              $ref: "#/components/schemas/VersionReferences"
+            is_point_in_time:
+              type: boolean
     Money:
       type: object
-      required: [amount, currency]
+      required:
+        - amount
+        - currency
       properties:
-        amount: { type: string }
-        currency: { type: string }
+        amount:
+          type: string
+        currency:
+          type: string
     BacktestCreateRequest:
       type: object
       required:
-        [
-          strategy_id,
-          start_date,
-          end_date,
-          initial_capital,
-          backtest_mode,
-          benchmark_id,
-          equal_weight_baseline_enabled,
-          rebalancing_policy_version,
-          portfolio_rule_version,
-          return_estimate_version,
-          risk_model_version,
-          eligibility_rules_version,
-          transaction_cost_model_version,
-          execution_price_rule,
-          cash_return_assumption,
-          infeasible_handling,
-        ]
+        - strategy_id
+        - start_date
+        - end_date
+        - initial_capital
+        - backtest_mode
+        - benchmark_id
+        - equal_weight_baseline_enabled
+        - rebalancing_policy_version
+        - portfolio_rule_version
+        - return_estimate_version
+        - risk_model_version
+        - eligibility_rules_version
+        - transaction_cost_model_version
+        - execution_price_rule
+        - cash_return_assumption
+        - infeasible_handling
       properties:
-        strategy_id: { type: string }
-        start_date: { type: string, format: date }
-        end_date: { type: string, format: date }
-        initial_capital: { $ref: "#/components/schemas/Money" }
+        strategy_id:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        initial_capital:
+          $ref: "#/components/schemas/Money"
         backtest_mode:
-          { type: string, enum: [HISTORICAL_FIDELITY, CURRENT_RULE] }
-        benchmark_id: { type: string }
-        equal_weight_baseline_enabled: { type: boolean, default: true }
+          type: string
+          enum:
+            - HISTORICAL_FIDELITY
+            - CURRENT_RULE
+        benchmark_id:
+          type: string
+        equal_weight_baseline_enabled:
+          type: boolean
+          default: true
         is_oos_split:
           type: object
-          required: [in_sample_end, parameter_freeze_date]
+          required:
+            - in_sample_end
+            - parameter_freeze_date
           properties:
-            in_sample_end: { type: string, format: date }
-            parameter_freeze_date: { type: string, format: date }
-        rebalancing_policy_version: { type: string }
-        portfolio_rule_version: { type: string }
-        return_estimate_version: { type: string }
-        risk_model_version: { type: string }
-        eligibility_rules_version: { type: string }
-        transaction_cost_model_version: { type: string }
-        execution_price_rule: { type: string }
-        cash_return_assumption: { type: string }
+            in_sample_end:
+              type: string
+              format: date
+            parameter_freeze_date:
+              type: string
+              format: date
+        rebalancing_policy_version:
+          type: string
+        portfolio_rule_version:
+          type: string
+        return_estimate_version:
+          type: string
+        risk_model_version:
+          type: string
+        eligibility_rules_version:
+          type: string
+        transaction_cost_model_version:
+          type: string
+        execution_price_rule:
+          type: string
+        cash_return_assumption:
+          type: string
         infeasible_handling:
-          { type: string, enum: [ABORT, SKIP_PERIOD], default: ABORT }
+          type: string
+          enum:
+            - ABORT
+            - SKIP_PERIOD
+          default: ABORT
     BacktestCreated:
       type: object
-      required: [backtest_id, status, created_at]
+      required:
+        - backtest_id
+        - status
+        - created_at
       properties:
-        backtest_id: { type: string }
-        status: { type: string, enum: [CREATED, UNKNOWN] }
-        created_at: { type: string, format: date-time }
+        backtest_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - CREATED
+            - UNKNOWN
+        created_at:
+          type: string
+          format: date-time
     BacktestCreatedEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestCreated" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestCreated"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     ValidationIssue:
       type: object
-      required: [code, message]
+      required:
+        - code
+        - message
       properties:
-        code: { type: string }
-        message: { type: string }
-        detail: { type: object, additionalProperties: true }
+        code:
+          type: string
+        message:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true
     BacktestValidation:
       type: object
       required:
-        [
-          validation_result,
-          warm_up_end_date,
-          effective_period,
-          in_sample_length_days,
-          out_of_sample_length_days,
-          warnings,
-          blocking_issues,
-        ]
+        - validation_result
+        - warm_up_end_date
+        - effective_period
+        - in_sample_length_days
+        - out_of_sample_length_days
+        - warnings
+        - blocking_issues
       properties:
         validation_result:
-          { type: string, enum: [PASS, PASS_WITH_WARNINGS, UNKNOWN] }
-        warm_up_end_date: { type: string, format: date }
+          type: string
+          enum:
+            - PASS
+            - PASS_WITH_WARNINGS
+            - UNKNOWN
+        warm_up_end_date:
+          type: string
+          format: date
         effective_period:
           type: object
-          required: [from, to]
+          required:
+            - from
+            - to
           properties:
-            from: { type: string, format: date }
-            to: { type: string, format: date }
-        in_sample_length_days: { type: integer }
-        out_of_sample_length_days: { type: integer }
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+        in_sample_length_days:
+          type: integer
+        out_of_sample_length_days:
+          type: integer
         warnings:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/ValidationIssue" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationIssue"
         blocking_issues:
-          {
-            type: array,
-            items: { $ref: "#/components/schemas/ValidationIssue" },
-          }
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationIssue"
     BacktestValidationEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestValidation" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestValidation"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     BacktestRun:
       type: object
-      required: [operation_id, backtest_id, status]
+      required:
+        - operation_id
+        - backtest_id
+        - status
       properties:
-        operation_id: { type: string }
-        backtest_id: { type: string }
-        status: { type: string, enum: [RUNNING, UNKNOWN] }
+        operation_id:
+          type: string
+        backtest_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - RUNNING
+            - UNKNOWN
     BacktestRunEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestRun" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestRun"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     BacktestStatus:
       type: object
-      required: [backtest_id, status, validation_status, progress, started_at]
+      required:
+        - backtest_id
+        - status
+        - validation_status
+        - progress
+        - started_at
       properties:
-        backtest_id: { type: string }
+        backtest_id:
+          type: string
         status:
-          {
-            type: string,
-            enum:
-              [
-                CREATED,
-                VALIDATING_CONFIGURATION,
-                RUNNING,
-                VALIDATING_RESULTS,
-                COMPLETED,
-                FAILED,
-                INVALID,
-                CANCELLED,
-                ABORTED,
-                UNKNOWN,
-              ],
-          }
+          type: string
+          enum:
+            - CREATED
+            - VALIDATING_CONFIGURATION
+            - RUNNING
+            - VALIDATING_RESULTS
+            - COMPLETED
+            - FAILED
+            - INVALID
+            - CANCELLED
+            - ABORTED
+            - UNKNOWN
         validation_status:
-          {
-            type: [string, "null"],
-            enum: [VALID, WARNING, INVALID, UNKNOWN, null],
-          }
+          type:
+            - string
+            - "null"
+          enum:
+            - VALID
+            - WARNING
+            - INVALID
+            - UNKNOWN
+            - null
         progress:
           type: object
           required:
-            [
-              current_decision_date,
-              completed_periods,
-              total_periods,
-              total_periods_is_estimate,
-            ]
+            - current_decision_date
+            - completed_periods
+            - total_periods
+            - total_periods_is_estimate
           properties:
-            current_decision_date: { type: [string, "null"], format: date }
-            completed_periods: { type: integer }
-            total_periods: { type: [integer, "null"] }
-            total_periods_is_estimate: { type: boolean }
-        started_at: { type: [string, "null"], format: date-time }
+            current_decision_date:
+              type:
+                - string
+                - "null"
+              format: date
+            completed_periods:
+              type: integer
+            total_periods:
+              type:
+                - integer
+                - "null"
+            total_periods_is_estimate:
+              type: boolean
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
     BacktestStatusEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestStatus" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestStatus"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     PerformanceMetrics:
       type: object
       required:
-        [
-          total_return,
-          annualized_return,
-          volatility,
-          max_drawdown,
-          sharpe_ratio,
-          sharpe_ratio_status,
-          sharpe_ratio_reason,
-        ]
+        - total_return
+        - annualized_return
+        - volatility
+        - max_drawdown
+        - sharpe_ratio
+        - sharpe_ratio_status
+        - sharpe_ratio_reason
       properties:
-        total_return: { type: number }
-        annualized_return: { type: number }
-        volatility: { type: number }
-        max_drawdown: { type: number }
-        sharpe_ratio: { type: [number, "null"] }
-        sharpe_ratio_status: { $ref: "#/components/schemas/MetricStatus" }
-        sharpe_ratio_reason: { type: [string, "null"] }
+        total_return:
+          type: number
+        annualized_return:
+          type: number
+        volatility:
+          type: number
+        max_drawdown:
+          type: number
+        sharpe_ratio:
+          type:
+            - number
+            - "null"
+        sharpe_ratio_status:
+          $ref: "#/components/schemas/MetricStatus"
+        sharpe_ratio_reason:
+          type:
+            - string
+            - "null"
     BacktestSummary:
       type: object
       required:
-        [
-          portfolio,
-          benchmark,
-          equal_weight_baseline,
-          equal_weight_baseline_status,
-          equal_weight_baseline_reason,
-        ]
+        - portfolio
+        - benchmark
+        - equal_weight_baseline
+        - equal_weight_baseline_status
+        - equal_weight_baseline_reason
       properties:
-        portfolio: { $ref: "#/components/schemas/PerformanceMetrics" }
-        benchmark: { $ref: "#/components/schemas/PerformanceMetrics" }
+        portfolio:
+          $ref: "#/components/schemas/PerformanceMetrics"
+        benchmark:
+          $ref: "#/components/schemas/PerformanceMetrics"
         equal_weight_baseline:
           anyOf:
-            - { $ref: "#/components/schemas/PerformanceMetrics" }
-            - { type: "null" }
+            - $ref: "#/components/schemas/PerformanceMetrics"
+            - type: "null"
         equal_weight_baseline_status:
-          { $ref: "#/components/schemas/MetricStatus" }
-        equal_weight_baseline_reason: { type: [string, "null"] }
+          $ref: "#/components/schemas/MetricStatus"
+        equal_weight_baseline_reason:
+          type:
+            - string
+            - "null"
     ExcessReturn:
       type: object
       required:
-        [
-          vs_benchmark,
-          vs_benchmark_status,
-          vs_benchmark_reason,
-          vs_equal_weight,
-          vs_equal_weight_status,
-          vs_equal_weight_reason,
-        ]
+        - vs_benchmark
+        - vs_benchmark_status
+        - vs_benchmark_reason
+        - vs_equal_weight
+        - vs_equal_weight_status
+        - vs_equal_weight_reason
       properties:
-        vs_benchmark: { type: [number, "null"] }
-        vs_benchmark_status: { $ref: "#/components/schemas/MetricStatus" }
-        vs_benchmark_reason: { type: [string, "null"] }
-        vs_equal_weight: { type: [number, "null"] }
-        vs_equal_weight_status: { $ref: "#/components/schemas/MetricStatus" }
-        vs_equal_weight_reason: { type: [string, "null"] }
+        vs_benchmark:
+          type:
+            - number
+            - "null"
+        vs_benchmark_status:
+          $ref: "#/components/schemas/MetricStatus"
+        vs_benchmark_reason:
+          type:
+            - string
+            - "null"
+        vs_equal_weight:
+          type:
+            - number
+            - "null"
+        vs_equal_weight_status:
+          $ref: "#/components/schemas/MetricStatus"
+        vs_equal_weight_reason:
+          type:
+            - string
+            - "null"
     SignificanceLayerBase:
       type: object
-      required: [passed, passed_status, passed_reason]
+      required:
+        - passed
+        - passed_status
+        - passed_reason
       properties:
-        passed: { type: [boolean, "null"] }
-        passed_status: { $ref: "#/components/schemas/MetricStatus" }
-        passed_reason: { type: [string, "null"] }
+        passed:
+          type:
+            - boolean
+            - "null"
+        passed_status:
+          $ref: "#/components/schemas/MetricStatus"
+        passed_reason:
+          type:
+            - string
+            - "null"
     StatisticalSignificanceLayer:
       allOf:
-        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - $ref: "#/components/schemas/SignificanceLayerBase"
         - type: object
           required:
-            [
-              bootstrap_ci_lower_vs_benchmark,
-              bootstrap_ci_lower_vs_benchmark_status,
-              bootstrap_ci_lower_vs_benchmark_reason,
-              bootstrap_ci_lower_vs_equal_weight,
-              bootstrap_ci_lower_vs_equal_weight_status,
-              bootstrap_ci_lower_vs_equal_weight_reason,
-            ]
+            - bootstrap_ci_lower_vs_benchmark
+            - bootstrap_ci_lower_vs_benchmark_status
+            - bootstrap_ci_lower_vs_benchmark_reason
+            - bootstrap_ci_lower_vs_equal_weight
+            - bootstrap_ci_lower_vs_equal_weight_status
+            - bootstrap_ci_lower_vs_equal_weight_reason
           properties:
-            bootstrap_ci_lower_vs_benchmark: { type: [number, "null"] }
+            bootstrap_ci_lower_vs_benchmark:
+              type:
+                - number
+                - "null"
             bootstrap_ci_lower_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            bootstrap_ci_lower_vs_benchmark_reason: { type: [string, "null"] }
-            bootstrap_ci_lower_vs_equal_weight: { type: [number, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            bootstrap_ci_lower_vs_benchmark_reason:
+              type:
+                - string
+                - "null"
+            bootstrap_ci_lower_vs_equal_weight:
+              type:
+                - number
+                - "null"
             bootstrap_ci_lower_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
+              $ref: "#/components/schemas/MetricStatus"
             bootstrap_ci_lower_vs_equal_weight_reason:
-              { type: [string, "null"] }
+              type:
+                - string
+                - "null"
     EffectSizeSignificanceLayer:
       allOf:
-        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - $ref: "#/components/schemas/SignificanceLayerBase"
         - type: object
           required:
-            [
-              ir_vs_benchmark,
-              ir_vs_benchmark_status,
-              ir_vs_benchmark_reason,
-              ir_vs_equal_weight,
-              ir_vs_equal_weight_status,
-              ir_vs_equal_weight_reason,
-              delta_sharpe_vs_benchmark,
-              delta_sharpe_vs_benchmark_status,
-              delta_sharpe_vs_benchmark_reason,
-              delta_sharpe_vs_equal_weight,
-              delta_sharpe_vs_equal_weight_status,
-              delta_sharpe_vs_equal_weight_reason,
-            ]
+            - ir_vs_benchmark
+            - ir_vs_benchmark_status
+            - ir_vs_benchmark_reason
+            - ir_vs_equal_weight
+            - ir_vs_equal_weight_status
+            - ir_vs_equal_weight_reason
+            - delta_sharpe_vs_benchmark
+            - delta_sharpe_vs_benchmark_status
+            - delta_sharpe_vs_benchmark_reason
+            - delta_sharpe_vs_equal_weight
+            - delta_sharpe_vs_equal_weight_status
+            - delta_sharpe_vs_equal_weight_reason
           properties:
-            ir_vs_benchmark: { type: [number, "null"] }
+            ir_vs_benchmark:
+              type:
+                - number
+                - "null"
             ir_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            ir_vs_benchmark_reason: { type: [string, "null"] }
-            ir_vs_equal_weight: { type: [number, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            ir_vs_benchmark_reason:
+              type:
+                - string
+                - "null"
+            ir_vs_equal_weight:
+              type:
+                - number
+                - "null"
             ir_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            ir_vs_equal_weight_reason: { type: [string, "null"] }
-            delta_sharpe_vs_benchmark: { type: [number, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            ir_vs_equal_weight_reason:
+              type:
+                - string
+                - "null"
+            delta_sharpe_vs_benchmark:
+              type:
+                - number
+                - "null"
             delta_sharpe_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            delta_sharpe_vs_benchmark_reason: { type: [string, "null"] }
-            delta_sharpe_vs_equal_weight: { type: [number, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            delta_sharpe_vs_benchmark_reason:
+              type:
+                - string
+                - "null"
+            delta_sharpe_vs_equal_weight:
+              type:
+                - number
+                - "null"
             delta_sharpe_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            delta_sharpe_vs_equal_weight_reason: { type: [string, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            delta_sharpe_vs_equal_weight_reason:
+              type:
+                - string
+                - "null"
     RobustnessSignificanceLayer:
       allOf:
-        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - $ref: "#/components/schemas/SignificanceLayerBase"
         - type: object
           required:
-            [
-              outperform_ratio_vs_benchmark,
-              outperform_ratio_vs_benchmark_status,
-              outperform_ratio_vs_benchmark_reason,
-              outperform_ratio_vs_equal_weight,
-              outperform_ratio_vs_equal_weight_status,
-              outperform_ratio_vs_equal_weight_reason,
-            ]
+            - outperform_ratio_vs_benchmark
+            - outperform_ratio_vs_benchmark_status
+            - outperform_ratio_vs_benchmark_reason
+            - outperform_ratio_vs_equal_weight
+            - outperform_ratio_vs_equal_weight_status
+            - outperform_ratio_vs_equal_weight_reason
           properties:
-            outperform_ratio_vs_benchmark: { type: [number, "null"] }
+            outperform_ratio_vs_benchmark:
+              type:
+                - number
+                - "null"
             outperform_ratio_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            outperform_ratio_vs_benchmark_reason: { type: [string, "null"] }
-            outperform_ratio_vs_equal_weight: { type: [number, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            outperform_ratio_vs_benchmark_reason:
+              type:
+                - string
+                - "null"
+            outperform_ratio_vs_equal_weight:
+              type:
+                - number
+                - "null"
             outperform_ratio_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
-            outperform_ratio_vs_equal_weight_reason: { type: [string, "null"] }
+              $ref: "#/components/schemas/MetricStatus"
+            outperform_ratio_vs_equal_weight_reason:
+              type:
+                - string
+                - "null"
     EconomicSignificanceLayer:
       allOf:
-        - { $ref: "#/components/schemas/SignificanceLayerBase" }
+        - $ref: "#/components/schemas/SignificanceLayerBase"
         - type: object
           required:
-            [
-              annualized_return_improvement_vs_benchmark,
-              annualized_return_improvement_vs_benchmark_status,
-              annualized_return_improvement_vs_benchmark_reason,
-              annualized_return_improvement_vs_equal_weight,
-              annualized_return_improvement_vs_equal_weight_status,
-              annualized_return_improvement_vs_equal_weight_reason,
-              max_drawdown_improvement_vs_benchmark,
-              max_drawdown_improvement_vs_benchmark_status,
-              max_drawdown_improvement_vs_benchmark_reason,
-              max_drawdown_improvement_vs_equal_weight,
-              max_drawdown_improvement_vs_equal_weight_status,
-              max_drawdown_improvement_vs_equal_weight_reason,
-            ]
+            - annualized_return_improvement_vs_benchmark
+            - annualized_return_improvement_vs_benchmark_status
+            - annualized_return_improvement_vs_benchmark_reason
+            - annualized_return_improvement_vs_equal_weight
+            - annualized_return_improvement_vs_equal_weight_status
+            - annualized_return_improvement_vs_equal_weight_reason
+            - max_drawdown_improvement_vs_benchmark
+            - max_drawdown_improvement_vs_benchmark_status
+            - max_drawdown_improvement_vs_benchmark_reason
+            - max_drawdown_improvement_vs_equal_weight
+            - max_drawdown_improvement_vs_equal_weight_status
+            - max_drawdown_improvement_vs_equal_weight_reason
           properties:
             annualized_return_improvement_vs_benchmark:
-              { type: [number, "null"] }
+              type:
+                - number
+                - "null"
             annualized_return_improvement_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
+              $ref: "#/components/schemas/MetricStatus"
             annualized_return_improvement_vs_benchmark_reason:
-              { type: [string, "null"] }
+              type:
+                - string
+                - "null"
             annualized_return_improvement_vs_equal_weight:
-              { type: [number, "null"] }
+              type:
+                - number
+                - "null"
             annualized_return_improvement_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
+              $ref: "#/components/schemas/MetricStatus"
             annualized_return_improvement_vs_equal_weight_reason:
-              { type: [string, "null"] }
-            max_drawdown_improvement_vs_benchmark: { type: [number, "null"] }
+              type:
+                - string
+                - "null"
+            max_drawdown_improvement_vs_benchmark:
+              type:
+                - number
+                - "null"
             max_drawdown_improvement_vs_benchmark_status:
-              { $ref: "#/components/schemas/MetricStatus" }
+              $ref: "#/components/schemas/MetricStatus"
             max_drawdown_improvement_vs_benchmark_reason:
-              { type: [string, "null"] }
-            max_drawdown_improvement_vs_equal_weight: { type: [number, "null"] }
+              type:
+                - string
+                - "null"
+            max_drawdown_improvement_vs_equal_weight:
+              type:
+                - number
+                - "null"
             max_drawdown_improvement_vs_equal_weight_status:
-              { $ref: "#/components/schemas/MetricStatus" }
+              $ref: "#/components/schemas/MetricStatus"
             max_drawdown_improvement_vs_equal_weight_reason:
-              { type: [string, "null"] }
+              type:
+                - string
+                - "null"
     BacktestResult:
       type: object
       required:
-        [
-          backtest_id,
-          status,
-          validation_status,
-          backtest_mode,
-          period,
-          initial_capital,
-          final_value,
-          summary,
-          excess_return,
-          significance_verdict,
-          validation_summary,
-        ]
+        - backtest_id
+        - status
+        - validation_status
+        - backtest_mode
+        - period
+        - initial_capital
+        - final_value
+        - summary
+        - excess_return
+        - significance_verdict
+        - validation_summary
       properties:
-        backtest_id: { type: string }
-        status: { type: string }
+        backtest_id:
+          type: string
+        status:
+          type: string
         validation_status:
-          { type: string, enum: [VALID, WARNING, INVALID, UNKNOWN] }
+          type: string
+          enum:
+            - VALID
+            - WARNING
+            - INVALID
+            - UNKNOWN
         backtest_mode:
-          { type: string, enum: [HISTORICAL_FIDELITY, CURRENT_RULE, UNKNOWN] }
+          type: string
+          enum:
+            - HISTORICAL_FIDELITY
+            - CURRENT_RULE
+            - UNKNOWN
         period:
           type: object
-          required: [start_date, end_date, warm_up_end_date]
+          required:
+            - start_date
+            - end_date
+            - warm_up_end_date
           properties:
-            start_date: { type: string, format: date }
-            end_date: { type: string, format: date }
-            warm_up_end_date: { type: string, format: date }
-        initial_capital: { $ref: "#/components/schemas/Money" }
-        final_value: { $ref: "#/components/schemas/Money" }
-        summary: { $ref: "#/components/schemas/BacktestSummary" }
-        excess_return: { $ref: "#/components/schemas/ExcessReturn" }
+            start_date:
+              type: string
+              format: date
+            end_date:
+              type: string
+              format: date
+            warm_up_end_date:
+              type: string
+              format: date
+        initial_capital:
+          $ref: "#/components/schemas/Money"
+        final_value:
+          $ref: "#/components/schemas/Money"
+        summary:
+          $ref: "#/components/schemas/BacktestSummary"
+        excess_return:
+          $ref: "#/components/schemas/ExcessReturn"
         significance_verdict:
           type: object
-          required: [overall, thresholds_status, layers]
+          required:
+            - overall
+            - thresholds_status
+            - layers
           properties:
             overall:
-              {
-                type: string,
-                enum: [SIGNIFICANT, NOT_SIGNIFICANT, CANNOT_DETERMINE, UNKNOWN],
-              }
+              type: string
+              enum:
+                - SIGNIFICANT
+                - NOT_SIGNIFICANT
+                - CANNOT_DETERMINE
+                - UNKNOWN
             thresholds_status:
-              { type: string, enum: [CALIBRATED, PENDING_CALIBRATION, UNKNOWN] }
+              type: string
+              enum:
+                - CALIBRATED
+                - PENDING_CALIBRATION
+                - UNKNOWN
             layers:
               type: object
-              required: [statistical, effect_size, robustness, economic]
+              required:
+                - statistical
+                - effect_size
+                - robustness
+                - economic
               properties:
                 statistical:
-                  { $ref: "#/components/schemas/StatisticalSignificanceLayer" }
+                  $ref: "#/components/schemas/StatisticalSignificanceLayer"
                 effect_size:
-                  { $ref: "#/components/schemas/EffectSizeSignificanceLayer" }
+                  $ref: "#/components/schemas/EffectSizeSignificanceLayer"
                 robustness:
-                  { $ref: "#/components/schemas/RobustnessSignificanceLayer" }
+                  $ref: "#/components/schemas/RobustnessSignificanceLayer"
                 economic:
-                  { $ref: "#/components/schemas/EconomicSignificanceLayer" }
+                  $ref: "#/components/schemas/EconomicSignificanceLayer"
         validation_summary:
           type: object
-          required: [warnings, invalid_reasons]
+          required:
+            - warnings
+            - invalid_reasons
           properties:
-            warnings: { type: array, items: { type: string } }
-            invalid_reasons: { type: array, items: { type: string } }
+            warnings:
+              type: array
+              items:
+                type: string
+            invalid_reasons:
+              type: array
+              items:
+                type: string
     BacktestResultMeta:
       allOf:
-        - { $ref: "#/components/schemas/ResponseMeta" }
+        - $ref: "#/components/schemas/ResponseMeta"
         - type: object
           required:
-            [
-              configuration_version,
-              data_version,
-              strategy_versions,
-              code_version,
-              transaction_cost_model_version,
-              methodology_policy_version,
-              report_policy_version,
-            ]
+            - configuration_version
+            - data_version
+            - strategy_versions
+            - code_version
+            - transaction_cost_model_version
+            - methodology_policy_version
+            - report_policy_version
           properties:
-            configuration_version: { type: string }
-            data_version: { type: string }
+            configuration_version:
+              type: string
+            data_version:
+              type: string
             strategy_versions:
               type: object
               required:
-                [
-                  metric_version,
-                  scoring_version,
-                  portfolio_rule_version,
-                  rebalance_rule_version,
-                  return_estimate_version,
-                  risk_model_version,
-                  eligibility_universe_version,
-                  benchmark_version,
-                  peer_group_classification_version,
-                ]
+                - metric_version
+                - scoring_version
+                - portfolio_rule_version
+                - rebalance_rule_version
+                - return_estimate_version
+                - risk_model_version
+                - eligibility_universe_version
+                - benchmark_version
+                - peer_group_classification_version
               properties:
-                metric_version: { type: string }
-                scoring_version: { type: string }
-                portfolio_rule_version: { type: string }
-                rebalance_rule_version: { type: string }
-                return_estimate_version: { type: string }
-                risk_model_version: { type: string }
-                eligibility_universe_version: { type: string }
-                benchmark_version: { type: string }
-                peer_group_classification_version: { type: string }
-            code_version: { type: string }
-            transaction_cost_model_version: { type: string }
-            methodology_policy_version: { type: string }
-            report_policy_version: { type: string }
+                metric_version:
+                  type: string
+                scoring_version:
+                  type: string
+                portfolio_rule_version:
+                  type: string
+                rebalance_rule_version:
+                  type: string
+                return_estimate_version:
+                  type: string
+                risk_model_version:
+                  type: string
+                eligibility_universe_version:
+                  type: string
+                benchmark_version:
+                  type: string
+                peer_group_classification_version:
+                  type: string
+            code_version:
+              type: string
+            transaction_cost_model_version:
+              type: string
+            methodology_policy_version:
+              type: string
+            report_policy_version:
+              type: string
     BacktestResultEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestResult" }
-        meta: { $ref: "#/components/schemas/BacktestResultMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestResult"
+        meta:
+          $ref: "#/components/schemas/BacktestResultMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
     SeriesPoint:
       type: object
-      required: [date, value, value_status, value_reason]
+      required:
+        - date
+        - value
+        - value_status
+        - value_reason
       properties:
-        date: { type: string, format: date }
-        value: { type: [number, string, "null"] }
-        value_status: { $ref: "#/components/schemas/MetricStatus" }
-        value_reason: { type: [string, "null"] }
+        date:
+          type: string
+          format: date
+        value:
+          type:
+            - number
+            - string
+            - "null"
+        value_status:
+          $ref: "#/components/schemas/MetricStatus"
+        value_reason:
+          type:
+            - string
+            - "null"
     CumulativeReturnSeries:
       type: object
       required:
-        [
-          portfolio,
-          benchmark,
-          equal_weight_baseline,
-          equal_weight_baseline_status,
-          equal_weight_baseline_reason,
-        ]
+        - portfolio
+        - benchmark
+        - equal_weight_baseline
+        - equal_weight_baseline_status
+        - equal_weight_baseline_reason
       properties:
         portfolio:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
         benchmark:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
         equal_weight_baseline:
           anyOf:
             - type: array
-              items: { $ref: "#/components/schemas/SeriesPoint" }
+              items:
+                $ref: "#/components/schemas/SeriesPoint"
             - type: "null"
         equal_weight_baseline_status:
-          { $ref: "#/components/schemas/MetricStatus" }
-        equal_weight_baseline_reason: { type: [string, "null"] }
+          $ref: "#/components/schemas/MetricStatus"
+        equal_weight_baseline_reason:
+          type:
+            - string
+            - "null"
     BacktestSeries:
       type: object
       required:
-        [
-          portfolio_value,
-          cumulative_return,
-          drawdown,
-          rolling_sharpe,
-          rolling_excess_return,
-        ]
+        - portfolio_value
+        - cumulative_return
+        - drawdown
+        - rolling_sharpe
+        - rolling_excess_return
       properties:
         portfolio_value:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
         cumulative_return:
-          { $ref: "#/components/schemas/CumulativeReturnSeries" }
+          $ref: "#/components/schemas/CumulativeReturnSeries"
         drawdown:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
         rolling_sharpe:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
         rolling_excess_return:
-          { type: array, items: { $ref: "#/components/schemas/SeriesPoint" } }
+          type: array
+          items:
+            $ref: "#/components/schemas/SeriesPoint"
     BacktestPerformance:
       type: object
-      required: [segment, series]
+      required:
+        - segment
+        - series
       properties:
         segment:
-          { type: string, enum: [FULL, IN_SAMPLE, OUT_OF_SAMPLE, UNKNOWN] }
-        series: { $ref: "#/components/schemas/BacktestSeries" }
+          type: string
+          enum:
+            - FULL
+            - IN_SAMPLE
+            - OUT_OF_SAMPLE
+            - UNKNOWN
+        series:
+          $ref: "#/components/schemas/BacktestSeries"
     BacktestPerformanceEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestPerformance" }
+        data:
+          $ref: "#/components/schemas/BacktestPerformance"
         meta:
           allOf:
-            - { $ref: "#/components/schemas/ResponseMeta" }
+            - $ref: "#/components/schemas/ResponseMeta"
             - type: object
-              required: [warm_up_end_date]
+              required:
+                - warm_up_end_date
               properties:
-                warm_up_end_date: { type: string, format: date }
-        error: { $ref: "#/components/schemas/EmptyError" }
+                warm_up_end_date:
+                  type: string
+                  format: date
+        error:
+          $ref: "#/components/schemas/EmptyError"
     BiasStatus:
-      {
-        type: string,
-        enum:
-          [PASS, FAIL, NOT_VERIFIED, PARTIALLY_MODELED, NOT_MODELED, UNKNOWN],
-      }
+      type: string
+      enum:
+        - PASS
+        - FAIL
+        - NOT_VERIFIED
+        - PARTIALLY_MODELED
+        - NOT_MODELED
+        - UNKNOWN
     BiasCheck:
       type: object
-      required: [status]
+      required:
+        - status
       properties:
-        status: { $ref: "#/components/schemas/BiasStatus" }
-        violations: { type: array, items: { type: string } }
-        reason: { type: string }
-        affected_periods: { type: integer }
+        status:
+          $ref: "#/components/schemas/BiasStatus"
+        violations:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        affected_periods:
+          type: integer
         availability_quality_distribution:
-          { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
-        unmodeled_costs: { type: array, items: { type: string } }
+          $ref: "#/components/schemas/AvailabilityQualityDistribution"
+        unmodeled_costs:
+          type: array
+          items:
+            type: string
     PointInTimeBiasCheck:
       allOf:
-        - { $ref: "#/components/schemas/BiasCheck" }
+        - $ref: "#/components/schemas/BiasCheck"
         - type: object
-          required: [status, availability_quality_distribution]
+          required:
+            - status
+            - availability_quality_distribution
           properties:
-            status: { $ref: "#/components/schemas/BiasStatus" }
+            status:
+              $ref: "#/components/schemas/BiasStatus"
             availability_quality_distribution:
-              { $ref: "#/components/schemas/AvailabilityQualityDistribution" }
-      required: [status, availability_quality_distribution]
+              $ref: "#/components/schemas/AvailabilityQualityDistribution"
+      required:
+        - status
+        - availability_quality_distribution
     TransactionCostBiasCheck:
       allOf:
-        - { $ref: "#/components/schemas/BiasCheck" }
+        - $ref: "#/components/schemas/BiasCheck"
         - type: object
-          required: [status, unmodeled_costs]
+          required:
+            - status
+            - unmodeled_costs
           properties:
-            status: { $ref: "#/components/schemas/BiasStatus" }
-            unmodeled_costs: { type: array, items: { type: string } }
-      required: [status, unmodeled_costs]
+            status:
+              $ref: "#/components/schemas/BiasStatus"
+            unmodeled_costs:
+              type: array
+              items:
+                type: string
+      required:
+        - status
+        - unmodeled_costs
     BacktestBiasCheck:
       type: object
-      required: [backtest_id, checks, snapshot_summary, data_limitations]
+      required:
+        - backtest_id
+        - checks
+        - snapshot_summary
+        - data_limitations
       properties:
-        backtest_id: { type: string }
+        backtest_id:
+          type: string
         checks:
           type: object
           required:
-            [
-              look_ahead_bias,
-              survivorship_bias,
-              tradability_bias,
-              point_in_time,
-              transaction_cost,
-              subscription_redemption_lag,
-            ]
+            - look_ahead_bias
+            - survivorship_bias
+            - tradability_bias
+            - point_in_time
+            - transaction_cost
+            - subscription_redemption_lag
           properties:
-            look_ahead_bias: { $ref: "#/components/schemas/BiasCheck" }
-            survivorship_bias: { $ref: "#/components/schemas/BiasCheck" }
-            tradability_bias: { $ref: "#/components/schemas/BiasCheck" }
-            point_in_time: { $ref: "#/components/schemas/PointInTimeBiasCheck" }
+            look_ahead_bias:
+              $ref: "#/components/schemas/BiasCheck"
+            survivorship_bias:
+              $ref: "#/components/schemas/BiasCheck"
+            tradability_bias:
+              $ref: "#/components/schemas/BiasCheck"
+            point_in_time:
+              $ref: "#/components/schemas/PointInTimeBiasCheck"
             transaction_cost:
-              { $ref: "#/components/schemas/TransactionCostBiasCheck" }
+              $ref: "#/components/schemas/TransactionCostBiasCheck"
             subscription_redemption_lag:
-              { $ref: "#/components/schemas/BiasCheck" }
+              $ref: "#/components/schemas/BiasCheck"
         snapshot_summary:
           type: object
           required:
-            [
-              snapshot_periods,
-              rebuilt_periods,
-              total_periods,
-              rebuilt_period_list,
-            ]
+            - snapshot_periods
+            - rebuilt_periods
+            - total_periods
+            - rebuilt_period_list
           properties:
-            snapshot_periods: { type: integer }
-            rebuilt_periods: { type: integer }
-            total_periods: { type: integer }
+            snapshot_periods:
+              type: integer
+            rebuilt_periods:
+              type: integer
+            total_periods:
+              type: integer
             rebuilt_period_list:
-              { type: array, items: { type: string, format: date } }
-        data_limitations: { type: array, items: { type: string } }
+              type: array
+              items:
+                type: string
+                format: date
+        data_limitations:
+          type: array
+          items:
+            type: string
     BacktestBiasCheckEnvelope:
       type: object
-      required: [data, meta, error]
+      required:
+        - data
+        - meta
+        - error
       properties:
-        data: { $ref: "#/components/schemas/BacktestBiasCheck" }
-        meta: { $ref: "#/components/schemas/ResponseMeta" }
-        error: { $ref: "#/components/schemas/EmptyError" }
+        data:
+          $ref: "#/components/schemas/BacktestBiasCheck"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    ReviewDecision:
+      properties:
+        action:
+          type: string
+          enum:
+            - CONFIRM
+            - OVERRIDE
+            - REJECT
+          title: Action
+        value:
+          anyOf:
+            - type: string
+            - items:
+                type: string
+              type: array
+          title: Value
+          default: UNKNOWN
+        evidence:
+          items:
+            $ref: "#/components/schemas/Evidence"
+          type: array
+          title: Evidence
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+        - action
+      title: ReviewDecision
+    DimensionResult:
+      properties:
+        status:
+          type: string
+          enum:
+            - CONFIRMED
+            - CANDIDATE
+            - CONFLICT
+            - UNKNOWN
+          title: Status
+        value:
+          anyOf:
+            - type: string
+            - items:
+                type: string
+              type: array
+          title: Value
+          default: UNKNOWN
+        candidates:
+          items:
+            type: string
+          type: array
+          title: Candidates
+          default: []
+        evidence:
+          items:
+            $ref: "#/components/schemas/Evidence"
+          type: array
+          title: Evidence
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+        - status
+      title: DimensionResult
+    Evidence:
+      properties:
+        source:
+          type: string
+          enum:
+            - OFFICIAL
+            - AGGREGATOR
+            - NAME
+          title: Source
+        rule_id:
+          type: string
+          title: Rule Id
+        confidence:
+          type: string
+          enum:
+            - OFFICIAL_DOCUMENT
+            - PUBLIC_AGGREGATOR
+            - NAME_HINT
+          title: Confidence
+        classified_at:
+          type: string
+          format: date-time
+          title: Classified At
+        raw_field:
+          type: string
+          title: Raw Field
+        normalized_field:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Normalized Field
+        raw_value:
+          type: string
+          title: Raw Value
+        payload_ref:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Payload Ref
+        locator:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Locator
+        conflict_reason:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Conflict Reason
+      additionalProperties: false
+      type: object
+      required:
+        - source
+        - rule_id
+        - confidence
+        - classified_at
+        - raw_field
+        - raw_value
+      title: Evidence
+    ReviewSubmission:
+      properties:
+        expected_revision:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Expected Revision
+        decisions:
+          additionalProperties:
+            $ref: "#/components/schemas/ReviewDecision"
+          type: object
+          title: Decisions
+        reason:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+        - expected_revision
+        - decisions
+        - reason
+      title: ReviewSubmission
+    ReviewOutcome:
+      properties:
+        revision_id:
+          type: integer
+          title: Revision Id
+        version:
+          type: integer
+          title: Version
+        case_id:
+          type: integer
+          title: Case Id
+      type: object
+      required:
+        - revision_id
+        - version
+        - case_id
+      title: ReviewOutcome
+    ReviewCasePayload:
+      properties:
+        case_id:
+          type: integer
+          title: Case Id
+        fund_id:
+          type: integer
+          title: Fund Id
+        expected_revision:
+          type: integer
+          title: Expected Revision
+        issue_type:
+          type: string
+          title: Issue Type
+        status:
+          type: string
+          title: Status
+        details:
+          type: object
+          title: Details
+        created_at:
+          type: string
+          title: Created At
+        resolved_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Resolved At
+        result_revision_id:
+          anyOf:
+            - type: integer
+            - type: "null"
+          title: Result Revision Id
+        baseline:
+          anyOf:
+            - $ref: "#/components/schemas/ClassificationSnapshot"
+            - type: "null"
+        incoming:
+          anyOf:
+            - $ref: "#/components/schemas/ClassificationSnapshot"
+            - type: "null"
+      type: object
+      required:
+        - case_id
+        - fund_id
+        - expected_revision
+        - issue_type
+        - status
+        - details
+        - created_at
+        - resolved_at
+        - result_revision_id
+      title: ReviewCasePayload
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
+    TypedEnvelope_list_dict_str__Any___:
+      properties:
+        data:
+          items:
+            type: object
+          type: array
+          title: Data
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+      title: TypedEnvelope[list[dict[str, Any]]]
+    TypedEnvelope_ReviewCasePayload_:
+      properties:
+        data:
+          $ref: "#/components/schemas/ReviewCasePayload"
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      title: TypedEnvelope[ReviewCasePayload]
+    PaginationModel:
+      properties:
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+        total_items:
+          type: integer
+          title: Total Items
+        total_pages:
+          type: integer
+          title: Total Pages
+      additionalProperties: false
+      type: object
+      required:
+        - page
+        - page_size
+        - total_items
+        - total_pages
+      title: PaginationModel
+    TypedEnvelope_ReviewOutcome_:
+      properties:
+        data:
+          $ref: "#/components/schemas/ReviewOutcome"
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      title: TypedEnvelope[ReviewOutcome]
+    ClassificationPayloadModel:
+      properties:
+        scheme:
+          type: string
+          const: FIP_CLASSIFICATION_V1
+          title: Scheme
+          default: FIP_CLASSIFICATION_V1
+        rule_version:
+          type: string
+          title: Rule Version
+          default: 1.0.0
+        enum_version:
+          type: string
+          title: Enum Version
+          default: 1.0.0
+        asset_class:
+          $ref: "#/components/schemas/DimensionResult"
+        strategy:
+          $ref: "#/components/schemas/DimensionResult"
+        geography:
+          $ref: "#/components/schemas/DimensionResult"
+        product_structure:
+          $ref: "#/components/schemas/DimensionResult"
+        market_attributes:
+          $ref: "#/components/schemas/DimensionResult"
+        review_items:
+          items:
+            type: string
+          type: array
+          title: Review Items
+          default: []
+        revision_id:
+          type: integer
+          title: Revision Id
+        version:
+          type: integer
+          title: Version
+        valid_from:
+          type: string
+          title: Valid From
+        valid_to:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Valid To
+        available_at:
+          type: string
+          title: Available At
+        classified_at:
+          type: string
+          title: Classified At
+        availability_quality:
+          type: string
+          title: Availability Quality
+        source_summary:
+          items:
+            type: string
+          type: array
+          title: Source Summary
+        trading_eligibility:
+          type: object
+          title: Trading Eligibility
+      additionalProperties: false
+      type: object
+      required:
+        - asset_class
+        - strategy
+        - geography
+        - product_structure
+        - market_attributes
+        - revision_id
+        - version
+        - valid_from
+        - available_at
+        - classified_at
+        - availability_quality
+        - source_summary
+        - trading_eligibility
+      title: ClassificationPayloadModel
+    CatalogPayload:
+      properties:
+        scheme:
+          type: string
+          title: Scheme
+        rule_version:
+          type: string
+          title: Rule Version
+        enum_version:
+          type: string
+          title: Enum Version
+        mapping_version:
+          type: string
+          title: Mapping Version
+        dimensions:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Dimensions
+        statuses:
+          items:
+            type: string
+          type: array
+          title: Statuses
+        confidence_grades:
+          additionalProperties:
+            type: string
+          type: object
+          title: Confidence Grades
+      type: object
+      required:
+        - scheme
+        - rule_version
+        - enum_version
+        - mapping_version
+        - dimensions
+        - statuses
+        - confidence_grades
+      title: CatalogPayload
+    TypedEnvelope_CatalogPayload_:
+      properties:
+        data:
+          $ref: "#/components/schemas/CatalogPayload"
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      title: TypedEnvelope[CatalogPayload]
+    TypedEnvelope_list_ReviewCasePayload__:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/ReviewCasePayload"
+          type: array
+          title: Data
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      title: TypedEnvelope[list[ReviewCasePayload]]
+    ResponseMetaModel:
+      properties:
+        api_version:
+          type: string
+          title: Api Version
+          default: v1
+        request_id:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Request Id
+        generated_at:
+          type: string
+          format: date-time
+          title: Generated At
+        as_of_date:
+          type: string
+          title: As Of Date
+        data_version:
+          type: string
+          title: Data Version
+        versions:
+          additionalProperties:
+            type: string
+          type: object
+          title: Versions
+        is_point_in_time:
+          type: boolean
+          title: Is Point In Time
+        availability_quality_distribution:
+          additionalProperties:
+            type: number
+          type: object
+          title: Availability Quality Distribution
+        pagination:
+          anyOf:
+            - $ref: "#/components/schemas/PaginationModel"
+            - type: "null"
+      additionalProperties: true
+      type: object
+      required:
+        - generated_at
+        - as_of_date
+        - data_version
+        - versions
+        - is_point_in_time
+        - availability_quality_distribution
+      title: ResponseMetaModel
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: "#/components/schemas/ValidationError"
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ClassificationHistoryInterval:
+      properties:
+        valid_from:
+          type: string
+          title: Valid From
+        valid_to:
+          anyOf:
+            - type: string
+            - type: "null"
+          title: Valid To
+        classification:
+          $ref: "#/components/schemas/ClassificationSnapshot"
+        trading_eligibility:
+          anyOf:
+            - type: object
+            - type: "null"
+          title: Trading Eligibility
+      type: object
+      required:
+        - valid_from
+        - valid_to
+        - classification
+        - trading_eligibility
+      title: ClassificationHistoryInterval
+    TypedEnvelope_list_ClassificationHistoryPayload__:
+      properties:
+        data:
+          items:
+            $ref: "#/components/schemas/ClassificationHistoryPayload"
+          type: array
+          title: Data
+        meta:
+          $ref: "#/components/schemas/ResponseMetaModel"
+        error:
+          type: "null"
+          title: Error
+      additionalProperties: false
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      title: TypedEnvelope[list[ClassificationHistoryPayload]]
+    ClassificationHistoryPayload:
+      properties:
+        revision_id:
+          type: integer
+          title: Revision Id
+        version:
+          type: integer
+          title: Version
+        rule_version:
+          type: string
+          title: Rule Version
+        enum_version:
+          type: string
+          title: Enum Version
+        available_at:
+          type: string
+          title: Available At
+        classified_at:
+          type: string
+          title: Classified At
+        actor:
+          type: string
+          title: Actor
+        reason:
+          type: string
+          title: Reason
+        reviewed:
+          type: boolean
+          title: Reviewed
+        intervals:
+          items:
+            $ref: "#/components/schemas/ClassificationHistoryInterval"
+          type: array
+          title: Intervals
+      type: object
+      required:
+        - revision_id
+        - version
+        - rule_version
+        - enum_version
+        - available_at
+        - classified_at
+        - actor
+        - reason
+        - reviewed
+        - intervals
+      title: ClassificationHistoryPayload
+    ClassificationSnapshot:
+      properties:
+        scheme:
+          type: string
+          const: FIP_CLASSIFICATION_V1
+          title: Scheme
+          default: FIP_CLASSIFICATION_V1
+        rule_version:
+          type: string
+          title: Rule Version
+          default: 1.0.0
+        enum_version:
+          type: string
+          title: Enum Version
+          default: 1.0.0
+        asset_class:
+          $ref: "#/components/schemas/DimensionResult"
+        strategy:
+          $ref: "#/components/schemas/DimensionResult"
+        geography:
+          $ref: "#/components/schemas/DimensionResult"
+        product_structure:
+          $ref: "#/components/schemas/DimensionResult"
+        market_attributes:
+          $ref: "#/components/schemas/DimensionResult"
+        review_items:
+          items:
+            type: string
+          type: array
+          title: Review Items
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+        - asset_class
+        - strategy
+        - geography
+        - product_structure
+        - market_attributes
+      title: ClassificationSnapshot

@@ -38,6 +38,10 @@ DATASETS: dict[str, DatasetSpec] = {
         callable_name="fund_name_em",
         required_columns=frozenset({"基金代码", "基金简称", "基金类型"}),
     ),
+    "fund_overview": DatasetSpec(
+        code="fund_overview", callable_name="fund_overview_em",
+        required_columns=frozenset({"基金全称", "基金类型"}),
+    ),
     "fund_nav": DatasetSpec(
         code="fund_nav",
         callable_name="fund_open_fund_info_em",

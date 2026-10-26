@@ -1,4 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { Button, Group, Stack, Tabs, Text } from "@mantine/core";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  createColumnHelper,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
@@ -7,9 +13,12 @@ import type {
   ListUniversesParams,
   ResponseMeta,
   UniverseMeta,
+  UniverseSummary,
 } from "../api/generated/m17.schemas";
 import { unwrapResponse } from "../api/http";
+import { DataTable } from "../components/DataTable";
 import { ErrorState } from "../components/ErrorState";
+import { PageHeader } from "../components/PageHeader";
 import { ProvenanceBar } from "../components/ProvenanceBar";
 import {
   UniverseFilters,
@@ -37,6 +46,8 @@ const provenanceMeta = (meta: ResponseMeta) => ({
   availability_quality_distribution: meta.availability_quality_distribution,
 });
 
+const snapshotColumn = createColumnHelper<UniverseSummary>();
+
 const UniverseList = () => {
   const [search, setSearch] = useSearchParams();
   const serializedSearch = search.toString();
@@ -54,6 +65,35 @@ const UniverseList = () => {
         meta: response.data.meta as ResponseMeta,
       };
     },
+    placeholderData: keepPreviousData,
+  });
+  const columns = [
+    snapshotColumn.accessor("universe_id", {
+      header: "快照 ID",
+      cell: ({ getValue }) => (
+        <Link
+          to={`/universes/${encodeURIComponent(getValue())}?return_to=${encodeURIComponent(`/universes?${serializedSearch}`)}`}
+        >
+          {getValue()}
+        </Link>
+      ),
+      enableHiding: false,
+    }),
+    snapshotColumn.accessor("universe_strategy", {
+      header: "策略",
+      cell: ({ getValue }) =>
+        getValue() === "UNKNOWN" ? "未知策略" : `策略 ${getValue()}`,
+    }),
+    snapshotColumn.accessor("decision_at", { header: "决策日期" }),
+    snapshotColumn.accessor("member_count", { header: "成员数" }),
+    snapshotColumn.accessor("eligibility_rules_version", {
+      header: "资格规则版本",
+    }),
+  ];
+  const table = useReactTable({
+    data: query.data?.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
   });
 
   const applyFilters = (values: UniverseFilterValues) => {
@@ -65,44 +105,61 @@ const UniverseList = () => {
   };
 
   return (
-    <section>
-      <h1>候选池快照</h1>
+    <Stack gap="lg">
+      <PageHeader
+        title="候选池快照"
+        breadcrumbs={[{ label: "候选池" }]}
+        context={
+          <Text size="sm" c="dimmed">
+            按真实快照筛选和查看纳入/排除依据。
+          </Text>
+        }
+      />
       <UniverseFilters
         key={serializedSearch}
         initialValues={filters}
         onSubmit={applyFilters}
       />
-      {query.isPending && <p role="status">正在加载候选池快照…</p>}
-      {query.isError && <ErrorState error={query.error} />}
-      {query.data && (
-        <>
-          <ProvenanceBar meta={provenanceMeta(query.data.meta)} />
-          {query.data.data.length === 0 ? (
-            <p>没有符合条件的候选池快照</p>
-          ) : (
-            <ul aria-label="候选池快照列表">
-              {query.data.data.map((universe) => (
-                <li key={universe.universe_id}>
-                  <Link to={`/universes/${universe.universe_id}`}>
-                    查看快照 {universe.universe_id}
-                  </Link>
-                  <span>策略：{universe.strategy_id}</span>
-                  <span>决策时间：{universe.decision_at}</span>
-                  <span>成员数：{universe.member_count}</span>
-                  <span>
-                    资格规则版本：{universe.eligibility_rules_version}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+      {query.isPending && <Text role="status">正在加载候选池快照…</Text>}
+      {query.isFetching && query.data && (
+        <Text role="status" size="sm" c="dimmed">
+          正在更新；保留上一次已返回的快照列表。
+        </Text>
       )}
-    </section>
+      {query.isError && (
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      )}
+      {query.data && (
+        <Stack gap="sm">
+          <ProvenanceBar meta={provenanceMeta(query.data.meta)} />
+          <Group justify="space-between">
+            <Text size="sm" c="dimmed">
+              当前接口返回 {query.data.data.length}{" "}
+              条快照；列表为完整已返回集合。
+            </Text>
+          </Group>
+          <DataTable
+            table={table}
+            caption="候选池快照列表"
+            emptyMessage="没有符合条件的候选池快照。"
+            layoutKey="universes"
+            requiredColumnIds={["universe_id"]}
+          />
+        </Stack>
+      )}
+    </Stack>
   );
 };
 
+const validReturnTo = (candidate: string | null) =>
+  candidate?.startsWith("/universes") &&
+  !candidate.startsWith("//") &&
+  !candidate.includes("://")
+    ? candidate
+    : "/universes";
+
 const UniverseDetail = ({ universeId }: { universeId: string }) => {
+  const [search, setSearch] = useSearchParams();
   const query = useQuery({
     queryKey: ["universe-detail", universeId],
     queryFn: async () => {
@@ -113,38 +170,72 @@ const UniverseDetail = ({ universeId }: { universeId: string }) => {
       };
     },
   });
-
-  if (query.isPending) return <p role="status">正在加载候选池快照…</p>;
-  if (query.isError) return <ErrorState error={query.error} />;
+  if (query.isPending) return <Text role="status">正在加载候选池快照…</Text>;
+  if (query.isError)
+    return (
+      <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+    );
 
   const { data, meta } = query.data;
+  const tabParam = search.get("tab");
+  const activeTab = tabParam === "rejected" ? "rejected" : "selected";
+  const returnTo = validReturnTo(search.get("return_to"));
+  const setTab = (tab: string | null) => {
+    const next = new URLSearchParams(search);
+    if (tab && tab !== "selected") next.set("tab", tab);
+    else next.delete("tab");
+    setSearch(next);
+  };
+
   return (
-    <section>
-      <Link to="/universes">返回候选池快照列表</Link>
-      <h1>候选池快照</h1>
-      <dl>
-        <dt>快照 ID</dt>
-        <dd>{data.universe_id}</dd>
-        <dt>决策时间</dt>
-        <dd>{data.decision_at}</dd>
-        <dt>候选池策略</dt>
-        <dd>{data.universe_strategy}</dd>
-      </dl>
-      <p>资格规则版本：{meta.eligibility_rules_version}</p>
-      <p>
-        评分策略版本：
-        {meta.scoring_policy_version ?? "未使用（仅资格筛选）"}
-      </p>
+    <Stack gap="lg">
+      <PageHeader
+        title={`候选池快照 ${data.universe_id}`}
+        breadcrumbs={[
+          { label: "候选池", href: returnTo },
+          { label: data.universe_id },
+        ]}
+        actions={
+          <Button component={Link} to={returnTo} variant="default">
+            返回候选池列表
+          </Button>
+        }
+      />
+      <Group align="flex-start" gap="xl" wrap="wrap">
+        <Text>决策时间：{data.decision_at}</Text>
+        <Text>
+          策略：
+          {data.universe_strategy === "UNKNOWN"
+            ? "未知策略"
+            : `策略 ${data.universe_strategy}`}
+        </Text>
+        <Text>资格规则版本：{meta.eligibility_rules_version}</Text>
+        <Text>
+          评分策略版本：{meta.scoring_policy_version ?? "未使用（仅资格筛选）"}
+        </Text>
+      </Group>
       <ProvenanceBar meta={provenanceMeta(meta)} />
-      <section aria-labelledby="selected-members-heading">
-        <h2 id="selected-members-heading">已入选（{data.members.length}）</h2>
-        <UniverseTable members={data.members} label="已入选成员" />
-      </section>
-      <section aria-labelledby="rejected-members-heading">
-        <h2 id="rejected-members-heading">已排除（{data.excluded.length}）</h2>
-        <UniverseTable members={data.excluded} label="已排除成员" />
-      </section>
-    </section>
+      <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
+        <Tabs.List aria-label="候选池成员状态">
+          <Tabs.Tab value="selected">已入选（{data.members.length}）</Tabs.Tab>
+          <Tabs.Tab value="rejected">已排除（{data.excluded.length}）</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="selected" pt="md">
+          <UniverseTable
+            members={data.members}
+            label="已入选成员"
+            decisionAt={data.decision_at}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value="rejected" pt="md">
+          <UniverseTable
+            members={data.excluded}
+            label="已排除成员"
+            decisionAt={data.decision_at}
+          />
+        </Tabs.Panel>
+      </Tabs>
+    </Stack>
   );
 };
 

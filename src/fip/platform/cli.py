@@ -1,5 +1,8 @@
 import argparse
 import datetime as dt
+import io
+import json
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -86,23 +89,27 @@ def _resolve(session: Session, symbol: str) -> "FundShareClass":
     )
     from fip.services.data_service.models.governance import DataProvider
 
-    share_class = session.execute(
-        select(FundShareClass)
-        .join(
-            ProviderFundIdentity,
-            ProviderFundIdentity.share_class_id == FundShareClass.id,
+    share_class = (
+        session.execute(
+            select(FundShareClass)
+            .join(
+                ProviderFundIdentity,
+                ProviderFundIdentity.share_class_id == FundShareClass.id,
+            )
+            .join(DataProvider, DataProvider.id == ProviderFundIdentity.provider_id)
+            .where(
+                DataProvider.provider_code == AkShareSourceAdapter.provider_code,
+                ProviderFundIdentity.provider_fund_id == symbol,
+                # 只认仍然开放的映射区间；已被关闭的历史映射不参与当下的解析。
+                ProviderFundIdentity.valid_to.is_(None),
+            )
+            # 同一段开放区间正常只有一条；显式定序保证结果确定，不靠数据库返回顺序。
+            .order_by(ProviderFundIdentity.valid_from.desc())
+            .limit(1)
         )
-        .join(DataProvider, DataProvider.id == ProviderFundIdentity.provider_id)
-        .where(
-            DataProvider.provider_code == AkShareSourceAdapter.provider_code,
-            ProviderFundIdentity.provider_fund_id == symbol,
-            # 只认仍然开放的映射区间；已被关闭的历史映射不参与当下的解析。
-            ProviderFundIdentity.valid_to.is_(None),
-        )
-        # 同一段开放区间正常只有一条；显式定序保证结果确定，不靠数据库返回顺序。
-        .order_by(ProviderFundIdentity.valid_from.desc())
-        .limit(1)
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if share_class is None:
         raise SystemExit(
             f"symbol {symbol} 尚未登记到 {AkShareSourceAdapter.provider_code} 的"
@@ -121,6 +128,8 @@ def cmd_ingest_funds(args: argparse.Namespace) -> None:
         # 这里，整批 ingest-funds 全废 —— 一条映射冲突不该毁掉一整批已抓数据。
         session.commit()
     print(f"新建份额类别 {result.created} 个")
+    for warning in result.classification_warnings:
+        print(f"待复核：{warning}")
     if result.reassignments:
         # 响亮失败：逐条列出冲突并以非零退出码结束。绝不静默沿用旧映射
         # （那等价于继续把新基金的数据写进旧基金），也绝不自动改写
@@ -147,12 +156,9 @@ def cmd_ingest_nav(args: argparse.Namespace) -> None:
         )
         session.commit()
     item = result.items[0]
-    print(f"{display_name}：{item.status}"
-          + (f" —— {item.error}" if item.error else ""))
+    print(f"{display_name}：{item.status}" + (f" —— {item.error}" if item.error else ""))
     if item.status in {BatchItemStatus.INVALID, BatchItemStatus.FAILED}:
-        raise SystemExit(
-            f"净值灌入失败（{item.status}）：{item.error or '未知错误'}"
-        )
+        raise SystemExit(f"净值灌入失败（{item.status}）：{item.error or '未知错误'}")
 
 
 def cmd_pit_nav(args: argparse.Namespace) -> None:
@@ -174,12 +180,14 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
     with _session() as session:
         share_class = _resolve(session, args.symbol)
         try:
-            points = PitDataContext(
-                context=context, session=session
-            ).navs().adjusted_nav_series(
-                share_class.id,
-                dt.date.fromisoformat(args.date_from),
-                dt.date.fromisoformat(args.date_to),
+            points = (
+                PitDataContext(context=context, session=session)
+                .navs()
+                .adjusted_nav_series(
+                    share_class.id,
+                    dt.date.fromisoformat(args.date_from),
+                    dt.date.fromisoformat(args.date_to),
+                )
             )
         except AdjustedNavUnavailable as exc:
             # 复权净值现在按 decision_at 现算，算不出来就是【真的】算不出来。
@@ -197,10 +205,163 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
             ) from exc
     print(f"{share_class.display_name} @ decision_at={decision_at}  共 {len(points)} 条")
     for point in points[:10]:
-        print(f"  {point.effective_at}  unit={point.unit_nav}  "
-              f"adj={point.adjusted_nav}  v{point.version}  "
-              f"row={point.availability_quality}  "
-              f"chain={point.chain_availability_quality}")
+        print(
+            f"  {point.effective_at}  unit={point.unit_nav}  "
+            f"adj={point.adjusted_nav}  v{point.version}  "
+            f"row={point.availability_quality}  "
+            f"chain={point.chain_availability_quality}"
+        )
+
+
+def cmd_classification(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    from fip.services.data_service.classification.service import (
+        ClassificationService,
+        ReviewDecision,
+    )
+    from fip.services.data_service.models.fund import FundClassificationReviewCase
+    from fip.services.data_service.models.governance import DataProviderDataset
+    from fip.services.data_service.models.raw import RawPayload
+
+    with _session() as session:
+        service = ClassificationService(session)
+        if args.command == "list-classification-reviews":
+            cases = session.scalars(
+                select(FundClassificationReviewCase)
+                .where(FundClassificationReviewCase.status == "PENDING")
+                .order_by(FundClassificationReviewCase.id)
+                .limit(args.limit)
+            )
+            for case in cases:
+                print(
+                    json.dumps(
+                        {"id": case.id, "fund_id": case.fund_id, "revision_id": case.revision_id}
+                    )
+                )
+            return
+        if not args.actor.strip():
+            raise SystemExit("--actor must be nonempty")
+        if args.command == "review-classification":
+            # CLI operates under the project's trusted operator environment,
+            # never an invented HTTP identity. Production must provision allowlist.
+            allowed = {
+                v.strip()
+                for v in os.environ.get("FIP_CLASSIFICATION_REVIEWERS", "").split(",")
+                if v.strip()
+            }
+            decisions = json.loads(args.decisions)
+            revision = service.review(
+                args.case_id,
+                expected_revision=args.expected_revision,
+                decisions={
+                    key: ReviewDecision.model_validate(value) for key, value in decisions.items()
+                },
+                actor=args.actor,
+                reason=args.reason,
+                can_review=args.actor in allowed,
+            )
+            session.commit()
+            print(f"revision={revision.id}")
+            return
+        ingest = _service(session)
+        if args.command == "refresh-classification":
+            share = _resolve(session, args.symbol)
+            if args.dry_run:
+                print(f"would fetch fund_overview symbol={args.symbol} fund_id={share.fund_id}")
+                return
+            try:
+                snapshot = ingest.ingest_fund_overview(share.fund_id, args.symbol, actor=args.actor)
+            except Exception:
+                # A contract error carries a retained raw payload; keep it reviewable.
+                from fip.services.data_service.adapters.akshare.client import AkShareContractError
+
+                error = sys.exception()
+                if isinstance(error, AkShareContractError):
+                    session.commit()
+                raise
+            session.commit()
+            print(snapshot.model_dump_json())
+            return
+        payloads = session.scalars(
+            select(RawPayload)
+            .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
+            .where(DataProviderDataset.dataset_code == "fund_list")
+            .order_by(RawPayload.ingested_at.desc(), RawPayload.id.desc())
+        )
+        seen: set[str] = set()
+        processed = 0
+        from fip.services.data_service.classification import DIMENSIONS
+        from fip.services.data_service.models.fund import Fund
+
+        unknown = dict.fromkeys(DIMENSIONS, 0)
+        conflicts = dict.fromkeys(DIMENSIONS, 0)
+        unknown_types: set[str] = set()
+        grouping: set[int] = set()
+        for payload in payloads:
+            frame = pd.read_parquet(io.BytesIO(payload.payload))
+            for _, row in frame.iterrows():
+                symbol = str(row["基金代码"]).strip()
+                if symbol in seen or (args.symbol and args.symbol != symbol):
+                    continue
+                seen.add(symbol)
+                share = _resolve(session, symbol)
+                if args.fund_id and args.fund_id != share.fund_id:
+                    continue
+                snapshot = ingest.classify_fields(
+                    share.fund_id,
+                    {"基金类型": str(row["基金类型"]), "基金简称": str(row["基金简称"])},
+                    payload,
+                    actor=args.actor,
+                    dry_run=args.dry_run,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "fund_id": share.fund_id,
+                            "classification": snapshot.to_dict(),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                processed += 1
+                for name in DIMENSIONS:
+                    state = getattr(snapshot, name).status
+                    unknown[name] += state == "UNKNOWN"
+                    conflicts[name] += state == "CONFLICT"
+                if snapshot.asset_class.status == "UNKNOWN":
+                    unknown_types.add(str(row["基金类型"]))
+                product = session.get(Fund, share.fund_id)
+                if product is not None and product.grouping_status != "CONFIRMED":
+                    grouping.add(product.id)
+                if processed % args.batch_size == 0 and not args.dry_run:
+                    session.commit()
+                if processed >= args.limit:
+                    break
+            if processed >= args.limit:
+                break
+        if not args.dry_run:
+            session.commit()
+        print(
+            json.dumps(
+                {
+                    "summary": {
+                        "processed": processed,
+                        "dry_run": args.dry_run,
+                        "unknown_rates": {
+                            k: v / processed if processed else 0 for k, v in unknown.items()
+                        },
+                        "conflict_rates": {
+                            k: v / processed if processed else 0 for k, v in conflicts.items()
+                        },
+                        "unrecognized_types": sorted(unknown_types),
+                        "unconfirmed_grouping_fund_ids": sorted(grouping),
+                    }
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,7 +383,38 @@ def main(argv: list[str] | None = None) -> int:
     p_pit.add_argument("--to", required=True, dest="date_to")
     p_pit.set_defaults(func=cmd_pit_nav)
 
+    for command in (
+        "classify-funds",
+        "refresh-classification",
+        "list-classification-reviews",
+        "review-classification",
+    ):
+        command_parser = sub.add_parser(command)
+        command_parser.set_defaults(func=cmd_classification)
+        if command == "list-classification-reviews":
+            command_parser.add_argument("--limit", type=int, default=100)
+            continue
+        command_parser.add_argument("--actor", required=True)
+        if command == "review-classification":
+            command_parser.add_argument("--case-id", type=int, required=True)
+            command_parser.add_argument("--expected-revision", type=int, required=True)
+            command_parser.add_argument("--reason", required=True)
+            command_parser.add_argument(
+                "--decisions", required=True, help="JSON dimension -> ReviewDecision"
+            )
+        else:
+            command_parser.add_argument("--dry-run", action="store_true")
+            command_parser.add_argument("--symbol", required=command == "refresh-classification")
+            if command == "classify-funds":
+                command_parser.add_argument("--fund-id", type=int)
+                command_parser.add_argument("--limit", type=int, default=100)
+                command_parser.add_argument("--batch-size", type=int, default=50)
+
     args = parser.parse_args(argv)
+    if getattr(args, "limit", 1) is not None and getattr(args, "limit", 1) <= 0:
+        parser.error("--limit must be positive")
+    if getattr(args, "batch_size", 1) <= 0:
+        parser.error("--batch-size must be positive")
     args.func(args)
     return 0
 

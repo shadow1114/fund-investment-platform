@@ -57,6 +57,10 @@ class ClassificationPoint:
     classification_code: str
     valid_from: dt.date
     availability_quality: str
+    revision_id: int | None = None
+    version: int | None = None
+    mapping_version: str | None = None
+    exclusion_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

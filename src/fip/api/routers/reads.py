@@ -18,6 +18,7 @@ from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, Port
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries
+from fip.services.data_service.classification import CATALOG
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -78,7 +79,11 @@ def get_session(request: Request) -> dict[str, Any]:
         {
             "user_id": principal.user_id,
             "roles": list(principal.roles),
-            "capabilities": {"can_review_decisions": principal.can_review_decisions},
+            "capabilities": {
+                "can_review_decisions": principal.can_review_decisions,
+                "can_review_classifications": principal.can_review_classifications,
+                "can_manage_data_ingestion": principal.can_manage_data_ingestion,
+            },
         },
         request_id=_request_id(request),
     )
@@ -96,6 +101,12 @@ def list_funds(
     fund_type: list[str] | None = Query(None),
     management_company_id: str | None = None,
     manager_id: str | None = None,
+    asset_class: list[str] | None = Query(None),
+    strategy: list[str] | None = Query(None),
+    geography: list[str] | None = Query(None),
+    product_structure: list[str] | None = Query(None),
+    market_attributes: list[str] | None = Query(None),
+    classification_status: list[str] | None = Query(None),
     lifecycle_status: list[str] | None = Query(None),
     investment_eligibility: list[str] | None = Query(None),
     inception_date_from: date | None = None,
@@ -113,6 +124,22 @@ def list_funds(
     if aum_min is not None and aum_max is not None and aum_min > aum_max:
         raise InvalidQueryError("aum_min must not be greater than aum_max")
     result = FundQueries(repository.funds).list(
+        asset_class=_multi_values(
+            asset_class, name="asset_class", allowed=set(CATALOG["asset_class"])
+        ),
+        strategy=_multi_values(strategy, name="strategy", allowed=set(CATALOG["strategy"])),
+        geography=_multi_values(geography, name="geography", allowed=set(CATALOG["geography"])),
+        product_structure=_multi_values(
+            product_structure, name="product_structure", allowed=set(CATALOG["product_structure"])
+        ),
+        market_attributes=_multi_values(
+            market_attributes, name="market_attributes", allowed=set(CATALOG["market_attributes"])
+        ),
+        classification_status=_multi_values(
+            classification_status,
+            name="classification_status",
+            allowed={"CONFIRMED", "CANDIDATE", "CONFLICT", "UNKNOWN"},
+        ),
         fund_name=fund_name,
         fund_type=_multi_values(fund_type, name="fund_type"),
         management_company_id=management_company_id,
@@ -275,9 +302,7 @@ def get_portfolio(
     principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     return success(
-        PortfolioQueries(repository.portfolios).detail(
-            id, principal=principal
-        ),
+        PortfolioQueries(repository.portfolios).detail(id, principal=principal),
         request_id=_request_id(request),
     )
 

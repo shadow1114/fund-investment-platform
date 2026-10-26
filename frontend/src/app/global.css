@@ -1,0 +1,42 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  font-synthesis: none;
+  font-variant-numeric: tabular-nums;
+  color: #20262d;
+  background: #f4f6f8;
+}
+
+html,
+body,
+#root {
+  min-width: 0;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow-x: clip;
+}
+
+#root {
+  isolation: isolate;
+}
+
+:focus-visible {
+  outline: 2px solid #087f8c;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

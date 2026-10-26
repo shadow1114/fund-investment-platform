@@ -52,7 +52,7 @@ describe("M1.7 accessibility and contract verification", () => {
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeVisible();
     expect(screen.getByRole("form", { name: "基金筛选" })).toBeVisible();
 
-    for (const name of ["基金研究", "候选池", "组合决策", "回测"]) {
+    for (const name of ["基金研究", "分类复核", "候选池", "组合决策", "回测"]) {
       await user.tab();
       expect(screen.getByRole("link", { name })).toHaveFocus();
     }

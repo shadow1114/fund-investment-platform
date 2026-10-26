@@ -18,8 +18,9 @@ _MAPPING_SQL = text("""
     WHERE available_at <= :visible_until
       AND valid_from <= :effective_at
       AND (valid_to IS NULL OR valid_to > :effective_at)
-      AND ((:share_class_id IS NOT NULL AND share_class_id = :share_class_id)
-        OR (:classification_code IS NOT NULL AND classification_code = :classification_code))
+      AND ((CAST(:share_class_id AS BIGINT) IS NOT NULL AND share_class_id = :share_class_id)
+        OR (CAST(:classification_code AS VARCHAR) IS NOT NULL
+            AND classification_code = :classification_code))
     ORDER BY CASE WHEN share_class_id IS NOT NULL THEN 0 ELSE 1 END,
              valid_from DESC, available_at DESC, id DESC
     LIMIT 1

@@ -86,6 +86,8 @@ export const SessionRolesItem = {
 
 export type SessionCapabilities = {
   can_review_decisions: boolean;
+  can_review_classifications?: boolean;
+  can_manage_data_ingestion: boolean;
 };
 
 export interface Session {
@@ -146,6 +148,171 @@ export interface OperationEnvelope {
   error: EmptyError;
 }
 
+export type FundIngestionRequestDataset =
+  (typeof FundIngestionRequestDataset)[keyof typeof FundIngestionRequestDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionRequestDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export interface FundIngestionRequest {
+  dataset: FundIngestionRequestDataset;
+}
+
+export type FundIngestionBatchRequestDataset =
+  (typeof FundIngestionBatchRequestDataset)[keyof typeof FundIngestionBatchRequestDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionBatchRequestDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export interface FundIngestionBatchRequest {
+  dataset: FundIngestionBatchRequestDataset;
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
+  fund_ids: string[];
+}
+
+export type FundIngestionSubmissionDataset =
+  (typeof FundIngestionSubmissionDataset)[keyof typeof FundIngestionSubmissionDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionSubmissionDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export type FundIngestionSubmissionStatus =
+  (typeof FundIngestionSubmissionStatus)[keyof typeof FundIngestionSubmissionStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionSubmissionStatus = {
+  RUNNING: "RUNNING",
+  COMPLETED: "COMPLETED",
+  BLOCKED: "BLOCKED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export interface FundIngestionSubmission {
+  operation_id: string;
+  fund_id: string;
+  fund_ids: string[];
+  dataset: FundIngestionSubmissionDataset;
+  status: FundIngestionSubmissionStatus;
+}
+
+export interface FundIngestionItem {
+  [key: string]: unknown;
+}
+
+export type FundIngestionTaskDataset =
+  (typeof FundIngestionTaskDataset)[keyof typeof FundIngestionTaskDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionTaskDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export type FundIngestionTaskStatus =
+  (typeof FundIngestionTaskStatus)[keyof typeof FundIngestionTaskStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionTaskStatus = {
+  RUNNING: "RUNNING",
+  COMPLETED: "COMPLETED",
+  BLOCKED: "BLOCKED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type FundIngestionTaskTaskStatus =
+  "SUCCESS" | "PARTIAL_SUCCESS" | "FAILED" | null;
+
+export type FundIngestionTaskSuccessCount = number | null;
+
+export type FundIngestionTaskFailureCount = number | null;
+
+export type FundIngestionTaskStartedAt = string | null;
+
+export type FundIngestionTaskFinishedAt = string | null;
+
+export type FundIngestionTaskFailure = string | null;
+
+export interface FundIngestionTask {
+  operation_id: string;
+  fund_id: string;
+  fund_ids: string[];
+  dataset: FundIngestionTaskDataset;
+  source: string;
+  actor: string;
+  status: FundIngestionTaskStatus;
+  task_status?: FundIngestionTaskTaskStatus;
+  requested_count: number;
+  success_count?: FundIngestionTaskSuccessCount;
+  failure_count?: FundIngestionTaskFailureCount;
+  created_at: string;
+  started_at?: FundIngestionTaskStartedAt;
+  finished_at?: FundIngestionTaskFinishedAt;
+  items: FundIngestionItem[];
+  failure?: FundIngestionTaskFailure;
+}
+
+export type FundBasicInfoHistoryRawFields = { [key: string]: unknown };
+
+export type FundBasicInfoHistoryNormalizedFields = { [key: string]: unknown };
+
+export type FundBasicInfoHistoryAvailabilityQuality =
+  (typeof FundBasicInfoHistoryAvailabilityQuality)[keyof typeof FundBasicInfoHistoryAvailabilityQuality];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundBasicInfoHistoryAvailabilityQuality = {
+  INFERRED: "INFERRED",
+} as const;
+
+export interface FundBasicInfoHistory {
+  fund_id: string;
+  version: number;
+  raw_fields: FundBasicInfoHistoryRawFields;
+  normalized_fields: FundBasicInfoHistoryNormalizedFields;
+  source: string;
+  adapter_version: string;
+  library_version: string;
+  available_at: string;
+  availability_quality: FundBasicInfoHistoryAvailabilityQuality;
+}
+
+export interface FundIngestionSubmissionEnvelope {
+  data: FundIngestionSubmission;
+  meta: ResponseMeta;
+  error: EmptyError;
+}
+
+export interface FundIngestionListEnvelope {
+  data: FundIngestionTask[];
+  meta: ResponseMeta;
+  error: EmptyError;
+}
+
+export interface FundIngestionEnvelope {
+  data: FundIngestionTask;
+  meta: ResponseMeta;
+  error: EmptyError;
+}
+
+export interface FundBasicInfoHistoryListEnvelope {
+  data: FundBasicInfoHistory[];
+  meta: ResponseMeta;
+  error: EmptyError;
+}
+
 export type LifecycleStatus =
   (typeof LifecycleStatus)[keyof typeof LifecycleStatus];
 
@@ -172,6 +339,8 @@ export const InvestmentEligibility = {
   UNKNOWN: "UNKNOWN",
 } as const;
 
+export type FundSummaryClassification = ClassificationPayloadModel | null;
+
 export interface FundSummary {
   fund_id: string;
   fund_name: string;
@@ -181,6 +350,7 @@ export interface FundSummary {
   inception_date: string;
   lifecycle_status: LifecycleStatus;
   investment_eligibility: InvestmentEligibility;
+  classification?: FundSummaryClassification;
 }
 
 export interface BenchmarkComponent {
@@ -1523,6 +1693,290 @@ export interface BacktestBiasCheckEnvelope {
   error: EmptyError;
 }
 
+export type ReviewDecisionAction =
+  (typeof ReviewDecisionAction)[keyof typeof ReviewDecisionAction];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ReviewDecisionAction = {
+  CONFIRM: "CONFIRM",
+  OVERRIDE: "OVERRIDE",
+  REJECT: "REJECT",
+} as const;
+
+export type ReviewDecisionValue = string | string[];
+
+export interface ReviewDecision {
+  action: ReviewDecisionAction;
+  value?: ReviewDecisionValue;
+  evidence?: Evidence[];
+}
+
+export type DimensionResultStatus =
+  (typeof DimensionResultStatus)[keyof typeof DimensionResultStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const DimensionResultStatus = {
+  CONFIRMED: "CONFIRMED",
+  CANDIDATE: "CANDIDATE",
+  CONFLICT: "CONFLICT",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
+export type DimensionResultValue = string | string[];
+
+export interface DimensionResult {
+  status: DimensionResultStatus;
+  value?: DimensionResultValue;
+  candidates?: string[];
+  evidence?: Evidence[];
+}
+
+export type EvidenceSource =
+  (typeof EvidenceSource)[keyof typeof EvidenceSource];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const EvidenceSource = {
+  OFFICIAL: "OFFICIAL",
+  AGGREGATOR: "AGGREGATOR",
+  NAME: "NAME",
+} as const;
+
+export type EvidenceConfidence =
+  (typeof EvidenceConfidence)[keyof typeof EvidenceConfidence];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const EvidenceConfidence = {
+  OFFICIAL_DOCUMENT: "OFFICIAL_DOCUMENT",
+  PUBLIC_AGGREGATOR: "PUBLIC_AGGREGATOR",
+  NAME_HINT: "NAME_HINT",
+} as const;
+
+export type EvidenceNormalizedField = string | null;
+
+export type EvidencePayloadRef = string | null;
+
+export type EvidenceLocator = string | null;
+
+export type EvidenceConflictReason = string | null;
+
+export interface Evidence {
+  source: EvidenceSource;
+  rule_id: string;
+  confidence: EvidenceConfidence;
+  classified_at: string;
+  raw_field: string;
+  normalized_field?: EvidenceNormalizedField;
+  raw_value: string;
+  payload_ref?: EvidencePayloadRef;
+  locator?: EvidenceLocator;
+  conflict_reason?: EvidenceConflictReason;
+}
+
+export type ReviewSubmissionDecisions = { [key: string]: ReviewDecision };
+
+export interface ReviewSubmission {
+  /** */
+  expected_revision: number;
+  decisions: ReviewSubmissionDecisions;
+  /**
+   * @minLength 1
+   * @maxLength 1024
+   */
+  reason: string;
+}
+
+export interface ReviewOutcome {
+  revision_id: number;
+  version: number;
+  case_id: number;
+}
+
+export type ReviewCasePayloadDetails = { [key: string]: unknown };
+
+export type ReviewCasePayloadResolvedAt = string | null;
+
+export type ReviewCasePayloadResultRevisionId = number | null;
+
+export type ReviewCasePayloadBaseline = ClassificationSnapshot | null;
+
+export type ReviewCasePayloadIncoming = ClassificationSnapshot | null;
+
+export interface ReviewCasePayload {
+  case_id: number;
+  fund_id: number;
+  expected_revision: number;
+  issue_type: string;
+  status: string;
+  details: ReviewCasePayloadDetails;
+  created_at: string;
+  resolved_at: ReviewCasePayloadResolvedAt;
+  result_revision_id: ReviewCasePayloadResultRevisionId;
+  baseline?: ReviewCasePayloadBaseline;
+  incoming?: ReviewCasePayloadIncoming;
+}
+
+export type ValidationErrorLocItem = string | number;
+
+export interface ValidationError {
+  loc: ValidationErrorLocItem[];
+  msg: string;
+  type: string;
+}
+
+export type TypedEnvelopeListDictStrAnyDataItem = { [key: string]: unknown };
+
+export interface TypedEnvelopeListDictStrAny {
+  data: TypedEnvelopeListDictStrAnyDataItem[];
+  meta: ResponseMetaModel;
+  error?: null;
+}
+
+export interface TypedEnvelopeReviewCasePayload {
+  data: ReviewCasePayload;
+  meta: ResponseMetaModel;
+  error: null;
+}
+
+export interface PaginationModel {
+  page: number;
+  page_size: number;
+  total_items: number;
+  total_pages: number;
+}
+
+export interface TypedEnvelopeReviewOutcome {
+  data: ReviewOutcome;
+  meta: ResponseMetaModel;
+  error: null;
+}
+
+export type ClassificationPayloadModelValidTo = string | null;
+
+export type ClassificationPayloadModelTradingEligibility = {
+  [key: string]: unknown;
+};
+
+export interface ClassificationPayloadModel {
+  scheme?: "FIP_CLASSIFICATION_V1";
+  rule_version?: string;
+  enum_version?: string;
+  asset_class: DimensionResult;
+  strategy: DimensionResult;
+  geography: DimensionResult;
+  product_structure: DimensionResult;
+  market_attributes: DimensionResult;
+  review_items?: string[];
+  revision_id: number;
+  version: number;
+  valid_from: string;
+  valid_to?: ClassificationPayloadModelValidTo;
+  available_at: string;
+  classified_at: string;
+  availability_quality: string;
+  source_summary: string[];
+  trading_eligibility: ClassificationPayloadModelTradingEligibility;
+}
+
+export type CatalogPayloadDimensions = { [key: string]: string[] };
+
+export type CatalogPayloadConfidenceGrades = { [key: string]: string };
+
+export interface CatalogPayload {
+  scheme: string;
+  rule_version: string;
+  enum_version: string;
+  mapping_version: string;
+  dimensions: CatalogPayloadDimensions;
+  statuses: string[];
+  confidence_grades: CatalogPayloadConfidenceGrades;
+}
+
+export interface TypedEnvelopeCatalogPayload {
+  data: CatalogPayload;
+  meta: ResponseMetaModel;
+  error: null;
+}
+
+export interface TypedEnvelopeListReviewCasePayload {
+  data: ReviewCasePayload[];
+  meta: ResponseMetaModel;
+  error: null;
+}
+
+export type ResponseMetaModelRequestId = string | null;
+
+export type ResponseMetaModelVersions = { [key: string]: string };
+
+export type ResponseMetaModelAvailabilityQualityDistribution = {
+  [key: string]: number;
+};
+
+export type ResponseMetaModelPagination = PaginationModel | null;
+
+export interface ResponseMetaModel {
+  api_version?: string;
+  request_id?: ResponseMetaModelRequestId;
+  generated_at: string;
+  as_of_date: string;
+  data_version: string;
+  versions: ResponseMetaModelVersions;
+  is_point_in_time: boolean;
+  availability_quality_distribution: ResponseMetaModelAvailabilityQualityDistribution;
+  pagination?: ResponseMetaModelPagination;
+  [key: string]: unknown;
+}
+
+export interface HTTPValidationError {
+  detail?: ValidationError[];
+}
+
+export type ClassificationHistoryIntervalValidTo = string | null;
+
+export type ClassificationHistoryIntervalTradingEligibilityAnyOf = {
+  [key: string]: unknown;
+};
+
+export type ClassificationHistoryIntervalTradingEligibility =
+  ClassificationHistoryIntervalTradingEligibilityAnyOf | null;
+
+export interface ClassificationHistoryInterval {
+  valid_from: string;
+  valid_to: ClassificationHistoryIntervalValidTo;
+  classification: ClassificationSnapshot;
+  trading_eligibility: ClassificationHistoryIntervalTradingEligibility;
+}
+
+export interface TypedEnvelopeListClassificationHistoryPayload {
+  data: ClassificationHistoryPayload[];
+  meta: ResponseMetaModel;
+  error: null;
+}
+
+export interface ClassificationHistoryPayload {
+  revision_id: number;
+  version: number;
+  rule_version: string;
+  enum_version: string;
+  available_at: string;
+  classified_at: string;
+  actor: string;
+  reason: string;
+  reviewed: boolean;
+  intervals: ClassificationHistoryInterval[];
+}
+
+export interface ClassificationSnapshot {
+  scheme?: "FIP_CLASSIFICATION_V1";
+  rule_version?: string;
+  enum_version?: string;
+  asset_class: DimensionResult;
+  strategy: DimensionResult;
+  geography: DimensionResult;
+  product_structure: DimensionResult;
+  market_attributes: DimensionResult;
+  review_items?: string[];
+}
+
 /**
  * Unified error envelope.
  */
@@ -1537,6 +1991,28 @@ export type SessionResponseResponse = SessionEnvelope;
  * Asynchronous operation progress.
  */
 export type OperationResponseResponse = OperationEnvelope;
+
+/**
+ * Accepted fund data ingestion job.
+ */
+export type FundIngestionSubmissionResponseResponse =
+  FundIngestionSubmissionEnvelope;
+
+/**
+ * Recent ingestion jobs for a fund.
+ */
+export type FundIngestionListResponseResponse = FundIngestionListEnvelope;
+
+/**
+ * Fund data ingestion job status and item results.
+ */
+export type FundIngestionResponseResponse = FundIngestionEnvelope;
+
+/**
+ * Versioned fund overview snapshots visible at the requested date.
+ */
+export type FundBasicInfoHistoryListResponseResponse =
+  FundBasicInfoHistoryListEnvelope;
 
 /**
  * Paginated funds.
@@ -1698,6 +2174,12 @@ export type ListFundsParams = {
   inception_date_to?: string;
   aum_min?: number;
   aum_max?: number;
+  asset_class?: string;
+  strategy?: string;
+  geography?: string;
+  product_structure?: string;
+  market_attributes?: string;
+  classification_status?: string;
 };
 
 export type GetFundParams = {
@@ -1730,6 +2212,23 @@ export const GetFundNavSeriesNavType = {
   ADJUSTED: "ADJUSTED",
   RAW: "RAW",
 } as const;
+
+export type ListFundIngestionsParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type GetFundBasicInfoHistoryParams = {
+  as_of_date?: AsOfDateParameter;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
 
 export type GetFundEvaluationsParams = {
   evaluation_period?: EvaluationPeriodParameter;
@@ -1778,3 +2277,25 @@ export const GetBacktestPerformanceSegment = {
   IN_SAMPLE: "IN_SAMPLE",
   OUT_OF_SAMPLE: "OUT_OF_SAMPLE",
 } as const;
+
+export type GetClassificationHistoryParams = {
+  decision_at?: string | null;
+};
+
+export type ListClassificationReviewsParams = {
+  /**
+   * @minimum 1
+   */
+  page?: number;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  page_size?: number;
+  status?: string | null;
+  decision_at?: string | null;
+};
+
+export type GetClassificationReviewParams = {
+  decision_at?: string | null;
+};

@@ -1,24 +1,28 @@
 import datetime as dt
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ExcludeConstraint
+from sqlalchemy.dialects.postgresql import JSONB, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
 from fip.platform.db.mixins import (
     IntervalMixin,
+    TimeSourceMixin,
     VersionedMixin,
     interval_check,
     interval_temporal_check_constraints,
@@ -41,8 +45,10 @@ class Fund(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 
@@ -70,8 +76,46 @@ class FundShareClass(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FundBasicInfoHistory(Base):
+    """Immutable source snapshot of normalized fund overview fields."""
+
+    __tablename__ = "fund_basic_info_history"
+    __table_args__ = (
+        UniqueConstraint("fund_id", "version", name="uq_fbih_fund_version"),
+        CheckConstraint("version > 0", name="ck_fbih_positive_version"),
+        CheckConstraint(
+            "availability_quality = 'INFERRED'",
+            name="ck_fbih_overview_availability_quality",
+        ),
+        Index("ix_fbih_pit", "fund_id", "available_at", "version"),
+        {"schema": "fund"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fund_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    normalized_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    raw_payload_id: Mapped[int] = mapped_column(
+        ForeignKey("raw.raw_payload.id", ondelete="RESTRICT"), nullable=False
+    )
+    available_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    availability_quality: Mapped[str] = mapped_column(String(16), nullable=False)
+    published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_available_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
@@ -101,7 +145,9 @@ class ProviderFundIdentity(Base, IntervalMixin):
     __tablename__ = "provider_fund_identity"
     __table_args__ = (
         UniqueConstraint(
-            "provider_id", "provider_fund_id", "valid_from",
+            "provider_id",
+            "provider_fund_id",
+            "valid_from",
             name="uq_pfi_provider_key",
         ),
         *interval_temporal_check_constraints("provider_fund_identity"),
@@ -228,12 +274,33 @@ class FundClassificationHistory(Base, IntervalMixin):
             "fund_id",
             "classification_scheme",
             unique=True,
-            postgresql_where=text("valid_to IS NULL"),
+            postgresql_where=text("valid_to IS NULL AND revision_id IS NULL"),
+        ),
+        Index(
+            "uq_fch_revision_open",
+            "revision_id",
+            unique=True,
+            postgresql_where=text("valid_to IS NULL AND revision_id IS NOT NULL"),
+        ),
+        ExcludeConstraint(  # type: ignore[no-untyped-call]
+            ("revision_id", "="),
+            (text("daterange(valid_from, valid_to, '[)')"), "&&"),
+            name="ex_fch_revision_intervals",
+            using="gist",
+        ),
+        CheckConstraint(
+            "revision_id IS NULL OR classification_result IS NOT NULL",
+            name="ck_fch_revision_result",
         ),
         {"schema": "fund"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fund.fund_classification_revision.id", ondelete="RESTRICT"), nullable=True
+    )
+    classification_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    trading_eligibility: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     fund_id: Mapped[int] = mapped_column(
         ForeignKey("fund.fund.id", ondelete="RESTRICT"), nullable=False
     )
@@ -279,7 +346,8 @@ class FundFee(Base, IntervalMixin):
         # share_class_id 会把「管理费 + 托管费同时开放」判成违规，那是正常数据。
         Index(
             "uq_fund_fee_open_interval",
-            "share_class_id", "fee_type",
+            "share_class_id",
+            "fee_type",
             unique=True,
             postgresql_where=text("valid_to IS NULL"),
         ),
@@ -332,3 +400,50 @@ class InvestmentEligibility(Base, VersionedMixin):
     effective_at: Mapped[dt.date] = mapped_column(primary_key=True)
     version: Mapped[int] = mapped_column(primary_key=True)
     eligibility_status: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class FundClassificationRevision(Base, TimeSourceMixin):
+    """Immutable complete interval-set revision; versions allocated under the product lock."""
+
+    __tablename__ = "fund_classification_revision"
+    __table_args__ = (
+        UniqueConstraint("fund_id", "scheme", "version", name="uq_fcr_version"),
+        CheckConstraint("version > 0", name="ck_fcr_positive_version"),
+        *interval_temporal_check_constraints("fund_classification_revision"),
+        Index("ix_fcr_pit", "fund_id", "scheme", "available_at", "version"),
+        {"schema": "fund"},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fund_id: Mapped[int] = mapped_column(ForeignKey("fund.fund.id"), nullable=False)
+    scheme: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    rule_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    enum_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    classified_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1024), nullable=False)
+    actor: Mapped[str] = mapped_column(String(64), nullable=False)
+    reviewed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class FundClassificationReviewCase(Base):
+    __tablename__ = "fund_classification_review_case"
+    __table_args__ = (
+        UniqueConstraint("fund_id", "revision_id", "issue_key", name="uq_fcrc_issue"),
+        CheckConstraint("status IN ('PENDING', 'RESOLVED', 'SUPERSEDED')", name="ck_fcrc_status"),
+        {"schema": "fund"},
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    fund_id: Mapped[int] = mapped_column(ForeignKey("fund.fund.id"), nullable=False)
+    revision_id: Mapped[int] = mapped_column(
+        ForeignKey("fund.fund_classification_revision.id"), nullable=False
+    )
+    issue_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    issue_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    result_revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("fund.fund_classification_revision.id")
+    )

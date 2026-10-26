@@ -1,10 +1,10 @@
 # 数据域模型 · Data Domain Model
 
-> 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文细化环节：① Fund Data
+> 上游文档：docs/01-product/01-product-overview.md（v2.6）｜本文细化环节：① Fund Data
 > 业务需求：docs/01-product/02-business-requirements.md（v2.3）
 > 架构依赖：docs/02-architecture/03-data-architecture.md（v1.1）
 >
-> **文档版本**：v1.6 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.8 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -665,3 +665,29 @@ Data Domain Model 由 **13 个核心实体 + 1 个派生实体**构成，四个�
 | v1.2 | 2026-08-25 | 新增 **`Risk-free Rate`** 实体与 Ownership——由 `04-factor` 发现的跨域缺口（Sharpe/Sortino/Alpha/IR 依赖） | `01-data-source.md` v2.1 |
 | v1.1 | 2026-08-25 | **随 01-data-source v2.0 同步**。§7.1 Benchmark 由三实体改为**四层次**——`Official Benchmark Definition` 归属 **Fund Master 域**（它是基金的属性，非基准的属性），与 Component / Index / Time Series 分离；修正对 `01-data-source` 的失效章节引用 | `01-product-overview.md` v2.4、`01-data-source.md` v2.0 |
 | v1.0 | 2026-08-25 | 初始版本。定义 13 个核心实体 + `Investment Eligibility` 派生实体；确立"分析最小单位是 Share Class"；五类必须版本化的实体；已终止基金的永久保留要求与状态转移图；Composite Benchmark 结构与价格/全收益指数的区分；费率"是否已含于净值"的显式标注；为 `11-database` 提供的十项输入与数据量级分类 | `01-product-overview.md` v2.4、`03-data-architecture.md` v1.1 |
+
+## 20. Fund Classification 五维实现（FIP_CLASSIFICATION_V1）
+
+产品级分类细化为 asset_class、strategy、product_structure 单值及 geography、market_attributes 多值；A/C 等份额标签仍属于 Share Class。每维分别记录 CONFIRMED / CANDIDATE / CONFLICT / UNKNOWN、最终值、候选与原始字段证据。名称只能提供候选；置信等级描述来源，不是概率，不替代 availability_quality。OTHER 必须来自明确识别规则。原需求 txt 当前未随仓库提供，首版枚举以版本化 `config/policy/classification/v1.yaml` 为交付目录，不宣称恢复缺失的原文。
+
+分类修订头 FundClassificationRevision 保存递增 version、规则/枚举版本、内容哈希、来源与分类完成时间、操作者和理由；FundClassificationHistory 的每个 revision 保存完整有效区间集合及独立场内交易资格。旧单码及其时间原样保留。PIT 先从可见修订中取最大 version，再取该修订覆盖业务日期的区间；新版缺口不回退。转型和回溯纠正追加修订，不关闭旧修订内的区间。相同证据重复抓取不产生新有效修订，新原始载荷仍留存。人工确认后的新来源产生复核事项，不自动覆盖人工结论。
+
+正式类型和详情字段经原始载荷留存后形成证据；不同来源合并而非相互覆盖。详情调用在可终止子进程中执行，HTTP 响应先捕获，再由已安装 AKShare 解析；解析失败留存 HTML。成功请求也限速，只有结构化瞬时网络/限流错误有限重试。未知发布时间不伪造，当前资料不回填为成立日起可见。
+
+复核按基线修订校验、指定有效区间和维度写入新修订；确认、覆盖和驳回均保留理由、证据与 AuditLog。过期或重复提交冲突。旧评价适配只投影确认的 EQUITY+ACTIVE、EQUITY+PASSIVE_INDEX、BOND、MIXED，增强/量化股票等组合排除并记录原因，benchmark 与 eligibility 继续独立校验。名称归组不再确认合并；旧身份与历史外键不迁移，可疑多份额归组只报告。
+
+| 版本 | 日期 | 变更 | 依赖与下游 |
+|---|---|---|---|
+| v1.7 | 2026-10-26 | 五维分类、不可变完整区间修订、按区间复核和独立兼容投影 | 上游产品 v2.6；同步 API 契约 v1.1；迁移 0034、Web/CLI、Peer Group 输入适配 |
+
+## 21. Fund Basic Info History
+
+基金基本信息抓取以产品 `Fund` 为粒度保存不可变的来源快照，使用 `fund_basic_info_history`，而 NAV 仍以份额类别 `FundShareClass` 为粒度。快照包含原始字段、已映射的规范字段、raw payload 外键、内容哈希、递增版本和 `available_at`。
+
+当前 AKShare 基本信息接口没有可靠的公告/供应商可用时刻，因此快照的 `available_at` 取本次实际抓取时刻，并标记 `INFERRED`；不把今日抓到的信息回填成基金成立日已知。规范字段仅是稳定的键名映射，原始字段和值始终保留供审计和后续重新解析。
+
+连续抓取内容未改变时仍保留新的 raw payload，但不新增基本信息版本。内容发生变化时追加新版本，不更新旧快照。按业务时点读取时只选 `available_at` 不晚于查询时点的快照；该快照不替代 Fund 的稳定身份，也不作为 NAV、评分或投资资格的权威输入。
+
+| 版本 | 日期 | 变更 | 依赖与下游 |
+|---|---|---|---|
+| v1.8 | 2026-10-26 | 增加基金基本信息不可变抓取快照和来源时间语义 | 同步 API 契约 v1.2；迁移 0036、数据采集 Worker、基金详情页 |

@@ -14,6 +14,8 @@ class PeerGroupCandidate:
     grouping_status: str
     status: str | None = None
     reason: str | None = None
+    classification_revision_id: int | None = None
+    classification_mapping_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

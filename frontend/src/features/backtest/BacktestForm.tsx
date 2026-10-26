@@ -1,20 +1,51 @@
-import { useState } from "react";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Fieldset,
+  NumberInput,
+  Select,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { useForm } from "@mantine/form";
 
 import type { BacktestCreateRequest } from "../../api/generated/m17.schemas";
 
-type Props = {
-  disabled?: boolean;
-  pending?: boolean;
-  onSubmit: (request: BacktestCreateRequest) => void;
+type Values = {
+  strategy_id: string;
+  start_date: string;
+  end_date: string;
+  amount: string;
+  currency: string;
+  backtest_mode: "CURRENT_RULE" | "HISTORICAL_FIDELITY";
+  benchmark_id: string;
+  equal_weight_baseline_enabled: boolean;
+  in_sample_end: string;
+  parameter_freeze_date: string;
+  rebalancing_policy_version: string;
+  portfolio_rule_version: string;
+  return_estimate_version: string;
+  risk_model_version: string;
+  eligibility_rules_version: string;
+  transaction_cost_model_version: string;
+  execution_price_rule: string;
+  cash_return_assumption: string;
+  infeasible_handling: "ABORT" | "SKIP_PERIOD";
 };
 
-const initial = {
+const validDate = (date: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(date));
+
+const initial: Values = {
   strategy_id: "",
   start_date: "",
   end_date: "",
-  amount: "1000000.00",
+  amount: "",
   currency: "CNY",
-  backtest_mode: "CURRENT_RULE" as const,
+  backtest_mode: "CURRENT_RULE",
   benchmark_id: "",
   equal_weight_baseline_enabled: true,
   in_sample_end: "",
@@ -25,239 +56,257 @@ const initial = {
   risk_model_version: "",
   eligibility_rules_version: "",
   transaction_cost_model_version: "",
-  execution_price_rule: "NEXT_DAY_NAV",
-  cash_return_assumption: "ZERO",
-  infeasible_handling: "ABORT" as const,
+  execution_price_rule: "",
+  cash_return_assumption: "",
+  infeasible_handling: "ABORT",
 };
 
-export const BacktestForm = ({ disabled, pending, onSubmit }: Props) => {
-  const [form, setForm] = useState(initial);
-  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
-    setForm((current) => ({ ...current, [key]: value }));
+type Props = {
+  pending?: boolean;
+  onSubmit: (request: BacktestCreateRequest) => void;
+};
+
+export const BacktestForm = ({ pending, onSubmit }: Props) => {
+  const form = useForm<Values>({
+    initialValues: initial,
+    validate: {
+      strategy_id: (value) => (value.trim() ? null : "请输入真实策略 ID"),
+      start_date: (value, values) =>
+        !validDate(value)
+          ? "请输入有效开始日期"
+          : validDate(values.end_date) && value > values.end_date
+            ? "开始日期不能晚于结束日期"
+            : null,
+      end_date: (value, values) =>
+        !validDate(value)
+          ? "请输入有效结束日期"
+          : validDate(values.start_date) && value < values.start_date
+            ? "结束日期不能早于开始日期"
+            : null,
+      amount: (value) => (Number(value) > 0 ? null : "初始资金必须大于 0"),
+      currency: (value) => (value.trim() ? null : "请输入币种代码"),
+      benchmark_id: (value) => (value.trim() ? null : "请输入真实基准 ID"),
+      rebalancing_policy_version: (value) =>
+        value.trim() ? null : "请填写版本引用",
+      portfolio_rule_version: (value) =>
+        value.trim() ? null : "请填写版本引用",
+      return_estimate_version: (value) =>
+        value.trim() ? null : "请填写版本引用",
+      risk_model_version: (value) => (value.trim() ? null : "请填写版本引用"),
+      eligibility_rules_version: (value) =>
+        value.trim() ? null : "请填写版本引用",
+      transaction_cost_model_version: (value) =>
+        value.trim() ? null : "请填写版本引用",
+      execution_price_rule: (value) =>
+        value.trim() ? null : "请填写服务端支持的规则标识",
+      cash_return_assumption: (value) =>
+        value.trim() ? null : "请填写服务端支持的假设标识",
+      in_sample_end: (value, values) =>
+        value && !validDate(value)
+          ? "请输入有效样本内结束日"
+          : value && !values.parameter_freeze_date
+            ? "请同时填写参数冻结日"
+            : null,
+      parameter_freeze_date: (value, values) =>
+        value && !validDate(value)
+          ? "请输入有效参数冻结日"
+          : value && !values.in_sample_end
+            ? "请同时填写样本内结束日"
+            : value && values.in_sample_end && value < values.in_sample_end
+              ? "参数冻结日不能早于样本内结束日"
+              : null,
+    },
+  });
+
+  const submit = (values: Values) => {
+    const request: BacktestCreateRequest = {
+      strategy_id: values.strategy_id.trim(),
+      start_date: values.start_date,
+      end_date: values.end_date,
+      initial_capital: {
+        amount: values.amount,
+        currency: values.currency.trim().toUpperCase(),
+      },
+      backtest_mode: values.backtest_mode,
+      benchmark_id: values.benchmark_id.trim(),
+      equal_weight_baseline_enabled: values.equal_weight_baseline_enabled,
+      rebalancing_policy_version: values.rebalancing_policy_version.trim(),
+      portfolio_rule_version: values.portfolio_rule_version.trim(),
+      return_estimate_version: values.return_estimate_version.trim(),
+      risk_model_version: values.risk_model_version.trim(),
+      eligibility_rules_version: values.eligibility_rules_version.trim(),
+      transaction_cost_model_version:
+        values.transaction_cost_model_version.trim(),
+      execution_price_rule: values.execution_price_rule.trim(),
+      cash_return_assumption: values.cash_return_assumption.trim(),
+      infeasible_handling: values.infeasible_handling,
+    };
+    if (values.in_sample_end && values.parameter_freeze_date) {
+      request.is_oos_split = {
+        in_sample_end: values.in_sample_end,
+        parameter_freeze_date: values.parameter_freeze_date,
+      };
+    }
+    onSubmit(request);
+  };
 
   return (
-    <form
-      aria-label="回测配置"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const request: BacktestCreateRequest = {
-          strategy_id: form.strategy_id,
-          start_date: form.start_date,
-          end_date: form.end_date,
-          initial_capital: { amount: form.amount, currency: form.currency },
-          backtest_mode: form.backtest_mode,
-          benchmark_id: form.benchmark_id,
-          equal_weight_baseline_enabled: form.equal_weight_baseline_enabled,
-          rebalancing_policy_version: form.rebalancing_policy_version,
-          portfolio_rule_version: form.portfolio_rule_version,
-          return_estimate_version: form.return_estimate_version,
-          risk_model_version: form.risk_model_version,
-          eligibility_rules_version: form.eligibility_rules_version,
-          transaction_cost_model_version: form.transaction_cost_model_version,
-          execution_price_rule: form.execution_price_rule,
-          cash_return_assumption: form.cash_return_assumption,
-          infeasible_handling: form.infeasible_handling,
-        };
-        if (form.in_sample_end && form.parameter_freeze_date) {
-          request.is_oos_split = {
-            in_sample_end: form.in_sample_end,
-            parameter_freeze_date: form.parameter_freeze_date,
-          };
-        }
-        onSubmit(request);
-      }}
-    >
-      <fieldset disabled={disabled || pending}>
-        <legend>创建配置（创建不会启动计算）</legend>
-        <label>
-          策略 ID
-          <input
-            required
-            value={form.strategy_id}
-            onChange={(event) => set("strategy_id", event.target.value)}
-          />
-        </label>
-        <label>
-          开始日期
-          <input
-            required
-            type="date"
-            value={form.start_date}
-            onChange={(event) => set("start_date", event.target.value)}
-          />
-        </label>
-        <label>
-          结束日期
-          <input
-            required
-            type="date"
-            value={form.end_date}
-            onChange={(event) => set("end_date", event.target.value)}
-          />
-        </label>
-        <label>
-          初始资金
-          <input
-            required
-            inputMode="decimal"
-            value={form.amount}
-            onChange={(event) => set("amount", event.target.value)}
-          />
-        </label>
-        <label>
-          币种
-          <input
-            required
-            value={form.currency}
-            onChange={(event) => set("currency", event.target.value)}
-          />
-        </label>
-        <label>
-          回测模式
-          <select
-            value={form.backtest_mode}
-            onChange={(event) =>
-              set(
-                "backtest_mode",
-                event.target.value as typeof form.backtest_mode,
-              )
-            }
-          >
-            <option value="CURRENT_RULE">CURRENT_RULE</option>
-            <option value="HISTORICAL_FIDELITY">HISTORICAL_FIDELITY</option>
-          </select>
-        </label>
-        <label>
-          基准 ID
-          <input
-            required
-            value={form.benchmark_id}
-            onChange={(event) => set("benchmark_id", event.target.value)}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={form.equal_weight_baseline_enabled}
-            onChange={(event) =>
-              set("equal_weight_baseline_enabled", event.target.checked)
-            }
-          />
-          启用等权基线
-        </label>
-        <label>
-          样本内结束日
-          <input
-            type="date"
-            value={form.in_sample_end}
-            onChange={(event) => set("in_sample_end", event.target.value)}
-          />
-        </label>
-        <label>
-          参数冻结日
-          <input
-            type="date"
-            value={form.parameter_freeze_date}
-            onChange={(event) =>
-              set("parameter_freeze_date", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          再平衡政策版本
-          <input
-            required
-            value={form.rebalancing_policy_version}
-            onChange={(event) =>
-              set("rebalancing_policy_version", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          组合规则版本
-          <input
-            required
-            value={form.portfolio_rule_version}
-            onChange={(event) =>
-              set("portfolio_rule_version", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          收益估计版本
-          <input
-            required
-            value={form.return_estimate_version}
-            onChange={(event) =>
-              set("return_estimate_version", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          风险模型版本
-          <input
-            required
-            value={form.risk_model_version}
-            onChange={(event) => set("risk_model_version", event.target.value)}
-          />
-        </label>
-        <label>
-          资格规则版本
-          <input
-            required
-            value={form.eligibility_rules_version}
-            onChange={(event) =>
-              set("eligibility_rules_version", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          交易成本模型版本
-          <input
-            required
-            value={form.transaction_cost_model_version}
-            onChange={(event) =>
-              set("transaction_cost_model_version", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          执行价格规则
-          <input
-            required
-            value={form.execution_price_rule}
-            onChange={(event) =>
-              set("execution_price_rule", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          现金收益假设
-          <input
-            required
-            value={form.cash_return_assumption}
-            onChange={(event) =>
-              set("cash_return_assumption", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          不可行处理
-          <select
-            value={form.infeasible_handling}
-            onChange={(event) =>
-              set(
-                "infeasible_handling",
-                event.target.value as typeof form.infeasible_handling,
-              )
-            }
-          >
-            <option value="ABORT">ABORT</option>
-            <option value="SKIP_PERIOD">SKIP_PERIOD</option>
-          </select>
-        </label>
-        <button type="submit">{pending ? "创建中…" : "创建回测"}</button>
-      </fieldset>
+    <form aria-label="回测配置" onSubmit={form.onSubmit(submit)}>
+      <Stack gap="md">
+        <Fieldset legend="创建回测配置">
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              创建配置不会启动回测。必填的规则和模型版本由用户指定，页面不提供虚构默认值。
+            </Text>
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+              <TextInput
+                label="策略 ID"
+                required
+                {...form.getInputProps("strategy_id")}
+              />
+              <TextInput
+                type="date"
+                label="开始日期"
+                required
+                max={form.values.end_date || undefined}
+                {...form.getInputProps("start_date")}
+              />
+              <TextInput
+                type="date"
+                label="结束日期"
+                required
+                min={form.values.start_date || undefined}
+                {...form.getInputProps("end_date")}
+              />
+              <NumberInput
+                label="初始资金"
+                required
+                min={0.01}
+                decimalScale={2}
+                value={form.values.amount}
+                onChange={(value) =>
+                  form.setFieldValue("amount", String(value))
+                }
+                error={form.errors.amount}
+              />
+              <TextInput
+                label="币种代码"
+                required
+                {...form.getInputProps("currency")}
+              />
+              <Select
+                label="回测模式"
+                data={[
+                  { value: "CURRENT_RULE", label: "当前规则" },
+                  { value: "HISTORICAL_FIDELITY", label: "历史规则还原" },
+                ]}
+                allowDeselect={false}
+                value={form.values.backtest_mode}
+                onChange={(value) =>
+                  form.setFieldValue(
+                    "backtest_mode",
+                    value === "HISTORICAL_FIDELITY" ? value : "CURRENT_RULE",
+                  )
+                }
+              />
+              <TextInput
+                label="基准 ID"
+                required
+                {...form.getInputProps("benchmark_id")}
+              />
+              <Select
+                label="不可行处理"
+                data={[
+                  { value: "ABORT", label: "中止回测" },
+                  { value: "SKIP_PERIOD", label: "跳过该期" },
+                ]}
+                allowDeselect={false}
+                value={form.values.infeasible_handling}
+                onChange={(value) =>
+                  form.setFieldValue(
+                    "infeasible_handling",
+                    value === "SKIP_PERIOD" ? value : "ABORT",
+                  )
+                }
+              />
+              <TextInput
+                label="再平衡政策版本"
+                required
+                {...form.getInputProps("rebalancing_policy_version")}
+              />
+              <TextInput
+                label="组合规则版本"
+                required
+                {...form.getInputProps("portfolio_rule_version")}
+              />
+              <TextInput
+                label="收益估计版本"
+                required
+                {...form.getInputProps("return_estimate_version")}
+              />
+              <TextInput
+                label="风险模型版本"
+                required
+                {...form.getInputProps("risk_model_version")}
+              />
+              <TextInput
+                label="资格规则版本"
+                required
+                {...form.getInputProps("eligibility_rules_version")}
+              />
+              <TextInput
+                label="交易成本模型版本"
+                required
+                {...form.getInputProps("transaction_cost_model_version")}
+              />
+              <TextInput
+                label="执行价格规则标识"
+                required
+                description="API 尚无可选值字典，请填写部署策略接受的标识。"
+                {...form.getInputProps("execution_price_rule")}
+              />
+              <TextInput
+                label="现金收益假设标识"
+                required
+                description="API 尚无可选值字典，请填写部署策略接受的标识。"
+                {...form.getInputProps("cash_return_assumption")}
+              />
+              <TextInput
+                type="date"
+                label="样本内结束日（可选）"
+                max={form.values.end_date || undefined}
+                {...form.getInputProps("in_sample_end")}
+              />
+              <TextInput
+                type="date"
+                label="参数冻结日（可选）"
+                min={form.values.in_sample_end || undefined}
+                max={form.values.end_date || undefined}
+                {...form.getInputProps("parameter_freeze_date")}
+              />
+            </SimpleGrid>
+            <Checkbox
+              label="启用等权基线"
+              checked={form.values.equal_weight_baseline_enabled}
+              onChange={(event) =>
+                form.setFieldValue(
+                  "equal_weight_baseline_enabled",
+                  event.currentTarget.checked,
+                )
+              }
+            />
+            {(form.errors.in_sample_end ||
+              form.errors.parameter_freeze_date) && (
+              <Alert color="red">
+                样本内结束日和参数冻结日必须同时填写，且冻结日不得早于样本内结束日。
+              </Alert>
+            )}
+          </Stack>
+        </Fieldset>
+        <Button type="submit" loading={pending}>
+          创建回测配置
+        </Button>
+      </Stack>
     </form>
   );
 };

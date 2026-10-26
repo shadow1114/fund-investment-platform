@@ -32,9 +32,9 @@ flowchart LR
 ```
 
 1. **前端 Web 界面**：基于 React 18、TypeScript、TanStack Query、ECharts 与 Vite 构建，监听端口 `5173`。开发服务器内置反向代理，自动将 `/api` 请求转发到后端。
-2. **后端 API 服务**：基于 FastAPI 与 Uvicorn 构建，监听端口 `8000`，内置 OpenAPI 冻结契约投影、三态实盘看板、动态再平衡引擎及审计追踪中间件。
-3. **后台 Worker 进程（可选）**：轮询 PostgreSQL 任务队列执行长时间复杂计算（如大样本重采样与多情景回测）。
-4. **PostgreSQL 数据库（可选）**：存储基金历史行情、候选池版本、决策快照、实盘三态账本与调仓审计日志。
+2. **后端 API 服务**：基于 FastAPI 与 Uvicorn 构建，监听端口 `8000`，提供冻结契约 API、审计追踪和组合/回测路由。实盘/再平衡当前后端使用内存样例，工作台会明确提示不可作为真实持仓或成交数据。
+3. **后台 Worker 进程（可选）**：轮询 PostgreSQL 任务队列执行异步优化/回测和基金基本信息、NAV 抓取作业。默认 `./start.sh` 不启动 Worker；任务会留在队列中，需使用 `./start.sh --with-worker` 执行。
+4. **PostgreSQL 数据库**：持久化基金、候选池、计算作业与抓取历史。基金抓取及后台任务需要数据库和最新迁移；没有数据库时，API 只能启动，不能提供完整的持久化业务流程。
 
 ---
 
@@ -47,7 +47,7 @@ flowchart LR
 | **Python** | 3.12.x | 运行后端 API、量化算法与领域模型 | `python3 --version` |
 | **Node.js** | 18.x / 20.x+ | 运行前端 Web 开发服务器 | `node -v` |
 | **npm** | 9.x+ / 10.x+ | 前端包依赖管理 | `npm -v` |
-| **PostgreSQL** *(可选)* | 14.x / 16.x | 生产与持久化数据库（若仅试用前端与 Mock 数据非必需） | `psql --version` |
+| **PostgreSQL** | 14.x / 16.x | 基金查询、异步任务、抓取历史等持久化业务所需 | `psql --version` |
 
 > [!NOTE]
 > 项目原生支持**纯本地模式启动**，无需 Docker 或任何容器守护进程。
@@ -56,7 +56,7 @@ flowchart LR
 
 ## 三、方式一：一键极速启动（推荐）
 
-仓库根目录下提供了自动化启动脚本 [`start.sh`](file:///Users/zhukun/学习/fund-investment-platform/start.sh)，该脚本会自动完成依赖检测、启动后端、启动前端并进行就绪检查。
+仓库根目录下提供了自动化启动脚本 [`start.sh`](../start.sh)，该脚本会检测依赖和目标端口，启动后端并检查存活探针，再启动前端并检查页面响应。目标端口已有进程监听时会停止启动并提示，不会杀掉或复用未识别的服务。前端首次安装依赖时使用 `npm ci`。
 
 ### 1. 执行一键启动
 在项目根目录下打开终端运行：
@@ -67,7 +67,7 @@ flowchart LR
 ### 2. 命令行选项说明
 脚本支持按需传入参数：
 ```bash
-# 同时启动后端 API、前端以及后台 Worker 进程
+# 同时启动后端 API、前端以及后台 Worker（需先启动 PostgreSQL 并执行迁移）
 ./start.sh --with-worker
 
 # 仅启动后端 API 服务 (端口 8000)
@@ -81,7 +81,7 @@ flowchart LR
 ```
 
 ### 3. 一键安全停止
-在当前运行脚本的终端中按下键盘 **`Ctrl + C`**，脚本内建的进程陷阱（Trap Hook）将**自动且整洁地同步停止后端和前端所有子进程**，绝不会残留孤儿进程或占用端口。
+在当前运行脚本的终端中按下 **`Ctrl + C`**，脚本会停止由本次启动的 API、前端和 Worker 进程。它不会终止启动前已存在的服务。
 
 ---
 
@@ -103,12 +103,13 @@ pip install -r requirements.lock
 ```
 
 ### 步骤 2：启动 PostgreSQL 并执行数据库迁移（可选）
-若本机已安装 PostgreSQL 并已创建数据库 `fip_dev`：
+启动完整 API 数据流程和 Worker 前，需要 PostgreSQL、数据库 `fip_dev` 及最新迁移：
 ```bash
 # 执行 Alembic 数据库版本迁移到最新状态
 make migrate
 ```
-*(若暂未启动 PostgreSQL，后端 API 仍可启动，部分无状态或 Mock 操作均可正常工作)*
+基金抓取依赖当前 Alembic head（含 0035–0037 的任务请求/结果、基金基本信息历史和 Worker 起止时间字段）。`start.sh` 不会自动迁移，也不会清理数据库。
+数据库不可用时，后端进程仍可能启动并通过存活探针，但读取/写入业务接口不会因此变为可用。
 
 ### 步骤 3：启动后端 FastAPI 服务
 在项目根目录运行：
@@ -123,7 +124,7 @@ make api-dev
 启动成功后，控制台将输出 Uvicorn 监听日志，服务运行于 `http://127.0.0.1:8000`。
 
 ### 步骤 4：（可选）启动后台异步计算 Worker
-若需要处理异步耗时优化作业，另开终端运行：
+若需要处理异步优化/回测或基金数据抓取作业，另开终端运行：
 ```bash
 make worker-dev
 # 或: PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker
@@ -151,11 +152,12 @@ npm run dev
 ### 1. Web 交互看板 (`http://localhost:5173`)
 | 功能模块 | 访问路径 | 核心业务能力说明 |
 | :--- | :--- | :--- |
-| **基金筛选与全景研究** | [`/funds`](http://localhost:5173/funds) | 风格分类、多周期夏普/索提诺/信息比率穿透、全市场基金过滤与指标透视 |
-| **基金深度详情** | [`/funds/000001`](http://localhost:5173/funds/000001) | 净值走势图表、时点归因、回撤分析、准入合规排查 |
-| **候选池管理与快照** | [`/universes`](http://localhost:5173/universes) | 全时点（Point-in-Time）候选池入选规则筛选、成分变动历史留痕 |
-| **组合决策详情页** | [`/portfolios/P001`](http://localhost:5173/portfolios/P001) | **集成三大核心子面板（通过顶部 Tab 切换）：**<br>① **组合优化与决策复核**：均值-方差优化、二次规划、PM 覆盖审批流；<br>② **实盘三态持仓监控（Stage ⑨）**：目标 vs 实际 vs 在途透视表、净值盯市漂移、在途防重复挂单加锁、本地模拟成交注入器；<br>③ **动态调仓与评估引擎（Stage ⑩）**：多触发器合并测算、换手率与交易成本把关、建议买卖指令清单。 |
-| **组合策略回测** | [`/backtests`](http://localhost:5173/backtests) | 历史回测执行进度轮询、收益曲线对比、前瞻偏差与幸存者偏差五维排查 |
+| **基金筛选与研究** | [`/funds`](http://localhost:5173/funds) | 服务端筛选、分页、排序、分类证据，以及单只/批量基本信息抓取；抓取任务需要 Worker 和已迁移数据库 |
+| **基金详情** | [`/funds/000001`](http://localhost:5173/funds/000001) | 净值图表、评估/评分归因、分类历史，以及 NAV 和分红拆分抓取 |
+| **候选池管理与快照** | [`/universes`](http://localhost:5173/universes) | 候选池快照查询、入选/排除结果和 API 实际提供的条件证据 |
+| **分类复核** | [`/classification-reviews`](http://localhost:5173/classification-reviews) | 查看待复核分类并按当前用户权限提交复核 |
+| **组合决策详情页** | [`/portfolios/P001`](http://localhost:5173/portfolios/P001) | 组合读取、优化提交/结果和决策复核。实盘与再平衡视图会标记后端数据源不可用；当前后端样例数据不代表真实持仓或成交。 |
+| **组合策略回测** | [`/backtests`](http://localhost:5173/backtests) | 回测创建、校验、运行状态和 URL 恢复。当前绩效与偏差 API 返回空结果，收益曲线和偏差结论不可用。 |
 
 ### 2. 后端开发者与监控入口 (`http://127.0.0.1:8000`)
 | 入口说明 | 访问路径 | 功能说明 |
@@ -180,22 +182,22 @@ npm run dev
 | `FIP_RATE_LIMIT_PER_MINUTE` | `120` | API 令牌桶限流速率（每分钟最大请求次数） |
 | `FIP_WORKER_POLL_SECONDS` | `1.0` | 异步计算 Worker 轮询任务队列的间隔秒数 |
 | `VITE_API_BASE_URL` | *(空)* | 前端 API 目标基地址（留空时由 Vite 自动代理到本地 8000 端口） |
+| `FIP_PYTHON_LOCALE` | `${LANG}`；未设置时 `zh_CN.UTF-8` | 仅由 `start.sh` 用于启动 Python 进程，保证虚拟环境中的 UTF-8 路径可读取；通常无需手动设置 |
 
 ---
 
 ## 七、常见问题排查 (FAQ)
 
 ### Q1: 提示端口 8000 或 5173 已被占用？
-**原因**：之前运行的服务未退出，或有其他程序占用了相同端口。  
-**解决办法**：
+启动脚本会停止运行，避免把其他项目误当作本项目服务。先检查监听进程身份，再决定是否停止：
 - 查看占用进程：
   ```bash
   lsof -i :8000
   lsof -i :5173
   ```
-- 杀死对应 PID：
+- 确认是本项目残留进程后，先尝试正常停止对应服务；不要直接对未知 PID 使用强制终止：
   ```bash
-  kill -9 <PID>
+  kill <PID>
   ```
 - 再次运行 `./start.sh`。
 

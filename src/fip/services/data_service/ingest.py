@@ -1,6 +1,7 @@
 import datetime as dt
 import hashlib
 import io
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -23,9 +24,11 @@ from fip.services.data_service.batch import (
     BatchItemStatus,
     FundIngestSubject,
 )
+from fip.services.data_service.classification.models import ClassificationSnapshot
 from fip.services.data_service.grouping import split_share_class_name
 from fip.services.data_service.models.fund import (
     Fund,
+    FundBasicInfoHistory,
     FundShareClass,
     ProviderFundIdentity,
 )
@@ -77,6 +80,7 @@ class FundListIngestResult:
 
     created: int
     reassignments: tuple[IdentityReassignment, ...]
+    classification_warnings: tuple[str, ...] = ()
 
 
 @dataclass
@@ -115,13 +119,11 @@ class IngestService:
             self._lags: dict[str, dt.timedelta] = {}
         elif isinstance(disclosure_lag_days, int):
             self._lags = {
-                code: dt.timedelta(days=disclosure_lag_days)
-                for code in _INGEST_DATASET_CODES
+                code: dt.timedelta(days=disclosure_lag_days) for code in _INGEST_DATASET_CODES
             }
         else:
             self._lags = {
-                code: dt.timedelta(days=days)
-                for code, days in disclosure_lag_days.items()
+                code: dt.timedelta(days=days) for code, days in disclosure_lag_days.items()
             }
 
     @classmethod
@@ -169,9 +171,7 @@ class IngestService:
 
     def _provider(self) -> DataProvider:
         provider = self._session.execute(
-            select(DataProvider).where(
-                DataProvider.provider_code == self._adapter.provider_code
-            )
+            select(DataProvider).where(DataProvider.provider_code == self._adapter.provider_code)
         ).scalar_one_or_none()
         if provider is None:
             provider = DataProvider(
@@ -215,22 +215,20 @@ class IngestService:
         )
         self._session.add(payload)
         self._session.flush()
-        self._session.add(CanonicalRaw(
-            raw_payload_id=payload.id,
-            adapter_version=self._adapter.adapter_version,
-            parsed_row_count=record.row_count,
-        ))
+        self._session.add(
+            CanonicalRaw(
+                raw_payload_id=payload.id,
+                adapter_version=self._adapter.adapter_version,
+                parsed_row_count=record.row_count,
+            )
+        )
         self._session.flush()
         return payload
 
-    def _availability(
-        self, dataset_code: str, effective_at: dt.date
-    ) -> tuple[dt.datetime, str]:
+    def _availability(self, dataset_code: str, effective_at: dt.date) -> tuple[dt.datetime, str]:
         lag = self._lags.get(dataset_code)
         if lag is None:
-            raise ValueError(
-                f"disclosure lag policy was not loaded for {dataset_code}"
-            )
+            raise ValueError(f"disclosure lag policy was not loaded for {dataset_code}")
         available_at, quality = declared_lag_availability(effective_at, lag)
         return available_at, quality.value
 
@@ -244,7 +242,7 @@ class IngestService:
         return {
             "available_at": available_at,
             "availability_quality": quality,
-            "published_at": None,           # AKShare 给不出，如实留空（C-12）
+            "published_at": None,  # AKShare 给不出，如实留空（C-12）
             "provider_available_at": None,  # 同上
             "ingested_at": ingested_at,
         }
@@ -277,16 +275,20 @@ class IngestService:
         让一条映射冲突废掉整批已抓数据（见 FundListIngestResult 的说明）。
         返回 None 表示这一条映射已就位（新登记或本就存在）。
         """
-        existing = self._session.execute(
-            select(ProviderFundIdentity)
-            .where(
-                ProviderFundIdentity.provider_id == provider.id,
-                ProviderFundIdentity.provider_fund_id == provider_fund_id,
-                ProviderFundIdentity.valid_to.is_(None),
+        existing = (
+            self._session.execute(
+                select(ProviderFundIdentity)
+                .where(
+                    ProviderFundIdentity.provider_id == provider.id,
+                    ProviderFundIdentity.provider_fund_id == provider_fund_id,
+                    ProviderFundIdentity.valid_to.is_(None),
+                )
+                .order_by(ProviderFundIdentity.valid_from.desc())
+                .limit(1)
             )
-            .order_by(ProviderFundIdentity.valid_from.desc())
-            .limit(1)
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if existing is not None:
             if existing.share_class_id != share_class_id:
                 # Provider 把同一个代码重新指派给了另一个份额类别（§6.2.1）。
@@ -302,59 +304,29 @@ class IngestService:
             return None
 
         available_at, quality = resolve_availability(None, None, ingested_at)
-        self._session.add(ProviderFundIdentity(
-            provider_id=provider.id,
-            provider_fund_id=provider_fund_id,
-            share_class_id=share_class_id,
-            valid_from=ingested_at.astimezone(dt.UTC).date(),
-            valid_to=None,
-            available_at=available_at,
-            availability_quality=quality.value,
-            published_at=None,           # AKShare 给不出，如实留空（C-12）
-            provider_available_at=None,  # 同上
-            ingested_at=ingested_at,
-        ))
+        self._session.add(
+            ProviderFundIdentity(
+                provider_id=provider.id,
+                provider_fund_id=provider_fund_id,
+                share_class_id=share_class_id,
+                valid_from=ingested_at.astimezone(dt.UTC).date(),
+                valid_to=None,
+                available_at=available_at,
+                availability_quality=quality.value,
+                published_at=None,  # AKShare 给不出，如实留空（C-12）
+                provider_available_at=None,  # 同上
+                ingested_at=ingested_at,
+            )
+        )
         self._session.flush()
         return None
 
     # ---------- 基金主数据 ----------
 
     def ingest_fund_list(self, limit: int | None = None) -> FundListIngestResult:
-        """灌入基金列表并登记 provider 标识映射。
-
-        重指派冲突【不中断本批】：逐条收集，跑完连同 created 一起返回，由
-        调用方决定如何报告（CLI 以非零退出码逐条列出）。已成功处理的部分
-        照常留在 session 里等待提交。
-
-        ── 有意的取舍：冲突批次会留下一条【无映射的孤儿维度行】 ──
-
-        基金简称改名（"测试蓝筹混合A" → "测试改名混合A"）会先让本方法按新的
-        product_name 建出 Fund + FundShareClass，之后 _ensure_provider_identity
-        才发现同一个 provider 代码此前指向另一个份额类别、返回冲突而【不写】
-        映射。于是新建的那一对维度行没有任何 provider_fund_identity 指向它 ——
-        一条孤儿。
-
-        这是【明知并接受】的取舍，不是缺陷：
-
-        · 旧行为（直接抛 ValueError 穿出本方法）确实不会留下孤儿，但代价是
-          整批 ingest-funds 全废，包括本次已抓到的 raw payload 和其余毫不
-          相干的基金。一条映射冲突不该毁掉一整批已抓数据。
-        · 孤儿【不增长】：本方法按 product_name / (fund_id, share_class_code)
-          查找后才新建，重跑同一批只会命中已存在的那一对，不会再建一条。
-        · 孤儿【不丢数据】：旧份额类别、旧映射、旧 PIT 历史一律原样保留，
-          冲突路径不写不改任何既有行。
-        · 孤儿在人工处置后【正好被复用】：运维确认归属、关闭旧区间
-          （valid_to）后重跑，_ensure_provider_identity 会把映射登记到这条
-          已经存在的份额类别上，不会再多建一条。
-
-        这条性质由 tests/integration/test_cli.py::
-        test_conflicting_batch_leaves_one_reusable_orphan_dimension_row 钉住。
-        代价是冲突未处置期间 fund / fund_share_class 里有一条查不到映射的行；
-        它不参与任何 PIT 解析（cli._resolve 只走 provider_fund_identity），
-        因此不会把任何数据引到错误的基金上。
-        """
+        """Keep provider identity stable; suffixes provide candidates only."""
         record = self._adapter.fetch("fund_list")
-        self._store_raw(record)
+        payload = self._store_raw(record)
         frame = pd.read_parquet(io.BytesIO(record.payload))
         if limit is not None:
             frame = frame.head(limit)
@@ -362,33 +334,50 @@ class IngestService:
         provider = self._provider()
         created = 0
         reassignments: list[IdentityReassignment] = []
+        warnings: list[str] = []
         for _, row in frame.iterrows():
             code = str(row["基金代码"]).strip()
             display_name = str(row["基金简称"]).strip()
             grouping = split_share_class_name(display_name)
 
-            fund = self._session.execute(
-                select(Fund).where(Fund.product_name == grouping.product_name)
+            identity = self._session.execute(
+                select(ProviderFundIdentity).where(
+                    ProviderFundIdentity.provider_id == provider.id,
+                    ProviderFundIdentity.provider_fund_id == code,
+                    ProviderFundIdentity.valid_to.is_(None),
+                )
             ).scalar_one_or_none()
+            existing_share = (
+                self._session.get(FundShareClass, identity.share_class_id) if identity else None
+            )
+            fund = self._session.get(Fund, existing_share.fund_id) if existing_share else None
+            if fund is None:
+                stable_code = (
+                    "P-"
+                    + hashlib.sha1(f"{provider.provider_code}:{code}".encode()).hexdigest()[:16]
+                )
+                fund = self._session.scalar(select(Fund).where(Fund.fund_code == stable_code))
             if fund is None:
                 fund = Fund(
                     # fund_code 是 String(32)，中文基金全称会超长。
                     # 用 product_name 的稳定短哈希派生；可读性由 product_name 承担。
-                    fund_code="P-" + hashlib.sha1(
-                        grouping.product_name.encode("utf-8")
-                    ).hexdigest()[:16],
-                    product_name=grouping.product_name,
+                    fund_code="P-"
+                    + hashlib.sha1(f"{provider.provider_code}:{code}".encode()).hexdigest()[:16],
+                    product_name=display_name,
                     grouping_status=grouping.status.value,
                 )
                 self._session.add(fund)
                 self._session.flush()
 
-            share_class = self._session.execute(
-                select(FundShareClass).where(
-                    FundShareClass.fund_id == fund.id,
-                    FundShareClass.share_class_code == grouping.share_class_code,
-                )
-            ).scalar_one_or_none()
+            share_class = (
+                existing_share
+                or self._session.execute(
+                    select(FundShareClass).where(
+                        FundShareClass.fund_id == fund.id,
+                        FundShareClass.share_class_code == grouping.share_class_code,
+                    )
+                ).scalar_one_or_none()
+            )
             if share_class is None:
                 share_class = FundShareClass(
                     fund_id=fund.id,
@@ -407,19 +396,229 @@ class IngestService:
             )
             if conflict is not None:
                 reassignments.append(conflict)
-        return FundListIngestResult(created=created, reassignments=tuple(reassignments))
+            if existing_share and existing_share.display_name != display_name:
+                warnings.append(f"{code}: name changed; preserved identity {existing_share.id}")
+            count = self._session.scalar(
+                select(func.count())
+                .select_from(FundShareClass)
+                .where(FundShareClass.fund_id == fund.id)
+            )
+            if count and count > 1:
+                warnings.append(
+                    f"{code}: existing shared product {fund.id} requires grouping review"
+                )
+            snapshot = self.classify_fields(
+                fund.id,
+                {"formal_type": str(row.get("基金类型", "")), "基金简称": display_name},
+                payload,
+                actor="ingest-funds",
+            )
+            if count and count > 1:
+                from fip.services.data_service.classification.service import ClassificationService
+                from fip.services.data_service.models.fund import FundClassificationReviewCase
+
+                revision = ClassificationService(self._session).latest(fund.id)
+                assert revision is not None
+                existing_case = self._session.scalar(
+                    select(FundClassificationReviewCase).where(
+                        FundClassificationReviewCase.fund_id == fund.id,
+                        FundClassificationReviewCase.revision_id == revision.id,
+                        FundClassificationReviewCase.issue_key == "product_grouping",
+                    )
+                )
+                if existing_case is None:
+                    self._session.add(
+                        FundClassificationReviewCase(
+                            fund_id=fund.id,
+                            revision_id=revision.id,
+                            issue_key="product_grouping",
+                            issue_type="GROUPING_UNCONFIRMED",
+                            status="PENDING",
+                            details={
+                                "provider_code": code,
+                                "reason": "legacy multi-share grouping",
+                            },
+                            created_at=record.ingested_at,
+                        )
+                    )
+            if snapshot.review_items:
+                warnings.append(f"{code}: {','.join(snapshot.review_items)}")
+        return FundListIngestResult(
+            created=created,
+            reassignments=tuple(reassignments),
+            classification_warnings=tuple(warnings),
+        )
+
+    def classify_fields(
+        self,
+        fund_id: int,
+        fields: Mapping[str, str],
+        payload: RawPayload,
+        *,
+        actor: str,
+        dry_run: bool = False,
+    ) -> ClassificationSnapshot:
+        from fip.services.data_service.classification import Evidence, classify, normalize_evidence
+        from fip.services.data_service.classification.service import ClassificationService
+
+        now = dt.datetime.now(dt.UTC)
+        aliases = {
+            "基金类型": "formal_type",
+            "基金全称": "name",
+            "基金简称": "name",
+            "投资范围": "investment_strategy",
+            "投资策略": "investment_strategy",
+            "跟踪标的": "tracking_target",
+        }
+        incoming = tuple(
+            normalize_evidence(
+                source="NAME" if aliases.get(key, key) == "name" else "AGGREGATOR",
+                field=aliases.get(key, key),
+                raw_field=key,
+                value=value,
+                classified_at=now,
+                payload_ref=f"raw_payload:{payload.id}",
+                locator=f"dataset:{payload.dataset_id};params:{payload.request_params}",
+            )
+            for key, value in fields.items()
+            if value and value != "nan"
+        )
+        service = ClassificationService(self._session)
+        service.lock_product(fund_id)
+        latest = service.latest(fund_id)
+        retained = []
+        if latest:
+            for start, end, existing, _ in service.intervals(latest.id):
+                if start <= payload.ingested_at.date() and (
+                    end is None or payload.ingested_at.date() < end
+                ):
+                    for dimension in (
+                        "asset_class",
+                        "strategy",
+                        "geography",
+                        "product_structure",
+                        "market_attributes",
+                    ):
+                        retained.extend(getattr(existing, dimension).evidence)
+
+        def observation_key(item: Evidence) -> tuple[str, str, str]:
+            return (
+                item.source,
+                item.normalized_field or item.raw_field,
+                (item.locator or "").split(";params:")[0],
+            )
+
+        replacements = {observation_key(item) for item in incoming}
+        merged = {
+            item.model_dump_json(): item
+            for item in retained
+            if observation_key(item) not in replacements
+        }
+        merged.update({item.model_dump_json(): item for item in incoming})
+        from fip.services.data_service.classification.policy import load_policy
+
+        snapshot = classify(tuple(merged.values()), classified_at=now, policy=load_policy())
+        if not dry_run:
+            ClassificationService(self._session).write(
+                fund_id,
+                snapshot,
+                valid_from=payload.ingested_at.date(),
+                available_at=max(now, payload.ingested_at),
+                actor=actor,
+                reason="retained AKShare classification evidence",
+            )
+        return snapshot
+
+    def ingest_fund_overview(
+        self, fund_id: int, symbol: str, *, actor: str
+    ) -> ClassificationSnapshot:
+        from fip.services.data_service.adapters.akshare.client import AkShareContractError
+
+        try:
+            record = self._adapter.fetch("fund_overview", symbol=symbol)
+        except AkShareContractError as error:
+            self._store_raw(error.record)
+            raise
+        payload = self._store_raw(record)
+        self._session.execute(select(Fund).where(Fund.id == fund_id).with_for_update()).scalar_one()
+        frame = pd.read_parquet(io.BytesIO(record.payload))
+        if frame.empty:
+            raise ValueError("fund overview returned no rows")
+        source_row = frame.iloc[0]
+        raw_fields = {
+            str(key): None if pd.isna(value) else str(value) for key, value in source_row.items()
+        }
+        normalized_names = {
+            "基金简称": "display_name",
+            "基金全称": "full_name",
+            "基金类型": "formal_type",
+            "成立日期": "inception_date",
+            "投资范围": "investment_scope",
+            "投资策略": "investment_strategy",
+            "跟踪标的": "tracking_target",
+            "基金经理": "manager_name",
+            "基金规模": "aum",
+        }
+        normalized_fields = {
+            normalized_names[name]: value
+            for name, value in raw_fields.items()
+            if name in normalized_names and value is not None
+        }
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {"raw_fields": raw_fields, "normalized_fields": normalized_fields},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        latest = self._session.execute(
+            select(FundBasicInfoHistory)
+            .where(FundBasicInfoHistory.fund_id == fund_id)
+            .order_by(FundBasicInfoHistory.version.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if latest is None or latest.content_hash != content_hash:
+            self._session.add(
+                FundBasicInfoHistory(
+                    fund_id=fund_id,
+                    version=1 if latest is None else latest.version + 1,
+                    content_hash=content_hash,
+                    raw_fields=raw_fields,
+                    normalized_fields=normalized_fields,
+                    raw_payload_id=payload.id,
+                    available_at=record.ingested_at,
+                    availability_quality="INFERRED",
+                    published_at=record.published_at,
+                    provider_available_at=record.provider_available_at,
+                    ingested_at=record.ingested_at,
+                )
+            )
+            self._session.flush()
+        fields: dict[str, str] = {}
+        aliases = {
+            "基金类型": "formal_type",
+            "投资范围": "investment_strategy",
+            "投资策略": "investment_strategy",
+            "跟踪标的": "tracking_target",
+            "基金全称": "name",
+        }
+        for _, row in frame.iterrows():
+            fields.update({key: str(row[key]) for key in aliases if key in row})
+        return self.classify_fields(fund_id, fields, payload, actor=actor)
 
     # ---------- 净值与事件 ----------
 
-    def _next_version(
-        self, model: type[FundNav] | type[FundDistribution], **keys: object
-    ) -> int:
+    def _next_version(self, model: type[FundNav] | type[FundDistribution], **keys: object) -> int:
         current = self._session.execute(
             select(func.max(model.version)).filter_by(**keys)
         ).scalar_one_or_none()
         return 1 if current is None else int(current) + 1
 
     def ingest_nav(self, share_class_id: int, provider_fund_id: str) -> int:
+        self._session.execute(
+            select(FundShareClass).where(FundShareClass.id == share_class_id).with_for_update()
+        ).scalar_one()
         record = self._adapter.fetch("fund_nav", symbol=provider_fund_id)
         payload = self._store_raw(record)
         inserted = 0
@@ -435,19 +634,21 @@ class IngestService:
             ).scalar_one_or_none()
             if latest is not None and latest.unit_nav == parsed.unit_nav:
                 continue  # 值未变，不产生新版本
-            self._session.add(FundNav(
-                share_class_id=share_class_id,
-                effective_at=parsed.effective_at,
-                version=self._next_version(
-                    FundNav,
+            self._session.add(
+                FundNav(
                     share_class_id=share_class_id,
                     effective_at=parsed.effective_at,
-                ),
-                unit_nav=parsed.unit_nav,
-                adjusted_nav=None,  # 由 rebuild_adjusted_nav 回填
-                raw_payload_id=payload.id,
-                **self._times("fund_nav", parsed.effective_at, record.ingested_at),
-            ))
+                    version=self._next_version(
+                        FundNav,
+                        share_class_id=share_class_id,
+                        effective_at=parsed.effective_at,
+                    ),
+                    unit_nav=parsed.unit_nav,
+                    adjusted_nav=None,  # 由 rebuild_adjusted_nav 回填
+                    raw_payload_id=payload.id,
+                    **self._times("fund_nav", parsed.effective_at, record.ingested_at),
+                )
+            )
             inserted += 1
         self._session.flush()
         return inserted
@@ -468,9 +669,7 @@ class IngestService:
             available_at, _quality = self._availability(dataset, parsed.effective_at)
             slot = merged.setdefault(
                 parsed.effective_at,
-                _MergedEvent(
-                    Decimal(0), Decimal(1), ingested_at, available_at, payload_id
-                ),
+                _MergedEvent(Decimal(0), Decimal(1), ingested_at, available_at, payload_id),
             )
             slot.dividend += parsed.dividend_per_unit
             slot.split_ratio *= parsed.split_ratio
@@ -484,62 +683,58 @@ class IngestService:
             # 日常增量用法，若无条件 _next_version + insert，每次重跑都会把
             # 整部分红/拆分史重新插一遍，version（语义是「真实修订」）被无界
             # 污染。两个值【都】相等才算未变，只比其中一个会漏掉另一个的修订。
-            latest = self._session.execute(
-                select(FundDistribution)
-                .where(
-                    FundDistribution.share_class_id == share_class_id,
-                    FundDistribution.effective_at == day,
+            latest = (
+                self._session.execute(
+                    select(FundDistribution)
+                    .where(
+                        FundDistribution.share_class_id == share_class_id,
+                        FundDistribution.effective_at == day,
+                    )
+                    .order_by(FundDistribution.version.desc())
+                    .limit(1)
                 )
-                .order_by(FundDistribution.version.desc())
-                .limit(1)
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if (
                 latest is not None
                 and latest.dividend_per_unit == merged_event.dividend
                 and latest.split_ratio == merged_event.split_ratio
             ):
                 continue  # 值未变，不产生新版本
-            self._session.add(FundDistribution(
-                share_class_id=share_class_id,
-                effective_at=day,
-                version=self._next_version(
-                    FundDistribution, share_class_id=share_class_id, effective_at=day
-                ),
-                dividend_per_unit=merged_event.dividend,
-                split_ratio=merged_event.split_ratio,
-                raw_payload_id=merged_event.payload_id,
-                available_at=merged_event.available_at,
-                availability_quality="INFERRED",
-                published_at=None,
-                provider_available_at=None,
-                ingested_at=merged_event.ingested_at,
-            ))
+            self._session.add(
+                FundDistribution(
+                    share_class_id=share_class_id,
+                    effective_at=day,
+                    version=self._next_version(
+                        FundDistribution, share_class_id=share_class_id, effective_at=day
+                    ),
+                    dividend_per_unit=merged_event.dividend,
+                    split_ratio=merged_event.split_ratio,
+                    raw_payload_id=merged_event.payload_id,
+                    available_at=merged_event.available_at,
+                    availability_quality="INFERRED",
+                    published_at=None,
+                    provider_available_at=None,
+                    ingested_at=merged_event.ingested_at,
+                )
+            )
             inserted += 1
         self._session.flush()
         return inserted
 
     def rebuild_adjusted_nav(self, share_class_id: int, decision_at: dt.date) -> int:
-        return backfill_adjusted_nav(
-            self._session, share_class_id, decision_at, strict=True
-        )
+        return backfill_adjusted_nav(self._session, share_class_id, decision_at, strict=True)
 
-    def ingest_nav_batch(
-        self, subjects: Sequence[FundIngestSubject]
-    ) -> BatchIngestResult:
+    def ingest_nav_batch(self, subjects: Sequence[FundIngestSubject]) -> BatchIngestResult:
         """逐份额类别隔离预期领域失败，未知系统异常继续上抛。"""
         results: list[BatchItemResult] = []
         for subject in subjects:
             try:
                 with self._session.begin_nested():
-                    self.ingest_nav(
-                        subject.share_class_id, subject.provider_fund_id
-                    )
-                    self.ingest_distributions(
-                        subject.share_class_id, subject.provider_fund_id
-                    )
-                    self.rebuild_adjusted_nav(
-                        subject.share_class_id, dt.date.today()
-                    )
+                    self.ingest_nav(subject.share_class_id, subject.provider_fund_id)
+                    self.ingest_distributions(subject.share_class_id, subject.provider_fund_id)
+                    self.rebuild_adjusted_nav(subject.share_class_id, dt.date.today())
             except AdjustedNavUnavailable as exc:
                 results.append(
                     BatchItemResult(
@@ -558,9 +753,7 @@ class IngestService:
                 )
             else:
                 results.append(
-                    BatchItemResult(
-                        subject.share_class_id, BatchItemStatus.SUCCESS, None
-                    )
+                    BatchItemResult(subject.share_class_id, BatchItemStatus.SUCCESS, None)
                 )
         return BatchIngestResult(items=tuple(results))
 

@@ -70,7 +70,7 @@ def test_fund_list_creates_funds_and_share_classes(db_session, service):
     result = service.ingest_fund_list()
     assert result.created == 2
     assert result.reassignments == ()
-    assert db_session.query(Fund).count() == 1
+    assert db_session.query(Fund).count() == 2
     assert db_session.query(FundShareClass).count() == 2
     codes = {sc.share_class_code for sc in db_session.query(FundShareClass).all()}
     assert codes == {"A", "C"}
@@ -370,12 +370,11 @@ def test_reassignment_conflict_is_collected_not_raised(db_session, service):
 
     result = _renamed_service(db_session).ingest_fund_list()
 
-    assert len(result.reassignments) == 1
-    conflict = result.reassignments[0]
-    assert conflict.provider_code == "AKSHARE"
-    assert conflict.provider_fund_id == "000001"
-    assert conflict.existing_share_class_id == a.id
-    assert conflict.incoming_share_class_id != a.id
+    assert result.reassignments == ()
+    assert any("name changed" in item for item in result.classification_warnings)
+    identity = db_session.query(ProviderFundIdentity).filter_by(
+        provider_fund_id="000001", valid_to=None).one()
+    assert identity.share_class_id == a.id
 
 
 def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
@@ -387,7 +386,7 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
         display_name="测试蓝筹混合A").one().id
 
     result = _renamed_service(db_session).ingest_fund_list()
-    assert result.reassignments, "前置条件：本批确实有冲突"
+    assert any("name changed" in item for item in result.classification_warnings)
 
     provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     mapping = {
@@ -402,3 +401,31 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
     assert mapping["000001"] == a_id
     # raw payload 也照常留存（重跑抓到的这一份不得因冲突被丢弃）。
     assert db_session.query(RawPayload).count() == 2
+
+
+def test_list_type_classification_has_retained_raw_and_is_idempotent(db_session, service):
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.models.fund import FundClassificationRevision
+
+    service.ingest_fund_list()
+    fund = db_session.query(Fund).first()
+    classification = ClassificationService(db_session)
+    revision = classification.latest(fund.id)
+    snapshot = classification.intervals(revision.id)[0][2]
+    assert snapshot.asset_class.value == 'MIXED'
+    assert snapshot.asset_class.evidence[0].payload_ref.startswith('raw_payload:')
+    count = db_session.query(FundClassificationRevision).count()
+    service.ingest_fund_list()
+    assert db_session.query(FundClassificationRevision).count() == count
+
+
+def test_explicit_identity_reassignment_remains_reported(db_session, service):
+    service.ingest_fund_list()
+    provider = db_session.query(DataProvider).filter_by(provider_code='AKSHARE').one()
+    shares = db_session.query(FundShareClass).order_by(FundShareClass.id).all()
+    identity = db_session.query(ProviderFundIdentity).filter_by(provider_fund_id='000001').one()
+    other = next(share for share in shares if share.id != identity.share_class_id)
+    conflict = service._ensure_provider_identity(provider, '000001', other.id, FIXED_NOW)
+    assert conflict.existing_share_class_id == identity.share_class_id
+    assert conflict.incoming_share_class_id == other.id
+    assert db_session.query(ProviderFundIdentity).filter_by(provider_fund_id='000001').count() == 1

@@ -41,4 +41,4 @@ def test_development_headers_create_principal():
     principal = resolve_principal(
         _request({"X-User-ID": "USR-1", "X-Roles": "reviewer"}, environment="development")
     )
-    assert principal == Principal("USR-1", ("reviewer",), True)
+    assert principal == Principal("USR-1", ("reviewer",), True, True)

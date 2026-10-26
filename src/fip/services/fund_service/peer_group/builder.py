@@ -42,8 +42,8 @@ def excluded_candidates(
             exclusions.append(
                 PeerGroupExclusion(
                     candidate.share_class_id,
-                    "UNSUPPORTED_CLASSIFICATION",
-                    "UNSUPPORTED_CLASSIFICATION",
+                    candidate.status or "UNSUPPORTED_CLASSIFICATION",
+                    candidate.reason or "UNSUPPORTED_CLASSIFICATION",
                 )
             )
     return tuple(sorted(exclusions, key=lambda item: item.share_class_id))

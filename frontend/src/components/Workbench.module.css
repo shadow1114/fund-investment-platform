@@ -1,0 +1,111 @@
+.tableSection {
+  min-width: 0;
+}
+
+.tableToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.columnButton {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: #20262d;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  border: 1px solid #dce2e7;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dataTable {
+  min-width: 720px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dataTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #20262d;
+  background: #f4f6f8;
+  white-space: nowrap;
+}
+
+.dataTable td {
+  vertical-align: top;
+}
+
+.caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.chartContainer {
+  width: 100%;
+  min-width: 0;
+  min-height: 320px;
+  height: 360px;
+}
+
+.panels {
+  display: flex;
+  min-width: 0;
+  min-height: 420px;
+  gap: 0;
+}
+
+.panel {
+  min-width: 280px;
+  overflow: auto;
+}
+
+.panelDivider {
+  position: relative;
+  width: 9px;
+  margin: 0 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panelDivider::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: #dce2e7;
+  content: "";
+}
+
+.panelDivider:focus-visible {
+  outline: 2px solid #087f8c;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1279px) {
+  .panels {
+    display: block;
+    min-height: 0;
+  }
+
+  .panel {
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .panel + .panel {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid #dce2e7;
+  }
+}

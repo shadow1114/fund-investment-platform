@@ -5,6 +5,20 @@ from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
+from fip.services.data_service.classification.models import ClassificationSnapshot
+
+
+class ClassificationPayloadModel(ClassificationSnapshot):
+    revision_id: int
+    version: int
+    valid_from: str
+    valid_to: str | None = None
+    available_at: str
+    classified_at: str
+    availability_quality: str
+    source_summary: list[str]
+    trading_eligibility: dict[str, Any]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -89,6 +103,45 @@ class OperationFailure(StrictModel):
     message: str
 
 
+class FundIngestionSubmissionModel(StrictModel):
+    operation_id: str
+    fund_id: str
+    fund_ids: list[str]
+    dataset: Literal["BASIC_INFO", "NAV"]
+    status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
+
+
+class FundIngestionTaskModel(StrictModel):
+    operation_id: str
+    fund_id: str
+    fund_ids: list[str]
+    dataset: Literal["BASIC_INFO", "NAV"]
+    source: str
+    actor: str
+    status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
+    task_status: Literal["SUCCESS", "PARTIAL_SUCCESS", "FAILED"] | None = None
+    requested_count: int
+    success_count: int | None = None
+    failure_count: int | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    items: list[dict[str, Any]]
+    failure: str | None = None
+
+
+class FundBasicInfoHistoryModel(StrictModel):
+    fund_id: str
+    version: int
+    raw_fields: dict[str, Any]
+    normalized_fields: dict[str, Any]
+    source: str
+    adapter_version: str
+    library_version: str
+    available_at: datetime
+    availability_quality: Literal["INFERRED"]
+
+
 class MetricTriple(StrictModel):
     value: float | None
     status: Literal["VALID", "UNAVAILABLE", "EXCLUDED", "UNKNOWN"]
@@ -110,6 +163,7 @@ class ReadPayloadModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    classification: ClassificationPayloadModel | None = None
     fund_id: str | None = None
     universe_id: str | None = None
     portfolio_id: str | None = None
@@ -237,6 +291,7 @@ class BacktestPayloadModel(ReadPayloadModel):
 # legacy common projection above until every route has been migrated to the
 # operation registry; none of the domain models accepts arbitrary nested keys.
 class FundSummaryModel(StrictModel):
+    classification: ClassificationPayloadModel | None = None
     fund_id: str
     fund_name: str
     share_class: str
@@ -556,8 +611,16 @@ class BacktestStatusProgressModel(StrictModel):
 class BacktestStatusModel(StrictModel):
     backtest_id: str
     status: Literal[
-        "CREATED", "VALIDATING_CONFIGURATION", "RUNNING", "VALIDATING_RESULTS", "COMPLETED",
-        "FAILED", "INVALID", "CANCELLED", "ABORTED", "UNKNOWN",
+        "CREATED",
+        "VALIDATING_CONFIGURATION",
+        "RUNNING",
+        "VALIDATING_RESULTS",
+        "COMPLETED",
+        "FAILED",
+        "INVALID",
+        "CANCELLED",
+        "ABORTED",
+        "UNKNOWN",
     ]
     validation_status: Literal["VALID", "WARNING", "INVALID", "UNKNOWN"] | None
     progress: BacktestStatusProgressModel

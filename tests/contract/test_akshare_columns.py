@@ -13,6 +13,7 @@ pytestmark = pytest.mark.contract
 
 PROBE_PARAMS: dict[str, dict[str, str]] = {
     "fund_list": {},
+    "fund_overview": {"symbol": "000001"},
     "fund_nav": {"symbol": "000001"},
     "fund_cumulative_nav": {"symbol": "000001"},
     "fund_distribution": {"symbol": "161725"},

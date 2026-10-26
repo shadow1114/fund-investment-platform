@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from fip.platform.jobs.executor import JobExecutor
+from fip.platform.jobs.fund_ingestion import handle_fund_ingestion
 from fip.settings import settings
 
 
@@ -16,7 +17,13 @@ def run_once(*, worker_id: str | None = None) -> bool:
     engine = create_engine(settings.database_url, future=True)
     try:
         with Session(engine, future=True) as session:
-            executor = JobExecutor(lease_seconds=settings.worker_lease_seconds)
+            executor = JobExecutor(
+                {
+                    "fund_basic_info_ingest": handle_fund_ingestion,
+                    "fund_nav_ingest": handle_fund_ingestion,
+                },
+                lease_seconds=settings.worker_lease_seconds,
+            )
             outcome = executor.execute_one(
                 session,
                 worker_id or f"worker-{uuid.uuid4().hex[:8]}",

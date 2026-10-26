@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Fund Investment Platform (基金投资平台) 本地一键启动脚本
-# =============================================================================
-set -e
+# Local development launcher for the Fund Investment Platform.
+set -Eeuo pipefail
 
-# 获取当前脚本所在根目录
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-# 输出带色彩提示
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
 CYAN="\033[0;36m"
@@ -16,19 +12,33 @@ RED="\033[0;31m"
 BOLD="\033[1m"
 RESET="\033[0m"
 
-echo -e "${CYAN}${BOLD}"
-echo "=================================================================="
-echo "    🚀 Fund Investment Platform (基金投资平台) 本地启动程序     "
-echo "=================================================================="
-echo -e "${RESET}"
-
 START_BACKEND=true
 START_FRONTEND=true
 START_WORKER=false
+PYTHON_LOCALE="${FIP_PYTHON_LOCALE:-${LANG:-zh_CN.UTF-8}}"
+if [[ "$PYTHON_LOCALE" == "C" || "$PYTHON_LOCALE" == "POSIX" || "$PYTHON_LOCALE" == *ASCII* ]]; then
+  PYTHON_LOCALE="zh_CN.UTF-8"
+fi
 
-# 解析入参选项
+usage() {
+  cat <<'EOF'
+用法: ./start.sh [选项]
+
+选项:
+  (无参数)         启动后端 API 和前端 Vite
+  --with-worker    同时启动 PostgreSQL 作业 Worker（需先应用数据库迁移）
+  --api-only       仅启动后端 API 服务
+  --backend-only   --api-only 的别名
+  --frontend-only  仅启动前端 Web 界面
+  --help, -h       查看帮助说明
+
+默认不会启动 Worker。基金数据抓取、优化和回测任务需要 PostgreSQL、最新迁移及运行中的 Worker。
+脚本不会自动执行数据库迁移，也不会终止已占用目标端口的进程。
+EOF
+}
+
 for arg in "$@"; do
-  case $arg in
+  case "$arg" in
     --backend-only|--api-only)
       START_FRONTEND=false
       ;;
@@ -39,145 +49,218 @@ for arg in "$@"; do
       START_WORKER=true
       ;;
     --help|-h)
-      echo "用法: ./start.sh [选项]"
-      echo ""
-      echo "选项:"
-      echo "  (无参数)         默认同时启动后端 API (端口 8000) 与前端应用 (端口 5173)"
-      echo "  --with-worker    同时启动后台异步作业 Worker 进程"
-      echo "  --api-only       仅启动后端 API 服务"
-      echo "  --frontend-only  仅启动前端 Web 界面"
-      echo "  --help, -h       查看帮助说明"
+      usage
       exit 0
+      ;;
+    *)
+      printf '%b未知参数: %s%b\n\n' "$RED" "$arg" "$RESET" >&2
+      usage >&2
+      exit 2
       ;;
   esac
 done
 
-# 1. 环境依赖检查
-echo -e "${YELLOW}🔍 正在检查运行环境依赖...${RESET}"
-
-if [ "$START_BACKEND" = true ] || [ "$START_WORKER" = true ]; then
-  if [ ! -f ".venv/bin/python" ]; then
-    echo -e "${RED}❌ 错误: 未检测到 Python 虚拟环境 (.venv/bin/python)。${RESET}"
-    echo "请先在根目录运行初始化命令安装环境:"
-    echo "  python3 -m venv .venv"
-    echo "  .venv/bin/pip install -r requirements.lock"
-    exit 1
-  fi
-  echo -e "${GREEN}  ✓ Python 虚拟环境正常 (.venv)${RESET}"
+if [[ "$START_BACKEND" == false && "$START_FRONTEND" == false ]]; then
+  printf '%b错误: 至少选择一个服务启动。%b\n' "$RED" "$RESET" >&2
+  exit 2
+fi
+if [[ "$START_WORKER" == true && "$START_BACKEND" == false ]]; then
+  printf '%b错误: --with-worker 需要同时启动 API；不能与 --frontend-only 一起使用。%b\n' "$RED" "$RESET" >&2
+  exit 2
 fi
 
-if [ "$START_FRONTEND" = true ]; then
-  if ! command -v node >/dev/null 2>&1; then
-    echo -e "${RED}❌ 错误: 系统中未检测到 Node.js，请先安装 Node.js (推荐 v18+)。${RESET}"
-    exit 1
-  fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo -e "${RED}❌ 错误: 系统中未检测到 npm 命令。${RESET}"
-    exit 1
-  fi
-  echo -e "${GREEN}  ✓ Node.js & npm 环境正常 ($(node -v))${RESET}"
+printf '%b%b\n' "$CYAN" "$BOLD"
+printf '%s\n' '=================================================================='
+printf '%s\n' '    🚀 Fund Investment Platform (基金投资平台) 本地启动程序'
+printf '%s\n' '=================================================================='
+printf '%b\n' "$RESET"
+printf '%b🔍 正在检查运行环境依赖...%b\n' "$YELLOW" "$RESET"
 
-  if [ ! -d "frontend/node_modules" ]; then
-    echo -e "${YELLOW}  ⚡️ 检测到前端未安装依赖，正在自动执行 npm install...${RESET}"
-    (cd frontend && npm install)
+if [[ "$START_BACKEND" == true ]]; then
+  if [[ ! -x ".venv/bin/python" ]]; then
+    printf '%b错误: 未检测到 Python 虚拟环境 (.venv/bin/python)。%b\n' "$RED" "$RESET" >&2
+    printf '%s\n' '请先运行:' '  python3 -m venv .venv' '  .venv/bin/pip install -r requirements.lock' >&2
+    exit 1
   fi
-  echo -e "${GREEN}  ✓ 前端依赖包就绪 (frontend/node_modules)${RESET}"
+  if ! LC_ALL="$PYTHON_LOCALE" .venv/bin/python -c 'import uvicorn' >/dev/null 2>&1; then
+    printf '%b错误: 当前 .venv 未安装 uvicorn，请按项目锁定依赖重新安装。%b\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  printf '%b  ✓ Python 环境正常 (.venv)%b\n' "$GREEN" "$RESET"
 fi
 
-# 2. 检查端口占用
+if [[ "$START_FRONTEND" == true ]]; then
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    printf '%b错误: 启动前端需要 Node.js 和 npm。%b\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  if [[ ! -f frontend/package-lock.json ]]; then
+    printf '%b错误: 缺少 frontend/package-lock.json，无法按锁文件安装依赖。%b\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  printf '%b  ✓ Node.js %s / npm %s%b\n' "$GREEN" "$(node -v)" "$(npm -v)" "$RESET"
+
+  if [[ ! -x frontend/node_modules/.bin/vite ]]; then
+    printf '%b  ⚡ 正在按 package-lock.json 安装前端依赖 (npm ci)...%b\n' "$YELLOW" "$RESET"
+    (cd frontend && npm ci)
+  fi
+fi
+
 check_port() {
-  local port=$1
-  local name=$2
-  if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo -e "${YELLOW}⚠️ 警告: 端口 $port ($name) 已被占用。如需重启，请先释放端口。${RESET}"
+  local port="$1"
+  local service="$2"
+  local listener=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    listener="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "$listener" ]]; then
+      printf '%b错误: 端口 %s (%s) 已被监听，PID: %s。为避免连接到其他项目，请先确认并手动处理该进程。%b\n' \
+        "$RED" "$port" "$service" "${listener//$'\n'/, }" "$RESET" >&2
+      return 1
+    fi
+  fi
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") >/dev/null 2>&1; then
+    printf '%b错误: 端口 %s (%s) 已有服务响应；请确认服务身份后再启动。%b\n' \
+      "$RED" "$port" "$service" "$RESET" >&2
+    return 1
   fi
 }
 
-if [ "$START_BACKEND" = true ]; then
+if [[ "$START_BACKEND" == true ]]; then
   check_port 8000 "后端 API"
 fi
-if [ "$START_FRONTEND" = true ]; then
+if [[ "$START_FRONTEND" == true ]]; then
   check_port 5173 "前端 Vite"
 fi
 
-# 清理进程 Hook
 BACKEND_PID=""
 FRONTEND_PID=""
 WORKER_PID=""
 
-cleanup() {
-  echo ""
-  echo -e "${YELLOW}🛑 正在安全停止所有服务进程...${RESET}"
-  if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
-    kill "$BACKEND_PID" 2>/dev/null || true
+stop_process() {
+  local pid="$1"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
   fi
-  if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
-    kill "$FRONTEND_PID" 2>/dev/null || true
-  fi
-  if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    kill "$WORKER_PID" 2>/dev/null || true
-  fi
-  wait 2>/dev/null || true
-  echo -e "${GREEN}✅ 所有服务已安全退出。${RESET}"
-  exit 0
 }
-trap cleanup SIGINT SIGTERM EXIT
 
-# 3. 启动后端 API 服务
-if [ "$START_BACKEND" = true ]; then
-  echo -e "\n${CYAN}▶️ 正在启动后端 FastAPI 服务 (http://127.0.0.1:8000)...${RESET}"
-  PYTHONPATH=src FIP_ENABLE_M2_REBALANCE=true .venv/bin/uvicorn fip.api.app:app \
-    --host 127.0.0.1 \
-    --port 8000 \
-    --reload &
-  BACKEND_PID=$!
+cleanup() {
+  local exit_status=$?
+  trap - EXIT INT TERM
+  printf '\n%b🛑 正在停止本脚本启动的服务...%b\n' "$YELLOW" "$RESET"
+  stop_process "$WORKER_PID"
+  stop_process "$FRONTEND_PID"
+  stop_process "$BACKEND_PID"
+  if [[ "$exit_status" -eq 0 ]]; then
+    printf '%b✅ 服务已停止。%b\n' "$GREEN" "$RESET"
+  else
+    printf '%b服务以状态码 %s 退出。%b\n' "$YELLOW" "$exit_status" "$RESET"
+  fi
+  exit "$exit_status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-  # 等待后端服务响应探针
-  echo -n "  等待后端就绪"
-  for _ in {1..20}; do
-    if curl -s http://127.0.0.1:8000/health/live | grep -q "status"; then
-      echo -e " ${GREEN}✓ 就绪!${RESET}"
-      break
+wait_for_http() {
+  local url="$1"
+  local expected="$2"
+  local description="$3"
+  local pid="$4"
+
+  printf '  等待%s' "$description"
+  for _ in {1..40}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      printf '\n%b错误: %s 进程已退出，请检查上方日志。%b\n' "$RED" "$description" "$RESET" >&2
+      return 1
     fi
-    echo -n "."
+    if curl --fail --silent --max-time 1 "$url" 2>/dev/null | grep -q "$expected"; then
+      printf ' %b✓ 就绪%b\n' "$GREEN" "$RESET"
+      return 0
+    fi
+    printf '.'
     sleep 0.5
   done
+  printf '\n%b错误: %s 等待超时。%b\n' "$RED" "$description" "$RESET" >&2
+  return 1
+}
+
+if [[ "$START_BACKEND" == true ]]; then
+  printf '\n%b▶ 正在启动后端 API (http://127.0.0.1:8000)...%b\n' "$CYAN" "$RESET"
+  LC_ALL="$PYTHON_LOCALE" PYTHONPATH=src FIP_ENABLE_M2_REBALANCE="${FIP_ENABLE_M2_REBALANCE:-true}" \
+    .venv/bin/python -m uvicorn fip.api.app:app \
+    --host 127.0.0.1 --port 8000 --reload &
+  BACKEND_PID=$!
+  wait_for_http \
+    "http://127.0.0.1:8000/health/live" \
+    '"status":"ok"' \
+    '后端 API' "$BACKEND_PID"
 fi
 
-# 4. 启动后台 Worker 进程 (若启用)
-if [ "$START_WORKER" = true ]; then
-  echo -e "\n${CYAN}▶️ 正在启动后台异步计算作业 Worker 进程...${RESET}"
-  PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker &
+if [[ "$START_WORKER" == true ]]; then
+  printf '\n%b▶ 检查数据库与迁移状态...%b\n' "$CYAN" "$RESET"
+  if ! curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then
+    printf '%b错误: 数据库未就绪或迁移未应用。请先启动 PostgreSQL 并运行 make migrate；本脚本不会自动迁移。%b\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  printf '%b▶ 正在启动后台作业 Worker...%b\n' "$CYAN" "$RESET"
+  LC_ALL="$PYTHON_LOCALE" PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker &
   WORKER_PID=$!
-  echo -e "${GREEN}  ✓ Worker 进程已启动 (PID: $WORKER_PID)${RESET}"
+  sleep 1
+  if ! kill -0 "$WORKER_PID" 2>/dev/null; then
+    printf '%b错误: Worker 未能保持运行，请检查数据库连接及上方日志。%b\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  printf '%b  ✓ Worker 已启动 (PID: %s)%b\n' "$GREEN" "$WORKER_PID" "$RESET"
 fi
 
-# 5. 启动前端 Vite 服务
-if [ "$START_FRONTEND" = true ]; then
-  echo -e "\n${CYAN}▶️ 正在启动前端 React + Vite 服务 (http://localhost:5173)...${RESET}"
-  (cd frontend && npm run dev) &
+if [[ "$START_FRONTEND" == true ]]; then
+  printf '\n%b▶ 正在启动前端 Vite (http://127.0.0.1:5173)...%b\n' "$CYAN" "$RESET"
+  frontend/node_modules/.bin/vite --host 127.0.0.1 --port 5173 &
   FRONTEND_PID=$!
-  sleep 1.5
+  wait_for_http \
+    "http://127.0.0.1:5173/funds" \
+    '<div id="root">' \
+    '前端 Vite' "$FRONTEND_PID"
 fi
 
-# 6. 展示成功看板
-echo ""
-echo -e "${GREEN}${BOLD}==================================================================${RESET}"
-echo -e "${GREEN}${BOLD}🎉 Fund Investment Platform 全部服务已启动完成！${RESET}"
-echo -e "${GREEN}${BOLD}==================================================================${RESET}"
-echo -e "  💻 ${BOLD}前端交互界面:${RESET}     ${CYAN}http://localhost:5173${RESET}"
-echo -e "  🔌 ${BOLD}后端 API 服务:${RESET}    ${CYAN}http://127.0.0.1:8000${RESET}"
-echo -e "  📖 ${BOLD}OpenAPI 文档:${RESET}     ${CYAN}http://127.0.0.1:8000/docs${RESET}"
-echo -e "  📊 ${BOLD}Prometheus 指标:${RESET}  ${CYAN}http://127.0.0.1:8000/metrics${RESET}"
-echo -e "  🩺 ${BOLD}健康状态检查:${RESET}     ${CYAN}http://127.0.0.1:8000/health/live${RESET}"
-echo -e "------------------------------------------------------------------"
-echo -e "  💡 ${BOLD}核心功能入口直达:${RESET}"
-echo -e "     • 基金筛选与研究看板:  ${CYAN}http://localhost:5173/funds${RESET}"
-echo -e "     • 候选池全时快照:      ${CYAN}http://localhost:5173/universes${RESET}"
-echo -e "     • 组合决策与实盘调仓:  ${CYAN}http://localhost:5173/portfolios/P001${RESET}"
-echo -e "     • 组合全闭环策略回测:  ${CYAN}http://localhost:5173/backtests${RESET}"
-echo -e "=================================================================="
-echo -e "${YELLOW}服务正在运行中，终端将实时展示访问日志。随时按下 [Ctrl + C] 即可安全停止全部服务。${RESET}\n"
+printf '\n%b%b==================================================================%b\n' "$GREEN" "$BOLD" "$RESET"
+printf '%b%b🎉 已启动所选服务%b\n' "$GREEN" "$BOLD" "$RESET"
+printf '%b%b==================================================================%b\n' "$GREEN" "$BOLD" "$RESET"
+if [[ "$START_FRONTEND" == true ]]; then
+  printf '  前端界面:   %bhttp://127.0.0.1:5173/funds%b\n' "$CYAN" "$RESET"
+fi
+if [[ "$START_BACKEND" == true ]]; then
+  printf '  后端 API:   %bhttp://127.0.0.1:8000%b\n' "$CYAN" "$RESET"
+  printf '  API 文档:   %bhttp://127.0.0.1:8000/docs%b\n' "$CYAN" "$RESET"
+  printf '  健康检查:   %bhttp://127.0.0.1:8000/health/live%b\n' "$CYAN" "$RESET"
+fi
+if [[ "$START_WORKER" == true ]]; then
+  printf '  后台 Worker: %b运行中%b\n' "$CYAN" "$RESET"
+else
+  printf '  后台 Worker: 未启动（抓取/优化/回测任务需要 ./start.sh --with-worker）\n'
+fi
+printf '\n%b按 Ctrl+C 停止本脚本启动的服务。%b\n' "$YELLOW" "$RESET"
 
-# 挂起脚本持续监听退出信号并捕获后台日志
-wait
+monitor_process() {
+  local pid="$1"
+  local service="$2"
+  local status=0
+  if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+    if wait "$pid"; then
+      status=1
+    else
+      status=$?
+    fi
+    printf '%b错误: %s 进程已退出 (状态码 %s)。%b\n' "$RED" "$service" "$status" "$RESET" >&2
+    exit "$status"
+  fi
+}
+
+while true; do
+  monitor_process "$BACKEND_PID" "后端 API"
+  monitor_process "$WORKER_PID" "后台 Worker"
+  monitor_process "$FRONTEND_PID" "前端 Vite"
+  sleep 1
+done

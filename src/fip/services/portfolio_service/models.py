@@ -4,7 +4,18 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,11 +65,12 @@ class BacktestRecord(Base):
 
 class LivePortfolioRecord(Base):
     __tablename__ = "live_portfolio"
-    __table_args__ = {"schema": "portfolio"}
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    portfolio_id: Mapped[str] = mapped_column(
-        ForeignKey("portfolio.portfolio.id"), nullable=False
+    __table_args__ = (
+        Index("ix_live_portfolio_portfolio_id", "portfolio_id"),
+        {"schema": "portfolio"},
     )
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.portfolio.id"), nullable=False)
     as_of_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     cash_balance: Mapped[Decimal] = mapped_column(
         Numeric(20, 4), nullable=False, default=Decimal(0)
@@ -81,19 +93,18 @@ class LivePortfolioRecord(Base):
 
 class PortfolioPositionRecord(Base):
     __tablename__ = "portfolio_position"
-    __table_args__ = {"schema": "portfolio"}
+    __table_args__ = (
+        Index("ix_portfolio_position_live_state", "live_portfolio_id", "state", "fund_id"),
+        {"schema": "portfolio"},
+    )
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     live_portfolio_id: Mapped[str] = mapped_column(
         ForeignKey("portfolio.live_portfolio.id"), nullable=False
     )
     fund_id: Mapped[str] = mapped_column(String(32), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)  # ACTUAL, TARGET, PENDING
-    shares: Mapped[Decimal] = mapped_column(
-        Numeric(20, 4), nullable=False, default=Decimal(0)
-    )
-    cost_basis: Mapped[Decimal] = mapped_column(
-        Numeric(20, 4), nullable=False, default=Decimal(0)
-    )
+    shares: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, default=Decimal(0))
+    cost_basis: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, default=Decimal(0))
     market_price: Mapped[Decimal] = mapped_column(
         Numeric(20, 4), nullable=False, default=Decimal(0)
     )
@@ -107,7 +118,10 @@ class PortfolioPositionRecord(Base):
 
 class ExecutionReportRecord(Base):
     __tablename__ = "execution_report"
-    __table_args__ = {"schema": "portfolio"}
+    __table_args__ = (
+        Index("ix_execution_report_live_status", "live_portfolio_id", "status"),
+        {"schema": "portfolio"},
+    )
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     live_portfolio_id: Mapped[str] = mapped_column(
         ForeignKey("portfolio.live_portfolio.id"), nullable=False
@@ -122,9 +136,7 @@ class ExecutionReportRecord(Base):
     filled_price: Mapped[Decimal] = mapped_column(
         Numeric(20, 4), nullable=False, default=Decimal(0)
     )
-    fee: Mapped[Decimal] = mapped_column(
-        Numeric(20, 4), nullable=False, default=Decimal(0)
-    )
+    fee: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, default=Decimal(0))
     # SUBMITTED, PARTIALLY_FILLED, FILLED, REJECTED, EXPIRED
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reported_at: Mapped[dt.datetime] = mapped_column(
@@ -134,7 +146,10 @@ class ExecutionReportRecord(Base):
 
 class RebalanceEventRecord(Base):
     __tablename__ = "rebalance_event"
-    __table_args__ = {"schema": "portfolio"}
+    __table_args__ = (
+        Index("ix_rebalance_event_live_date", "live_portfolio_id", "decision_at"),
+        {"schema": "portfolio"},
+    )
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     live_portfolio_id: Mapped[str] = mapped_column(
         ForeignKey("portfolio.live_portfolio.id"), nullable=False
@@ -157,7 +172,10 @@ class RebalanceEventRecord(Base):
 
 class RebalanceTradeRecord(Base):
     __tablename__ = "rebalance_trade"
-    __table_args__ = {"schema": "portfolio"}
+    __table_args__ = (
+        Index("ix_rebalance_trade_rebalance_id", "rebalance_id"),
+        {"schema": "portfolio"},
+    )
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     rebalance_id: Mapped[str] = mapped_column(
         ForeignKey("portfolio.rebalance_event.id"), nullable=False

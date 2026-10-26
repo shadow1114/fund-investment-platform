@@ -20,7 +20,7 @@ from fip.api.errors import ApiError
 from fip.api.health import router as health_router
 from fip.api.limits import LocalRateLimiter
 from fip.api.observability import MetricsRegistry, RequestEventSink, event_for
-from fip.api.routers import commands, operations, reads, rebalance
+from fip.api.routers import classifications, commands, fund_ingestions, operations, reads, rebalance
 from fip.api.schemas import (
     BacktestBiasCheckPayloadModel,
     BacktestCreatedPayloadModel,
@@ -32,6 +32,9 @@ from fip.api.schemas import (
     DecisionPayloadModel,
     DecisionReviewOutcomeModel,
     EvaluationPayloadModel,
+    FundBasicInfoHistoryModel,
+    FundIngestionSubmissionModel,
+    FundIngestionTaskModel,
     FundListPayloadModel,
     FundPayloadModel,
     NavSeriesPayloadModel,
@@ -174,6 +177,8 @@ def create_app(
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     app.include_router(reads.router, prefix="/api/v1")
+    app.include_router(classifications.router, prefix="/api/v1")
+    app.include_router(fund_ingestions.router, prefix="/api/v1")
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(operations.router, prefix="/api/v1")
     if m2_enabled:
@@ -185,6 +190,11 @@ def create_app(
     if strict_contracts:
         models: dict[str, object] = {
             "getSession": SessionPayloadModel,
+            "submitFundIngestion": FundIngestionSubmissionModel,
+            "submitFundIngestionBatch": FundIngestionSubmissionModel,
+            "listFundIngestions": list[FundIngestionTaskModel],
+            "getFundIngestion": FundIngestionTaskModel,
+            "getFundBasicInfoHistory": list[FundBasicInfoHistoryModel],
             "listFunds": list[FundListPayloadModel],
             "getFund": FundPayloadModel,
             "getFundNavSeries": NavSeriesPayloadModel,

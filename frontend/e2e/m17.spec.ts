@@ -1,3 +1,7 @@
+import {
+  classificationCatalog,
+  classificationHistoryEnvelope,
+} from "../src/test/classificationFixtures";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -23,6 +27,8 @@ import {
 } from "../src/test/contractFixtures";
 
 const apiFixtures: Record<string, unknown> = {
+  "/api/v1/fund-classifications/catalog": classificationCatalog,
+  "/api/v1/funds/000001/classification-history": classificationHistoryEnvelope,
   "/api/v1/funds": fundListEnvelope,
   "/api/v1/funds/000001": fundDetailEnvelope,
   "/api/v1/funds/000001/nav-series": fundNavEnvelope,
@@ -99,9 +105,19 @@ for (const [path, heading] of [
         page.getByRole("link", { name: "Alpha 稳健基金" }),
       ).toBeVisible();
       await expect(page.getByText("点时数据：是")).toBeVisible();
+      await expect(
+        page.getByRole("listbox", { name: "资产类别", exact: true }),
+      ).toContainText("EQUITY");
     } else if (path === "/funds/000001") {
       await expect(page.getByRole("tab", { name: "净值" })).toBeVisible();
       await expect(page.getByText(/调整规则：\s*adj-v2/)).toBeVisible();
+      await page.getByText("可见分类历史", { exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "修订 12 / v1", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByLabel("资产类别证据")).toContainText(
+        "招募书第3页",
+      );
     } else if (path === "/universes") {
       await expect(
         page.getByRole("link", { name: "查看快照 UNI-001" }),

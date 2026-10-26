@@ -266,9 +266,37 @@ export const sessionEnvelope = {
   data: {
     user_id: "USR-001",
     roles: ["Researcher"],
-    capabilities: { can_review_decisions: false },
+    capabilities: {
+      can_review_decisions: false,
+      can_review_classifications: false,
+      can_manage_data_ingestion: false,
+    },
   },
   meta: { request_id: "REQ-SESSION" },
+  error: null,
+};
+
+export const fundIngestionListEnvelope = {
+  data: [],
+  meta: responseMeta,
+  error: null,
+};
+
+export const fundIngestionSubmissionEnvelope = {
+  data: {
+    operation_id: "ING-001",
+    fund_id: "1001",
+    fund_ids: ["1001"],
+    dataset: "NAV",
+    status: "RUNNING",
+  },
+  meta: responseMeta,
+  error: null,
+};
+
+export const fundBasicInfoHistoryEnvelope = {
+  data: [],
+  meta: responseMeta,
   error: null,
 };
 

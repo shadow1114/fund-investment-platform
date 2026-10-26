@@ -1,5 +1,19 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import {
+  Alert,
+  Button,
+  Group,
+  Stack,
+  Tabs,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useParams } from "react-router-dom";
 
 import {
@@ -32,7 +46,9 @@ import {
 import { queryKeys } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { OperationProgress } from "../components/OperationProgress";
+import { PageHeader } from "../components/PageHeader";
 import { ProvenanceBar } from "../components/ProvenanceBar";
+import { WorkbenchPanels } from "../components/WorkbenchPanels";
 import { DecisionReviewPanel } from "../features/portfolio/DecisionReviewPanel";
 import { LivePortfolioPanel } from "../features/portfolio/LivePortfolioPanel";
 import { OptimizationForm } from "../features/portfolio/OptimizationForm";
@@ -53,10 +69,17 @@ const PortfolioIndex = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const pageSize = Math.max(1, Number(searchParams.get("page_size") || "20"));
+  const sort = searchParams.get("sort") || "portfolio_name";
+  const order = searchParams.get("order") === "desc" ? "desc" : "asc";
   const query = useQuery({
-    queryKey: queryKeys.portfolios({ page, page_size: pageSize }),
+    queryKey: queryKeys.portfolios({ page, page_size: pageSize, sort, order }),
     queryFn: async () => {
-      const response = await listPortfolios({ page, page_size: pageSize });
+      const response = await listPortfolios({
+        page,
+        page_size: pageSize,
+        sort,
+        order,
+      });
       return {
         data: unwrapResponse(response, {
           requiredMeta: ["versions", "is_point_in_time", "pagination"],
@@ -64,58 +87,80 @@ const PortfolioIndex = () => {
         meta: response.data.meta as PortfolioListMeta,
       };
     },
+    placeholderData: keepPreviousData,
   });
+  const changePage = (nextPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(nextPage));
+    next.set("page_size", String(pageSize));
+    next.set("sort", sort);
+    next.set("order", order);
+    setSearchParams(next);
+  };
 
   return (
-    <section>
-      <h1>组合决策</h1>
+    <Stack gap="lg">
+      <PageHeader
+        title="组合决策"
+        breadcrumbs={[{ label: "组合决策" }]}
+        context={
+          <Text size="sm" c="dimmed">
+            当前身份有权访问的组合。
+          </Text>
+        }
+      />
       {query.isPending && <p role="status">正在加载组合…</p>}
-      {query.isError && <ErrorState error={query.error} />}
+      {query.isFetching && query.data && (
+        <Text role="status" size="sm" c="dimmed">
+          正在更新组合列表；保留上一次结果。
+        </Text>
+      )}
+      {query.isError && (
+        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      )}
       {query.data && (
-        <>
+        <Stack gap="md">
           <ProvenanceBar meta={provenanceMeta(query.data.meta)} />
           {query.data.data.length > 0 ? (
             <>
               <PortfolioList portfolios={query.data.data} />
               <nav aria-label="组合列表分页">
-                <button
-                  disabled={query.data.meta.pagination.page <= 1}
-                  onClick={() =>
-                    setSearchParams({
-                      page: String(page - 1),
-                      page_size: String(pageSize),
-                    })
-                  }
-                >
-                  上一页
-                </button>
-                <span>
-                  第 {query.data.meta.pagination.page} /{" "}
-                  {query.data.meta.pagination.total_pages} 页，共{" "}
-                  {query.data.meta.pagination.total_items} 个组合
-                </span>
-                <button
-                  disabled={
-                    query.data.meta.pagination.page >=
-                    query.data.meta.pagination.total_pages
-                  }
-                  onClick={() =>
-                    setSearchParams({
-                      page: String(page + 1),
-                      page_size: String(pageSize),
-                    })
-                  }
-                >
-                  下一页
-                </button>
+                <Group justify="space-between" wrap="wrap">
+                  <Button
+                    variant="default"
+                    disabled={query.data.meta.pagination.page <= 1}
+                    onClick={() =>
+                      changePage(query.data.meta.pagination.page - 1)
+                    }
+                  >
+                    上一页
+                  </Button>
+                  <Text size="sm">
+                    第 {query.data.meta.pagination.page} /{" "}
+                    {query.data.meta.pagination.total_pages} 页，共{" "}
+                    {query.data.meta.pagination.total_items} 个组合
+                  </Text>
+                  <Button
+                    variant="default"
+                    disabled={
+                      query.data.meta.pagination.page >=
+                      query.data.meta.pagination.total_pages
+                    }
+                    onClick={() =>
+                      changePage(query.data.meta.pagination.page + 1)
+                    }
+                  >
+                    下一页
+                  </Button>
+                </Group>
               </nav>
             </>
           ) : (
             <p>当前用户没有可见组合。</p>
           )}
-        </>
+        </Stack>
       )}
-    </section>
+    </Stack>
   );
 };
 
@@ -137,14 +182,31 @@ const PortfolioDetail = ({
   portfolioId: string;
   pollIntervalMs: number;
 }) => {
-  const [operationId, setOperationId] = useState<string>();
-  const [submittedOptimizationId, setSubmittedOptimizationId] =
-    useState<string>();
-  const [decisionInput, setDecisionInput] = useState("");
-  const [decisionId, setDecisionId] = useState<string>();
-  const [activeTab, setActiveTab] = useState<
-    "optimization" | "live" | "rebalance"
-  >("optimization");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const operationId = searchParams.get("operation_id") ?? undefined;
+  const submittedOptimizationId =
+    searchParams.get("optimization_id") ?? undefined;
+  const [decisionInput, setDecisionInput] = useState(
+    searchParams.get("decision_id") ?? "",
+  );
+  const decisionId = searchParams.get("decision_id") ?? undefined;
+  const tabValue = searchParams.get("tab");
+  const activeTab: "optimization" | "decision" | "live" | "rebalance" =
+    tabValue === "decision" || tabValue === "live" || tabValue === "rebalance"
+      ? tabValue
+      : "optimization";
+  const selectTab = (value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (value && value !== "optimization") next.set("tab", value);
+    else next.delete("tab");
+    setSearchParams(next);
+  };
+  const optimizationKey = useRef<string>();
+
+  useEffect(() => {
+    setDecisionInput(searchParams.get("decision_id") ?? "");
+  }, [searchParams]);
 
   const portfolioQuery = useQuery({
     queryKey: queryKeys.portfolio(portfolioId),
@@ -163,17 +225,23 @@ const PortfolioDetail = ({
   });
 
   const submitMutation = useMutation({
-    mutationFn: async (request: OptimizationRequest) =>
-      unwrapResponse(
+    mutationFn: async (request: OptimizationRequest) => {
+      optimizationKey.current ??= newIdempotencyKey();
+      return unwrapResponse(
         await submitOptimization(
           portfolioId,
           request,
-          withIdempotencyKey(newIdempotencyKey()),
+          withIdempotencyKey(optimizationKey.current),
         ),
-      ),
+      );
+    },
     onSuccess: (submission) => {
-      setOperationId(submission.operation_id);
-      setSubmittedOptimizationId(submission.optimization_id);
+      optimizationKey.current = undefined;
+      const next = new URLSearchParams(searchParams);
+      next.set("operation_id", submission.operation_id);
+      next.set("optimization_id", submission.optimization_id);
+      next.delete("tab");
+      setSearchParams(next);
     },
   });
 
@@ -237,6 +305,16 @@ const PortfolioDetail = ({
         error: null,
       };
     },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.decision(decisionId ?? ""),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.portfolio(portfolioId),
+        }),
+      ]);
+    },
   });
 
   if (portfolioQuery.isPending) return <p role="status">正在加载组合…</p>;
@@ -254,179 +332,180 @@ const PortfolioDetail = ({
     sessionQuery.data?.capabilities.can_review_decisions === true;
 
   return (
-    <section>
-      <Link to="/portfolios">返回组合列表</Link>
+    <Stack gap="lg">
+      <PageHeader
+        title={portfolioQuery.data.data.portfolio_name}
+        breadcrumbs={[
+          { label: "组合决策", href: "/portfolios" },
+          { label: portfolioQuery.data.data.portfolio_name },
+        ]}
+        actions={
+          <Button component={Link} to="/portfolios" variant="default">
+            返回组合列表
+          </Button>
+        }
+      />
       <PortfolioOverview portfolio={portfolioQuery.data.data} />
       <ProvenanceBar meta={provenanceMeta(portfolioQuery.data.meta)} />
 
-      <nav
-        aria-label="组合功能导航"
-        style={{
-          display: "flex",
-          gap: "1rem",
-          margin: "1.5rem 0 1rem 0",
-          borderBottom: "2px solid #e2e8f0",
-          paddingBottom: "0.25rem",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setActiveTab("optimization")}
-          style={{
-            padding: "0.5rem 1rem",
-            fontWeight: activeTab === "optimization" ? "bold" : "normal",
-            borderBottom:
-              activeTab === "optimization"
-                ? "3px solid #2563eb"
-                : "transparent",
-            background: "none",
-            borderTop: "none",
-            borderLeft: "none",
-            borderRight: "none",
-            cursor: "pointer",
-            fontSize: "1rem",
-          }}
-        >
-          组合优化与决策
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("live")}
-          style={{
-            padding: "0.5rem 1rem",
-            fontWeight: activeTab === "live" ? "bold" : "normal",
-            borderBottom:
-              activeTab === "live" ? "3px solid #2563eb" : "transparent",
-            background: "none",
-            borderTop: "none",
-            borderLeft: "none",
-            borderRight: "none",
-            cursor: "pointer",
-            fontSize: "1rem",
-          }}
-        >
-          实盘三态持仓（Stage ⑨）
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("rebalance")}
-          style={{
-            padding: "0.5rem 1rem",
-            fontWeight: activeTab === "rebalance" ? "bold" : "normal",
-            borderBottom:
-              activeTab === "rebalance" ? "3px solid #2563eb" : "transparent",
-            background: "none",
-            borderTop: "none",
-            borderLeft: "none",
-            borderRight: "none",
-            cursor: "pointer",
-            fontSize: "1rem",
-          }}
-        >
-          动态调仓与评估（Stage ⑩）
-        </button>
-      </nav>
+      <Tabs value={activeTab} onChange={selectTab} keepMounted={false}>
+        <Tabs.List aria-label="组合功能">
+          <Tabs.Tab value="optimization">组合优化</Tabs.Tab>
+          <Tabs.Tab value="decision">决策复核</Tabs.Tab>
+          <Tabs.Tab value="live">实盘持仓</Tabs.Tab>
+          <Tabs.Tab value="rebalance">再平衡</Tabs.Tab>
+        </Tabs.List>
 
-      {activeTab === "live" && <LivePortfolioPanel portfolioId={portfolioId} />}
-
-      {activeTab === "rebalance" && (
-        <RebalancingPanel portfolioId={portfolioId} />
-      )}
-
-      {activeTab === "optimization" && (
-        <>
-          <OptimizationForm
-            portfolioRuleVersion={
-              portfolioQuery.data.data.portfolio_rule_version
+        <Tabs.Panel value="optimization" pt="md">
+          <WorkbenchPanels
+            layoutKey="portfolio"
+            primaryLabel="优化配置"
+            secondaryLabel="优化结果"
+            primary={
+              <Stack gap="md">
+                <OptimizationForm
+                  portfolioRuleVersion={
+                    portfolioQuery.data.data.portfolio_rule_version
+                  }
+                  pending={submitMutation.isPending}
+                  onSubmit={(request) => submitMutation.mutate(request)}
+                />
+                {submitMutation.error && (
+                  <ErrorState error={submitMutation.error} />
+                )}
+                {operationId && (
+                  <OperationProgress
+                    operationId={operationId}
+                    resultRef={operationQuery.data?.result_ref}
+                    pollIntervalMs={pollIntervalMs}
+                  />
+                )}
+                {operationQuery.error && (
+                  <ErrorState
+                    error={operationQuery.error}
+                    onRetry={() => void operationQuery.refetch()}
+                  />
+                )}
+              </Stack>
             }
-            pending={submitMutation.isPending}
-            onSubmit={(request) => submitMutation.mutate(request)}
+            secondary={
+              <Stack gap="md">
+                {operationQuery.data?.status === "COMPLETED" &&
+                  operationQuery.data.result_ref &&
+                  !resultOptimizationId && (
+                    <Alert color="red" title="结果关联错误">
+                      优化结果引用与当前组合不匹配。
+                    </Alert>
+                  )}
+                {optimizationQuery.isPending && resultOptimizationId && (
+                  <Text role="status">正在读取优化结果…</Text>
+                )}
+                {optimizationQuery.error && (
+                  <ErrorState
+                    error={optimizationQuery.error}
+                    onRetry={() => void optimizationQuery.refetch()}
+                  />
+                )}
+                {optimizationQuery.data && (
+                  <OptimizationResult
+                    optimization={optimizationQuery.data.data}
+                    meta={optimizationQuery.data.meta}
+                  />
+                )}
+                {!resultOptimizationId && (
+                  <Text c="dimmed">提交并完成优化后，结果会显示在此处。</Text>
+                )}
+              </Stack>
+            }
           />
-          {submitMutation.error && <ErrorState error={submitMutation.error} />}
-          {operationId && (
-            <OperationProgress
-              operationId={operationId}
-              resultRef={operationQuery.data?.result_ref}
-              pollIntervalMs={pollIntervalMs}
-            />
-          )}
-          {operationQuery.error && <ErrorState error={operationQuery.error} />}
-          {operationQuery.data?.status === "COMPLETED" &&
-            operationQuery.data.result_ref &&
-            !resultOptimizationId && (
-              <p role="alert">优化结果引用与当前组合不匹配。</p>
-            )}
-          {optimizationQuery.isPending && resultOptimizationId && (
-            <p role="status">正在读取优化结果…</p>
-          )}
-          {optimizationQuery.error && (
-            <ErrorState error={optimizationQuery.error} />
-          )}
-          {optimizationQuery.data && (
-            <OptimizationResult
-              optimization={optimizationQuery.data.data}
-              meta={optimizationQuery.data.meta}
-            />
-          )}
+        </Tabs.Panel>
 
-          <section aria-label="决策查询">
-            <h2>读取决策快照</h2>
-            <label>
-              决策 ID
-              <input
+        <Tabs.Panel value="decision" pt="md">
+          <Stack gap="md">
+            <Alert color="blue" variant="light" title="打开已有决策">
+              当前优化结果契约没有返回关联的 decision_id；请使用已有决策 ID
+              打开真实决策。服务端仍负责资源授权。
+            </Alert>
+            <Group align="flex-end" wrap="wrap" aria-label="决策查询">
+              <TextInput
+                label="决策 ID"
                 value={decisionInput}
-                onChange={(event) => setDecisionInput(event.target.value)}
-              />
-            </label>
-            <button
-              disabled={!decisionInput.trim()}
-              onClick={() => {
-                const nextDecisionId = decisionInput.trim();
-                // Reloading the same ID must not discard a successful POST review
-                // while the GET snapshot is still cached (and may be stale).
-                if (nextDecisionId !== decisionId) reviewMutation.reset();
-                setDecisionId(nextDecisionId);
-              }}
-            >
-              加载决策
-            </button>
-          </section>
-          {sessionQuery.isPending && <p role="status">正在校验复核权限…</p>}
-          {sessionQuery.error && <ErrorState error={sessionQuery.error} />}
-          {sessionQuery.data && !canReview && <p>当前会话无决策复核权限。</p>}
-          {decisionQuery.isPending && decisionId && (
-            <p role="status">正在读取决策…</p>
-          )}
-          {decisionQuery.error && <ErrorState error={decisionQuery.error} />}
-          {decision && (
-            <>
-              {decisionQuery.data?.meta && (
-                <ProvenanceBar meta={provenanceMeta(decisionQuery.data.meta)} />
-              )}
-              <DecisionReviewPanel
-                key={decision.decision_id}
-                decision={decision}
-                reviewResult={reviewResult}
-                reviewAction={
-                  reviewIsCurrent
-                    ? reviewMutation.variables?.request.action
-                    : undefined
-                }
-                canReview={canReview}
-                pending={reviewIsCurrent && reviewMutation.isPending}
-                error={reviewIsCurrent ? reviewMutation.error : null}
-                onReview={(request) =>
-                  reviewMutation.mutate({
-                    reviewedDecisionId: decision.decision_id,
-                    request,
-                  })
+                onChange={(event) =>
+                  setDecisionInput(event.currentTarget.value)
                 }
               />
-            </>
-          )}
-        </>
-      )}
-    </section>
+              <Button
+                disabled={!decisionInput.trim()}
+                onClick={() => {
+                  const nextDecisionId = decisionInput.trim();
+                  if (nextDecisionId !== decisionId) reviewMutation.reset();
+                  const next = new URLSearchParams(searchParams);
+                  next.set("decision_id", nextDecisionId);
+                  setSearchParams(next);
+                }}
+              >
+                加载决策
+              </Button>
+            </Group>
+            {sessionQuery.isPending && (
+              <Text role="status">正在校验复核权限…</Text>
+            )}
+            {sessionQuery.error && (
+              <ErrorState
+                error={sessionQuery.error}
+                onRetry={() => void sessionQuery.refetch()}
+              />
+            )}
+            {sessionQuery.data && !canReview && (
+              <Alert color="yellow">当前会话没有决策复核权限。</Alert>
+            )}
+            {decisionQuery.isPending && decisionId && (
+              <Text role="status">正在读取决策…</Text>
+            )}
+            {decisionQuery.error && (
+              <ErrorState
+                error={decisionQuery.error}
+                onRetry={() => void decisionQuery.refetch()}
+              />
+            )}
+            {decision && (
+              <>
+                {decisionQuery.data?.meta && (
+                  <ProvenanceBar
+                    meta={provenanceMeta(decisionQuery.data.meta)}
+                  />
+                )}
+                <DecisionReviewPanel
+                  key={decision.decision_id}
+                  decision={decision}
+                  reviewResult={reviewResult}
+                  reviewAction={
+                    reviewIsCurrent
+                      ? reviewMutation.variables?.request.action
+                      : undefined
+                  }
+                  canReview={canReview}
+                  pending={reviewIsCurrent && reviewMutation.isPending}
+                  error={reviewIsCurrent ? reviewMutation.error : null}
+                  onReview={(request) =>
+                    reviewMutation.mutate({
+                      reviewedDecisionId: decision.decision_id,
+                      request,
+                    })
+                  }
+                />
+              </>
+            )}
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="live" pt="md">
+          <LivePortfolioPanel portfolioId={portfolioId} />
+        </Tabs.Panel>
+        <Tabs.Panel value="rebalance" pt="md">
+          <RebalancingPanel portfolioId={portfolioId} />
+        </Tabs.Panel>
+      </Tabs>
+    </Stack>
   );
 };
 

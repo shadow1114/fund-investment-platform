@@ -1,3 +1,7 @@
+import {
+  classificationCatalog,
+  emptyClassificationHistory,
+} from "./classificationFixtures";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
@@ -5,6 +9,9 @@ import {
   fundDetailEnvelope,
   fundEvaluationEnvelope,
   fundListEnvelope,
+  fundIngestionListEnvelope,
+  fundIngestionSubmissionEnvelope,
+  fundBasicInfoHistoryEnvelope,
   fundNavEnvelope,
   fundScoreEnvelope,
   operationEnvelope,
@@ -22,6 +29,24 @@ export const resetRequestLog = () => {
 };
 
 export const contractHandlers = [
+  http.get("/api/v1/fund-classifications/catalog", () =>
+    HttpResponse.json(classificationCatalog),
+  ),
+  http.get("/api/v1/funds/:fundId/classification-history", () =>
+    HttpResponse.json(emptyClassificationHistory),
+  ),
+  http.get("/api/v1/funds/:fundId/ingestions", () =>
+    HttpResponse.json(fundIngestionListEnvelope),
+  ),
+  http.post("/api/v1/funds/:fundId/ingestions", () =>
+    HttpResponse.json(fundIngestionSubmissionEnvelope, { status: 202 }),
+  ),
+  http.post("/api/v1/fund-ingestions", () =>
+    HttpResponse.json(fundIngestionSubmissionEnvelope, { status: 202 }),
+  ),
+  http.get("/api/v1/funds/:fundId/basic-info-history", () =>
+    HttpResponse.json(fundBasicInfoHistoryEnvelope),
+  ),
   http.get("/api/v1/session", () => HttpResponse.json(sessionEnvelope)),
   http.get("/api/v1/operations/:operationId", () =>
     HttpResponse.json(operationEnvelope),

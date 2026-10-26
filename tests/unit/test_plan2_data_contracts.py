@@ -33,7 +33,10 @@ def test_classification_has_one_open_interval_per_scheme():
         "fund_id",
         "classification_scheme",
     ]
-    assert str(index.dialect_options["postgresql"]["where"]) == "valid_to IS NULL"
+    assert (
+        str(index.dialect_options["postgresql"]["where"])
+        == "valid_to IS NULL AND revision_id IS NULL"
+    )
 
 
 def test_manager_overlap_constraint_uses_plan2_contract_name():

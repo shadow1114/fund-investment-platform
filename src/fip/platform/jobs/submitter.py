@@ -1,5 +1,6 @@
 import datetime as dt
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -41,6 +42,7 @@ class JobSubmitter:
         decision_id: str | None = None,
         resource_id: str | None = None,
         result_ref: str | None = None,
+        job_payload: dict[str, Any] | None = None,
     ) -> CalculationJob:
         """提交任务。相同幂等键的重复提交返回既有任务，不产生第二条记录。
 
@@ -64,6 +66,7 @@ class JobSubmitter:
             decision_id=decision_id,
             resource_id=resource_id,
             result_ref=result_ref,
+            job_payload=job_payload,
             status=ExecutionStatus.RUNNING.value,
             progress=0,
         )

@@ -1,11 +1,25 @@
 evaluation.fund_score.ck_fund_score_data_completeness
     CHECK (((data_completeness >= (0)::numeric) AND (data_completeness <= (1)::numeric)))
+fund.fund_classification_history.ck_fch_revision_result
+    CHECK (((revision_id IS NULL) OR (classification_result IS NOT NULL)))
 fund.fund_classification_history.ck_fund_classification_history_interval
     CHECK (((valid_to IS NULL) OR (valid_from < valid_to)))
 fund.fund_classification_history.ck_fund_classification_history_quality_source
     CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
 fund.fund_classification_history.ck_fund_classification_history_time_order
     CHECK ((((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= COALESCE(provider_available_at, published_at))))
+fund.fund_classification_review_case.ck_fcrc_status
+    CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'RESOLVED'::character varying, 'SUPERSEDED'::character varying])::text[])))
+fund.fund_classification_revision.ck_fcr_positive_version
+    CHECK ((version > 0))
+fund.fund_classification_revision.ck_fund_classification_revision_quality_source
+    CHECK ((((availability_quality = 'EXACT'::availability_quality_enum) AND (provider_available_at IS NOT NULL)) OR ((availability_quality = 'DERIVED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NOT NULL)) OR ((availability_quality = 'INFERRED'::availability_quality_enum) AND (provider_available_at IS NULL) AND (published_at IS NULL))))
+fund.fund_classification_revision.ck_fund_classification_revision_time_order
+    CHECK ((((provider_available_at IS NULL) OR (published_at IS NULL) OR (provider_available_at >= published_at)) AND (ingested_at >= COALESCE(provider_available_at, published_at, ingested_at)) AND (available_at >= COALESCE(provider_available_at, published_at))))
+fund.fund_basic_info_history.ck_fbih_overview_availability_quality
+    CHECK (((availability_quality)::text = 'INFERRED'::text))
+fund.fund_basic_info_history.ck_fbih_positive_version
+    CHECK ((version > 0))
 fund.fund_fee.ck_fund_fee_interval
     CHECK (((valid_to IS NULL) OR (valid_from < valid_to)))
 fund.fund_fee.ck_fund_fee_quality_source

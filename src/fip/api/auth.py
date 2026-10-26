@@ -30,7 +30,10 @@ def resolve_principal(request: Request) -> Principal:
     raw_roles = request.headers.get("X-Roles", "Researcher")
     roles = tuple(role.strip() for role in raw_roles.split(",") if role.strip())
     can_review = any(role.lower() in {"reviewer", "admin", "administrator"} for role in roles)
-    return Principal(user_id, roles, can_review)
+    can_manage_ingestion = any(
+        role.lower() in {"operations", "admin", "administrator"} for role in roles
+    )
+    return Principal(user_id, roles, can_review, can_review, can_manage_ingestion)
 
 
 def authenticate_request(request: Request) -> Principal:

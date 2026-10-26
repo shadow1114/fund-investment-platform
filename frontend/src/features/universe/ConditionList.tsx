@@ -14,11 +14,12 @@ const labels = {
 } as const;
 
 const displayValue = (value: unknown) => {
+  if (value === undefined) return "未返回";
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "不可用";
 };
 
 export const ConditionList = ({ fundId, kind, conditions }: Props) => {
@@ -43,12 +44,30 @@ export const ConditionList = ({ fundId, kind, conditions }: Props) => {
         <ul id={panelId} aria-label={`${fundId} 的${label}`}>
           {conditions.map((condition, index) => (
             <li key={`${condition.condition}-${index}`}>
-              <strong>{condition.condition}</strong>
-              <span>结果：{condition.result}</span>
-              <span>实际值：{displayValue(condition.actual)}</span>
-              {condition.gap !== undefined && (
-                <span>差额：{condition.gap}</span>
-              )}
+              <dl>
+                <dt>筛选条件</dt>
+                <dd>{condition.condition}</dd>
+                <dt>结果</dt>
+                <dd>
+                  {condition.result === "PASS"
+                    ? "通过"
+                    : condition.result === "FAIL"
+                      ? "未通过"
+                      : `未知（${condition.result}）`}
+                </dd>
+                <dt>实际值</dt>
+                <dd>{displayValue(condition.actual)}</dd>
+                <dt>阈值</dt>
+                <dd>接口未提供</dd>
+                <dt>来源</dt>
+                <dd>接口未提供</dd>
+                {condition.gap !== undefined && (
+                  <>
+                    <dt>差额</dt>
+                    <dd>{condition.gap}</dd>
+                  </>
+                )}
+              </dl>
             </li>
           ))}
         </ul>
