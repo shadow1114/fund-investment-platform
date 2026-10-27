@@ -2,6 +2,8 @@ import base64
 import datetime as dt
 import io
 import json
+import math
+import re
 import subprocess
 import sys
 import threading
@@ -49,20 +51,26 @@ def _throttle_overview() -> None:
 
 
 def _isolated_overview(**params: Any) -> pd.DataFrame:
+    return _isolated_call(
+        [
+            sys.executable,
+            "-m",
+            "fip.services.data_service.adapters.akshare.overview_worker",
+            str(params["symbol"]),
+        ],
+    )
+
+
+def _run_isolated(command: list[str], *, timeout: float = 25) -> subprocess.CompletedProcess[bytes]:
+    # subprocess.run kills and waits for its child on TimeoutExpired, unlike a future timeout.
+    return subprocess.run(command, capture_output=True, timeout=timeout, check=True)
+
+
+def _isolated_call(command: list[str]) -> pd.DataFrame:
     for attempt in range(3):
         _throttle_overview()
         try:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "fip.services.data_service.adapters.akshare.overview_worker",
-                    str(params["symbol"]),
-                ],
-                capture_output=True,
-                timeout=25,
-                check=True,
-            )
+            result = _run_isolated(command)
         except subprocess.TimeoutExpired:
             if attempt == 2:
                 raise
@@ -121,7 +129,59 @@ class AkShareSourceAdapter:
             raise KeyError(f"未声明的数据集：{dataset}") from None
 
         call_params: dict[str, Any] = {**spec.fixed_params, **params}
-        if dataset == "fund_overview" and not self._injected_caller:
+        classification_source = dataset in {
+            "fund_index_passive",
+            "fund_index_enhanced",
+            "fund_detail_xq",
+        }
+        if dataset in {"fund_index_passive", "fund_index_enhanced"}:
+            if call_params != spec.fixed_params:
+                raise ValueError(
+                    "Index membership requires the registered indicator and 全部 scope"
+                )
+        if dataset == "fund_detail_xq":
+            call_params.setdefault("timeout", 20)
+            symbol = call_params.get("symbol")
+            if not isinstance(symbol, str) or not re.fullmatch(r"[0-9]{6}", symbol):
+                raise ValueError("Snowball requires an exact six-digit fund code")
+            timeout = float(call_params["timeout"])
+            if not math.isfinite(timeout) or not 0 < timeout <= 20:
+                raise ValueError("Snowball timeout must be positive and at most 20 seconds")
+            call_params["timeout"] = timeout
+        if classification_source:
+            try:
+                if self._injected_caller:
+                    frame = self._caller(spec.callable_name, **call_params)
+                else:
+                    frame = _isolated_call(
+                        [
+                            sys.executable,
+                            "-m",
+                            "fip.services.data_service.adapters.akshare.source_worker",
+                            spec.callable_name,
+                            json.dumps(call_params, ensure_ascii=False),
+                        ]
+                    )
+            except Exception as exc:
+                error = (
+                    exc
+                    if isinstance(exc, AkShareContractError)
+                    else AkShareContractError(f"{type(exc).__name__}: {exc}")
+                )
+                error.record = SourceRecord(
+                    dataset=dataset,
+                    payload=error.raw_payload,
+                    row_count=0,
+                    ingested_at=self._clock(),
+                    request_params={
+                        **{k: str(v) for k, v in call_params.items()},
+                        "payload_format": "http_body",
+                    },
+                )
+                if error is exc:
+                    raise
+                raise error from exc
+        elif dataset == "fund_overview" and not self._injected_caller:
             try:
                 frame = _isolated_overview(**call_params)
             except AkShareContractError as error:

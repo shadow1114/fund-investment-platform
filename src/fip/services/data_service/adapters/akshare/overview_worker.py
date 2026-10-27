@@ -17,6 +17,7 @@ def capture_overview(
     symbol: str,
     *,
     caller: Callable[..., pd.DataFrame] | None = None,
+    request_timeout: float = 20,
 ) -> dict[str, Any]:
     original_get = requests.get
     raw = b""
@@ -24,7 +25,7 @@ def capture_overview(
 
     def captured_get(*args: Any, **kwargs: Any) -> requests.Response:
         nonlocal raw, status
-        kwargs["timeout"] = 20
+        kwargs["timeout"] = request_timeout
         response = original_get(*args, **kwargs)
         raw, status = response.content, response.status_code
         response.raise_for_status()
