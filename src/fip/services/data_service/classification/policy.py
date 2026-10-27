@@ -45,6 +45,8 @@ class ClassificationPolicy(BaseModel):
     active_dimensions: tuple[str, ...] = DIMENSIONS
     paused_dimensions: tuple[str, ...] = ()
     strategy_tag_catalog: tuple[str, ...] = ()
+    active_non_index_types: tuple[str, ...] = ()
+    target_risk_mechanisms: tuple[str, ...] = ()
     index_asset_mapping_version: str | None = None
     index_assets: dict[str, IndexAssetEntry] = Field(default_factory=dict)
 
@@ -80,6 +82,15 @@ class ClassificationPolicy(BaseModel):
             self.strategy_priority
         ) != len(set(self.strategy_priority)):
             raise ValueError("Strategy priority must cover each known strategy once")
+        if any(
+            name not in self.formal_types or self.formal_types[name] == "UNKNOWN" or "指数" in name
+            for name in self.active_non_index_types
+        ) or len(self.active_non_index_types) != len(set(self.active_non_index_types)):
+            raise ValueError("Active type gate requires unique controlled non-index formal types")
+        if any(not value.strip() for value in self.target_risk_mechanisms) or len(
+            self.target_risk_mechanisms
+        ) != len(set(self.target_risk_mechanisms)):
+            raise ValueError("Target-risk mechanisms must be nonempty unique declarations")
         if self.rule_version == "3.0.0" or self.enum_version == "3.0.0":
             if (self.scheme, self.rule_version, self.enum_version) != (
                 "FIP_CLASSIFICATION_V1",

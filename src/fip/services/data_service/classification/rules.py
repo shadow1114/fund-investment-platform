@@ -6,6 +6,7 @@ from datetime import datetime
 
 from .models import DIMENSIONS, ClassificationSnapshot, DimensionResult, Evidence, Source, Status
 from .policy import ClassificationPolicy
+from .strategy import classify_strategy, classify_tags
 
 CATALOG = {
     "asset_class": (
@@ -170,6 +171,10 @@ def classify(
     policy = policy or DEFAULT_POLICY
     dimensions: dict[str, DimensionResult] = {}
     review: set[str] = set()
+    tag_results = None
+    if policy.rule_version == "3.0.0":
+        tag_results, tag_review = classify_tags(evidence, policy)
+        review.update(tag_review)
     for dimension in DIMENSIONS:
         if dimension not in policy.active_dimensions:
             dimensions[dimension] = DimensionResult(
@@ -179,6 +184,10 @@ def classify(
                 else "UNKNOWN",
                 evaluation_state="NOT_EVALUATED",
             )
+            continue
+        if dimension == "strategy" and policy.rule_version == "3.0.0":
+            dimensions[dimension], strategy_review = classify_strategy(evidence, policy)
+            review.update(strategy_review)
             continue
         values: set[str] = set()
         candidates: set[str] = set()
@@ -304,4 +313,5 @@ def classify(
         geography=dimensions["geography"],
         product_structure=dimensions["product_structure"],
         market_attributes=dimensions["market_attributes"],
+        strategy_tag_results=tag_results,
     )
