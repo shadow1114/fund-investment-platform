@@ -937,3 +937,124 @@ def test_authorized_tag_admission_is_bound_to_exact_reviewed_result_across_inter
         and r.valid_from == DAY
     )
     assert old_interval.classification_code == "UNKNOWN"
+
+
+def bounded_tag_review_fixture():
+    """Identical tag JSON exists before, inside, and after the reviewed range."""
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    start = DAY + dt.timedelta(days=1)
+    split = DAY + dt.timedelta(days=2)
+    end = DAY + dt.timedelta(days=3)
+    evidence = ev("strategy", "bounded audited rejection")
+    exact_tag = StrategyTagResult(
+        status="UNKNOWN", evaluation_state="EVALUATED", manual_action="REJECT", evidence=(evidence,)
+    )
+    copied = snap().model_copy(
+        update={"strategy_tag_results": {"QUANTITATIVE": exact_tag}, "strategy_tags": ()}
+    )
+    middle = snap(ev("formal_type", "股票型"))
+    baseline = service.replace_intervals(
+        1,
+        [
+            (DAY, start, copied),
+            (start, split, middle, {"status": "ALLOWED"}),
+            (split, end, middle, {"status": "BLOCKED"}),
+            (end, None, copied),
+        ],
+        available_at=NOW,
+        actor="source",
+        reason="bounded fixture with trading split",
+    )
+    case = service._case(
+        baseline,
+        "bounded-review",
+        "TAG_REVIEW",
+        {
+            "dimension": "strategy_tags.QUANTITATIVE",
+            "valid_from": start.isoformat(),
+            "valid_to": end.isoformat(),
+        },
+        NOW,
+    )
+    revision = service.review(
+        case.id,
+        expected_revision=baseline.id,
+        decisions={"asset_class": decision("EQUITY"), "strategy": decision()},
+        tag_decisions={
+            "QUANTITATIVE": module.StrategyTagDecision(action="REJECT", evidence=(evidence,))
+        },
+        actor="reviewer",
+        reason="bounded review only",
+        can_review=True,
+        reviewed_at=LATER,
+    )
+    return session, service, revision, exact_tag, start, split, end
+
+
+def test_identical_reviewed_tag_is_authorized_only_inside_reviewed_range_in_result_revision():
+    from fip.services.data_service.models.fund import FundClassificationHistory
+
+    session, service, revision, exact_tag, start, split, end = bounded_tag_review_fixture()
+    rows = {
+        r.valid_from: r
+        for r in session.rows
+        if isinstance(r, FundClassificationHistory) and r.revision_id == revision.id
+    }
+    assert all(
+        r.classification_result["strategy_tag_results"]["QUANTITATIVE"]
+        == exact_tag.model_dump(mode="json")
+        for r in rows.values()
+    )
+    assert rows[DAY].classification_code == "UNKNOWN"
+    assert rows[start].classification_code == "ACTIVE_EQUITY"
+    assert rows[split].classification_code == "ACTIVE_EQUITY"
+    assert rows[end].classification_code == "UNKNOWN"
+    for day, expected in [
+        (DAY, "UNKNOWN"),
+        (start, "ACTIVE_EQUITY"),
+        (split, "ACTIVE_EQUITY"),
+        (end, "UNKNOWN"),
+    ]:
+        point = SqlClassificationPitRepository(session, LATER + (day - DAY)).current(1)
+        assert point.classification_code == expected
+    audit = next(r for r in session.rows if isinstance(r, AuditLog) and r.action == "REVIEW")
+    assert audit.detail["valid_from"] == start.isoformat()
+    assert audit.detail["valid_to"] == end.isoformat()
+    assert audit.detail["revision_id"] == revision.id
+
+
+def test_exact_audited_tag_copy_cannot_inherit_admission_in_an_unrelated_revision():
+    from fip.services.data_service.models.fund import FundClassificationHistory
+
+    session, service, reviewed, _, start, _, end = bounded_tag_review_fixture()
+    snapshot = next(v[2] for v in service.intervals(reviewed.id) if v[0] == start)
+    copied = service.replace_intervals(
+        1,
+        [
+            (start, end, snapshot, {"status": "ALLOWED"}),
+            (end, None, snapshot, {"status": "BLOCKED"}),
+        ],
+        available_at=LATER + dt.timedelta(hours=1),
+        actor="source",
+        reason="copy without new review",
+        reviewed=True,
+    )
+    assert copied.id != reviewed.id
+    assert all(
+        r.classification_code == "UNKNOWN"
+        for r in session.rows
+        if isinstance(r, FundClassificationHistory) and r.revision_id == copied.id
+    )
+    assert (
+        SqlClassificationPitRepository(session, LATER + dt.timedelta(days=1))
+        .current(1)
+        .classification_code
+        == "UNKNOWN"
+    )
+    assert (
+        SqlClassificationPitRepository(session, LATER + dt.timedelta(days=4))
+        .current(1)
+        .classification_code
+        == "UNKNOWN"
+    )

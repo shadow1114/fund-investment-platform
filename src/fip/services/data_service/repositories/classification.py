@@ -150,7 +150,15 @@ class SqlClassificationPitRepository:
                 snapshot,
                 grouping_confirmed=(product is not None and product.grouping_status == "CONFIRMED"),
                 verified_tag_rejections=verified_tag_rejections(
-                    self._session, fund_id, snapshot, visible_until=self._visible_until
+                    self._session,
+                    fund_id,
+                    snapshot,
+                    visible_until=self._visible_until,
+                    revision_id=revision.id,
+                    valid_from=dt.date.fromisoformat(result["valid_from"]),
+                    valid_to=dt.date.fromisoformat(result["valid_to"])
+                    if result["valid_to"]
+                    else None,
                 ),
             )
             return ClassificationPoint(

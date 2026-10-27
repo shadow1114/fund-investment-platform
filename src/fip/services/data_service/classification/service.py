@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -55,6 +56,22 @@ class StrategyTagDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["CONFIRM", "REJECT"]
     evidence: tuple[Evidence, ...]
+
+
+@dataclass(frozen=True)
+class _TagReviewAuthorization:
+    fund_id: int
+    expected_revision: int
+    valid_from: dt.date
+    valid_to: dt.date | None
+    tags: Mapping[str, StrategyTagResult]
+    result_revision: int | None = None
+
+
+def _range_within(
+    start: dt.date, end: dt.date | None, scope_start: dt.date, scope_end: dt.date | None
+) -> bool:
+    return start >= scope_start and (scope_end is None or end is not None and end <= scope_end)
 
 
 def _source_identity(item: Evidence) -> dict[str, object] | None:
@@ -272,6 +289,9 @@ def verified_tag_rejections(
     snapshot: ClassificationSnapshot,
     *,
     visible_until: dt.datetime,
+    revision_id: int,
+    valid_from: dt.date,
+    valid_to: dt.date | None,
 ) -> frozenset[str]:
     """Manual admission requires an actual matching review, never a JSON flag alone."""
     requested = {
@@ -292,10 +312,10 @@ def verified_tag_rejections(
     )
     for audit in audits:
         detail = audit.detail or {}
-        revision_id = detail.get("revision_id")
+        audit_revision_id = detail.get("revision_id")
         revision = (
-            session.get(FundClassificationRevision, revision_id)
-            if isinstance(revision_id, int)
+            session.get(FundClassificationRevision, audit_revision_id)
+            if isinstance(audit_revision_id, int)
             else None
         )
         case_id = detail.get("case_id")
@@ -304,6 +324,7 @@ def verified_tag_rejections(
         )
         if (
             revision is None
+            or revision.id != revision_id
             or not revision.reviewed
             or revision.fund_id != fund_id
             or revision.available_at > visible_until
@@ -314,6 +335,22 @@ def verified_tag_rejections(
             or case.revision_id != detail.get("expected_revision")
             or not audit.operator.strip()
             or not str(detail.get("reason", "")).strip()
+        ):
+            continue
+        # Copying a tag is not reviewed interval/revision lineage. Only the exact
+        # result revision and intervals contained in its explicit review range
+        # inherit admission, including trading/eligibility splits inside it.
+        try:
+            scope_start = dt.date.fromisoformat(detail["valid_from"])
+            scope_end = (
+                dt.date.fromisoformat(detail["valid_to"])
+                if detail["valid_to"] is not None
+                else None
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (scope_end is not None and scope_end <= scope_start) or not _range_within(
+            valid_from, valid_to, scope_start, scope_end
         ):
             continue
         result_tags = detail.get("result_tag_results") or {}
@@ -333,7 +370,7 @@ class ClassificationService:
 
     def __init__(self, session: Session) -> None:
         self.session = session
-        self._authorized_tag_rejections: dict[str, StrategyTagResult] = {}
+        self._authorized_tag_rejections: _TagReviewAuthorization | None = None
 
     def lock_product(self, fund_id: int) -> None:
         product = self.session.scalar(select(Fund).where(Fund.id == fund_id).with_for_update())
@@ -700,6 +737,15 @@ class ClassificationService:
         )
         self.session.add(revision)
         self.session.flush()
+        authorization = self._authorized_tag_rejections
+        if (
+            authorization is not None
+            and authorization.result_revision is None
+            and authorization.fund_id == fund_id
+            and previous is not None
+            and authorization.expected_revision == previous.id
+        ):
+            self._authorized_tag_rejections = replace(authorization, result_revision=revision.id)
         carry: list[FundClassificationReviewCase] = []
         if previous:
             for case in self.session.scalars(
@@ -748,15 +794,28 @@ class ClassificationService:
                 case.status = "SUPERSEDED"
                 case.resolved_at = available_at
         for start, end, value, trading in ordered:
+            authorization = self._authorized_tag_rejections
             projection = project_legacy(
                 value,
                 grouping_confirmed=True,
                 verified_tag_rejections=frozenset(
                     tag
-                    for tag, result in self._authorized_tag_rejections.items()
+                    for tag, result in (authorization.tags.items() if authorization else ())
                     if (value.strategy_tag_results or {}).get(tag) == result
+                    and authorization is not None
+                    and authorization.fund_id == fund_id
+                    and authorization.result_revision == revision.id
+                    and _range_within(start, end, authorization.valid_from, authorization.valid_to)
                 )
-                | verified_tag_rejections(self.session, fund_id, value, visible_until=available_at),
+                | verified_tag_rejections(
+                    self.session,
+                    fund_id,
+                    value,
+                    visible_until=available_at,
+                    revision_id=revision.id,
+                    valid_from=start,
+                    valid_to=end,
+                ),
             )
             self.session.add(
                 FundClassificationHistory(
@@ -1139,9 +1198,17 @@ class ClassificationService:
             # Only this authorized/CAS-checked review path may admit newly rejected
             # tags while its revision and matching audit are built atomically.
             prior_scope = self._authorized_tag_rejections
-            self._authorized_tag_rejections = {
-                tag: tags[tag] for tag, value in tag_decisions.items() if value.action == "REJECT"
-            }
+            self._authorized_tag_rejections = _TagReviewAuthorization(
+                fund_id=case.fund_id,
+                expected_revision=latest.id,
+                valid_from=target,
+                valid_to=end,
+                tags={
+                    tag: tags[tag]
+                    for tag, value in tag_decisions.items()
+                    if value.action == "REJECT"
+                },
+            )
             try:
                 result = self.write(
                     case.fund_id,
@@ -1198,6 +1265,8 @@ class ClassificationService:
                     "incoming": incoming.to_dict() if incoming else None,
                     "accepted_version": accept_incoming_version,
                     "reject_upgrade": reject_upgrade,
+                    "valid_from": target.isoformat(),
+                    "valid_to": end.isoformat() if end else None,
                     "result_tag_results": {
                         tag: value.model_dump(mode="json")
                         for tag, value in (proposed.strategy_tag_results or {}).items()
