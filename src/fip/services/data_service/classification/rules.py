@@ -200,6 +200,10 @@ def classify(
                     used.append(item)
                     review.add("asset_class:INDEX_QUERY_CONTEXT")
                     continue
+                if item.raw_field not in ("tracking_target", "跟踪标的"):
+                    used.append(item)
+                    review.add("asset_class:UNRECOGNIZED")
+                    continue
                 entry = policy.index_assets.get(item.raw_value)
                 if entry is None:
                     used.append(item)

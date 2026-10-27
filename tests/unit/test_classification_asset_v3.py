@@ -153,6 +153,41 @@ def test_auxiliary_fields_cannot_establish_tracking_asset(field):
     assert (result.asset_class.status, result.asset_class.value) == ("UNKNOWN", "UNKNOWN")
 
 
+@pytest.mark.parametrize(
+    "raw_field",
+    [
+        "业绩比较基准",
+        "benchmark",
+        "投资范围",
+        "investment_scope",
+        "投资目标",
+        "investment_objective",
+        "未知原始字段",
+    ],
+)
+@pytest.mark.parametrize("source", ["OFFICIAL", "AGGREGATOR"])
+def test_misnormalized_auxiliary_or_unknown_fields_cannot_establish_tracking_asset(
+    raw_field, source
+):
+    raw = ev("tracking_target", "沪深300指数", source).model_copy(update={"raw_field": raw_field})
+    result = classify_v3([raw])
+    assert (result.asset_class.status, result.asset_class.value) == ("UNKNOWN", "UNKNOWN")
+    assert result.asset_class.evidence == (raw,)
+    assert "asset_class:UNRECOGNIZED" in result.review_items
+
+    reliable = classify_v3([raw, ev("formal_type", "债券型")])
+    assert (reliable.asset_class.status, reliable.asset_class.value) == ("CONFIRMED", "BOND")
+
+
+def test_original_tracking_target_field_can_confirm_exact_index_asset():
+    raw = ev("tracking_target", "沪深300指数", "AGGREGATOR").model_copy(
+        update={"raw_field": "跟踪标的"}
+    )
+    result = classify_v3([raw])
+    assert (result.asset_class.status, result.asset_class.value) == ("CONFIRMED", "EQUITY")
+    assert result.asset_class.evidence[0].required_observations == (raw,)
+
+
 def test_name_clue_is_only_candidate_and_does_not_conflict_with_reliable_asset():
     name = ev("name", "商品债券基金", "NAME")
     result = classify_v3([name])
