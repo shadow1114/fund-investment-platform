@@ -650,10 +650,20 @@ class ClassificationService:
             if i and (previous_end is None or previous_end > start):
                 raise ValueError("overlapping intervals")
         merged: list[StoredInterval] = []
+        authorization = self._authorized_tag_rejections
+        review_boundaries = (
+            {authorization.valid_from, authorization.valid_to}
+            if authorization is not None
+            and authorization.fund_id == fund_id
+            and previous is not None
+            and authorization.expected_revision == previous.id
+            else set()
+        )
         for start, end, value, trading in ordered:
             if (
                 merged
                 and merged[-1][1] == start
+                and start not in review_boundaries
                 and _canonical(merged[-1][2].to_dict()) == _canonical(value.to_dict())
                 and merged[-1][3] == trading
             ):

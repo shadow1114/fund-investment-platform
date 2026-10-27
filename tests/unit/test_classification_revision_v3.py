@@ -1058,3 +1058,91 @@ def test_exact_audited_tag_copy_cannot_inherit_admission_in_an_unrelated_revisio
         .classification_code
         == "UNKNOWN"
     )
+
+
+def review_identical_snapshot(service, baseline, case):
+    """Use the same authorized inputs when preparing and testing boundary copies."""
+    return service.review(
+        case.id,
+        expected_revision=baseline.id,
+        decisions={"asset_class": decision("EQUITY"), "strategy": decision()},
+        tag_decisions={
+            "QUANTITATIVE": module.StrategyTagDecision(
+                action="REJECT", evidence=(ev("strategy", "scope-only rejection"),)
+            )
+        },
+        actor="reviewer",
+        reason="one bounded interval",
+        can_review=True,
+        reviewed_at=LATER,
+    )
+
+
+def test_review_boundaries_survive_merging_identical_snapshot_and_trading_rows():
+    from fip.services.data_service.models.fund import FundClassificationHistory
+
+    # Prepare the exact full result via real review, including retained evidence
+    # and raw observations, rather than guessing the service's serialized result.
+    template_session = MemorySession()
+    template_service = module.ClassificationService(template_session)
+    template = persist(template_session, snap(ev("formal_type", "股票型")))
+    template_revision = review_identical_snapshot(
+        template_service, template, pending(template_session, template)
+    )
+    identical = template_service.intervals(template_revision.id)[-1][2]
+
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    start = DAY + dt.timedelta(days=1)
+    end = DAY + dt.timedelta(days=3)
+    baseline = service.replace_intervals(
+        1,
+        [
+            (DAY, start, identical),
+            (start, end, snap(ev("formal_type", "股票型"))),
+            (end, None, identical),
+        ],
+        available_at=NOW,
+        actor="source",
+        reason="identical outside copies",
+    )
+    case = next(
+        c
+        for c in service.active_review_cases(1)
+        if c.details.get("valid_from") == start.isoformat()
+    )
+    revision = review_identical_snapshot(service, baseline, case)
+    rows = sorted(
+        (
+            r
+            for r in session.rows
+            if isinstance(r, FundClassificationHistory) and r.revision_id == revision.id
+        ),
+        key=lambda r: r.valid_from,
+    )
+    assert [(r.valid_from, r.valid_to) for r in rows] == [(DAY, start), (start, end), (end, None)]
+    assert all(r.classification_result == identical.to_dict() for r in rows)
+    assert all(r.trading_eligibility == {"status": "UNKNOWN"} for r in rows)
+    assert [r.classification_code for r in rows] == ["UNKNOWN", "ACTIVE_EQUITY", "UNKNOWN"]
+    for day, expected in [(DAY, "UNKNOWN"), (start, "ACTIVE_EQUITY"), (end, "UNKNOWN")]:
+        assert (
+            SqlClassificationPitRepository(session, LATER + (day - DAY))
+            .current(1)
+            .classification_code
+            == expected
+        )
+    # Replaying the identical result must retain its persisted review boundaries;
+    # losing those boundaries must not manufacture a new-evidence proposal.
+    before = list(service.active_review_cases(1))
+    assert (
+        service.write(
+            1,
+            identical,
+            valid_from=DAY,
+            available_at=LATER + dt.timedelta(hours=1),
+            actor="source",
+            reason="identical replay",
+        )
+        is revision
+    )
+    assert service.active_review_cases(1) == before
