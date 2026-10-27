@@ -43,6 +43,13 @@ FOREIGN_SUBJECT = re.compile(
     r"其他基金|其它基金|别的基金|例如|举例|引用|据称|资料称|底层基金|现金头寸|现金管理|局部|部分资产"
 )
 QUOTED = re.compile(r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"|\'[^\'\n]*\'')
+CLAUSE_BOUNDARY = re.compile(
+    r"[，,]|(?=(?:但|而|同时|并)(?:本基金)?"
+    r"(?:不|未|没有|拒绝|可|可以)?(?:采用|运用|使用|实施|采取))"
+)
+LOCAL_INDEX_ENHANCEMENT = re.compile(
+    r"(?:并)?主动增强(?=$|获取(?:超额)?收益|投资|选股|资产配置|组合|其收益|该指数|该组合)"
+)
 
 
 def _field(item: Evidence) -> str:
@@ -62,6 +69,29 @@ def _sentences(text: str) -> list[str]:
     return [
         part.strip() for part in re.split(r"[。！？!?；;\n]", QUOTED.sub("", text)) if part.strip()
     ]
+
+
+def _clauses(text: str) -> list[str]:
+    """Keep each declaration's context, while retaining a conditional preamble.
+
+    A comma alone does not release "若条件成熟" from the declaration it qualifies.
+    Explicit contrast can introduce an independent declaration with its own context.
+    """
+    clauses: list[str] = []
+    for sentence in _sentences(text):
+        preamble = ""
+        for part in CLAUSE_BOUNDARY.split(sentence):
+            part = part.strip()
+            if not part:
+                continue
+            if preamble and not re.match(r"但|而|然而|不过", part):
+                part = f"{preamble}，{part}"
+            preamble = ""
+            if OPTIONAL.search(part) and not ADOPTION.search(part):
+                preamble = part
+            else:
+                clauses.append(part)
+    return clauses
 
 
 def _context(sentence: str) -> str:
@@ -148,19 +178,19 @@ def _declarations(item: Evidence, policy: ClassificationPolicy) -> list[tuple[st
     """Keep sentence boundaries so separate exclusive declarations still conflict."""
     results = []
     field = _field(item)
-    clauses = []
-    for sentence in _sentences(item.raw_value):
-        if _context(sentence) == "IGNORED":
-            continue
-        # A new adoption clause is independent; an index-copy clause followed by
-        # local "并主动增强" stays together as one enhanced implementation.
-        clauses.extend(
-            re.split(
-                r"[，,](?=(?:并|实际|本基金)*(?:采用|运用|使用|实施|采取))"
-                r"|(?=并(?:采用|实施|运用)(?:指数增强策略|主动管理策略|主动投资策略))",
-                sentence,
-            )
-        )
+    clauses: list[str] = []
+    for clause in _clauses(item.raw_value):
+        # Local enhancement continues the copy implementation; a separate adopted
+        # strategy instead keeps its own clause and can create a real conflict.
+        if (
+            clauses
+            and LOCAL_INDEX_ENHANCEMENT.match(clause)
+            and "指数" in clauses[-1]
+            and _adopts(clauses[-1], "复制")
+        ):
+            clauses[-1] += clause
+        else:
+            clauses.append(clause)
     for sentence in clauses:
         if _context(sentence) != "POSITIVE":
             continue
@@ -187,7 +217,11 @@ def _declarations(item: Evidence, policy: ClassificationPolicy) -> list[tuple[st
         if field not in STRATEGY_FIELDS:
             continue
         index_context = "指数" in sentence
-        enhanced = index_context and "增强" in sentence and _adopts(sentence, r"指数|复制")
+        enhanced = _adopts(sentence, r"指数增强|增强指数") or (
+            index_context
+            and _adopts(sentence, "复制")
+            and bool(LOCAL_INDEX_ENHANCEMENT.search(sentence))
+        )
         if enhanced:
             results.append(("ENHANCED_INDEX", sentence))
         elif index_context and _adopts(sentence, r"复制|被动跟踪|被动投资"):
@@ -344,7 +378,7 @@ def classify_tags(
             ):
                 continue
             evaluated = True
-            for sentence in _sentences(item.raw_value):
+            for sentence in _clauses(item.raw_value):
                 if not _adopts(sentence, QUANT_METHOD):
                     continue
                 context = _context(sentence)

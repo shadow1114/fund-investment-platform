@@ -454,3 +454,76 @@ def test_index_list_and_incompatible_official_index_declaration_conflict(dataset
     result = v3([member(dataset), ev("investment_strategy", text)])
     assert (result.strategy.status, result.strategy.value) == ("CONFLICT", "UNKNOWN")
     assert result.strategy.candidates == ("ENHANCED_INDEX", "PASSIVE_INDEX")
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "本基金不采用目标日期策略，而",
+        "其他基金采用目标日期策略，本基金",
+        "本基金可采用目标日期策略，但本基金",
+        "资料引用‘采用目标日期策略’，而本基金",
+    ],
+)
+def test_review_independent_target_clause_keeps_its_own_context(prefix):
+    raw = ev("investment_strategy", prefix + "采用目标风险策略。")
+    result = v3([raw]).strategy
+    assert (result.status, result.value) == ("CONFIRMED", "TARGET_RISK")
+    assertion = next(e for e in result.evidence if e.rule_id == "STR020")
+    assert assertion.required_observations == (raw,)
+    assert "matched=" in assertion.rationale
+
+
+@pytest.mark.parametrize("separator", ["，但", "，而", "，同时", "但"])
+def test_review_tag_positive_and_negative_clauses_conflict(separator):
+    raw = ev("investment_strategy", f"本基金采用量化模型{separator}不采用多因子模型。")
+    result = v3([raw])
+    tag = result.strategy_tag_results["QUANTITATIVE"]
+    assert tag.status == "CONFLICT"
+    assert result.strategy_tags == ()
+    assert len(tag.evidence) == 2
+    assert all(e.required_observations == (raw,) for e in tag.evidence)
+    assert any("polarity=POSITIVE" in e.rationale for e in tag.evidence)
+    assert any("polarity=NEGATIVE" in e.rationale for e in tag.evidence)
+    assert "strategy_tags:QUANTITATIVE:CONFLICT" in result.review_items
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "其他基金采用多因子模型，本基金",
+        "本基金可采用多因子模型，但本基金",
+        "资料引用‘采用多因子模型’，而本基金",
+    ],
+)
+def test_review_tag_positive_clause_is_independent_of_unrelated_context(prefix):
+    result = v3([ev("investment_strategy", prefix + "采用量化模型。")])
+    assert result.strategy_tags == ("QUANTITATIVE",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "本基金采用完全复制法跟踪沪深300指数，增强风险管理能力。",
+        "本基金采用完全复制法跟踪沪深300指数并增强风险管理能力。",
+        "本基金采用完全复制法跟踪沪深300指数，增强流动性管理。",
+        "本基金采用完全复制法跟踪沪深300指数并主动增强客户服务能力。",
+    ],
+)
+def test_review_unrelated_enhancement_does_not_change_passive_strategy(text):
+    result = v3([ev("investment_strategy", text)]).strategy
+    assert (result.status, result.value) == ("CONFIRMED", "PASSIVE_INDEX")
+    assert "ENHANCED_INDEX" not in result.candidates
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "本基金通过复制沪深300指数，并主动增强获取超额收益。",
+        "本基金通过复制沪深300指数并主动增强获取超额收益。",
+        "本基金通过主动管理增强指数投资组合。",
+    ],
+)
+def test_review_index_investment_enhancement_still_is_enhanced(text):
+    result = v3([ev("investment_strategy", text)]).strategy
+    assert (result.status, result.value) == ("CONFIRMED", "ENHANCED_INDEX")
