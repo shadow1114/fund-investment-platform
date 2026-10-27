@@ -18,13 +18,17 @@ PAUSED = ("geography", "product_structure", "market_attributes")
 
 def legacy_snapshot(version="1.0.0"):
     result = {"status": "UNKNOWN", "value": "UNKNOWN", "candidates": [], "evidence": []}
-    return {
+    raw = {
         "scheme": "FIP_CLASSIFICATION_V1",
         "rule_version": version,
         "enum_version": version,
         **{dimension: deepcopy(result) for dimension in models.DIMENSIONS},
         "review_items": [],
     }
+    if version == "3.0.0":
+        for dimension in PAUSED:
+            raw[dimension]["evaluation_state"] = "NOT_EVALUATED"
+    return raw
 
 
 def evidence(field="investment_strategy", value="采用量化模型"):
@@ -228,6 +232,82 @@ def test_v3_paused_dimensions_cannot_claim_current_evaluation(dimension):
     raw[dimension]["evaluation_state"] = "EVALUATED"
     with pytest.raises(ValidationError):
         models.ClassificationSnapshot.model_validate(raw)
+
+
+@pytest.mark.parametrize("dimension", PAUSED)
+@pytest.mark.parametrize("missing", ["omitted", "null"])
+def test_v3_paused_dimensions_require_explicit_evaluation_state(dimension, missing):
+    raw = legacy_snapshot("3.0.0")
+    if missing == "omitted":
+        raw[dimension].pop("evaluation_state")
+    else:
+        raw[dimension]["evaluation_state"] = None
+    with pytest.raises(ValidationError):
+        models.ClassificationSnapshot.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("rule_version", "enum_version"),
+    [("3.0.0", "1.0.0"), ("3.0.0", "2.0.0"), ("1.0.0", "3.0.0"), ("2.0.0", "3.0.0")],
+)
+def test_v3_snapshot_rejects_unregistered_version_pairs(rule_version, enum_version):
+    raw = legacy_snapshot("3.0.0")
+    raw.update(rule_version=rule_version, enum_version=enum_version)
+    with pytest.raises(ValidationError):
+        models.ClassificationSnapshot.model_validate(raw)
+
+
+def test_v3_rule_version_cannot_bypass_quantitative_strategy_rejection():
+    raw = legacy_snapshot("3.0.0")
+    raw["enum_version"] = "1.0.0"
+    raw["strategy"].update(status="CONFIRMED", value="QUANTITATIVE", evidence=[evidence()])
+    with pytest.raises(ValidationError):
+        models.ClassificationSnapshot.model_validate(raw)
+
+
+@pytest.mark.parametrize("status", ["CONFIRMED", "CANDIDATE", "CONFLICT"])
+def test_tag_assertions_require_evidence_and_unknown_remains_available(status):
+    raw = legacy_snapshot("3.0.0")
+    raw["strategy_tag_results"] = {
+        "QUANTITATIVE": {
+            "status": status,
+            "value": "QUANTITATIVE" if status == "CONFIRMED" else "UNKNOWN",
+            "candidates": ["QUANTITATIVE"] if status in {"CANDIDATE", "CONFLICT"} else [],
+            "evaluation_state": "EVALUATED",
+        }
+    }
+    with pytest.raises(ValidationError):
+        models.ClassificationSnapshot.model_validate(raw)
+    raw["strategy_tag_results"]["QUANTITATIVE"].update(
+        status="UNKNOWN", value="UNKNOWN", candidates=[]
+    )
+    snapshot = models.ClassificationSnapshot.model_validate(raw)
+    assert snapshot.strategy_tags == ()
+    assert snapshot.strategy_tag_results["QUANTITATIVE"].status == "UNKNOWN"
+
+
+def test_snapshot_tag_results_cannot_mutate_after_validation():
+    raw = legacy_snapshot("3.0.0")
+    raw["strategy_tag_results"] = {
+        "QUANTITATIVE": {
+            "status": "CONFIRMED",
+            "value": "QUANTITATIVE",
+            "evidence": [evidence()],
+            "evaluation_state": "EVALUATED",
+        }
+    }
+    snapshot = models.ClassificationSnapshot.model_validate(raw)
+    before = snapshot.model_dump_json()
+    with pytest.raises(TypeError):
+        snapshot.strategy_tag_results["QUANTITATIVE"] = models.StrategyTagResult(status="UNKNOWN")
+    with pytest.raises(TypeError):
+        del snapshot.strategy_tag_results["QUANTITATIVE"]
+    raw["strategy_tag_results"].clear()
+    exported = snapshot.to_dict()
+    exported["strategy_tag_results"].clear()
+    assert snapshot.strategy_tags == ("QUANTITATIVE",)
+    assert snapshot.model_dump_json() == before
+    assert models.ClassificationSnapshot.model_validate_json(before) == snapshot
 
 
 def test_unevaluated_placeholder_cannot_contain_facts():

@@ -1,5 +1,6 @@
 """Versioned JSON contract. Confidence is an evidence grade, never probability."""
 
+from collections.abc import Mapping
 from datetime import datetime
 from types import MappingProxyType
 from typing import ClassVar, Literal
@@ -8,6 +9,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     SerializerFunctionWrapHandler,
+    field_serializer,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -133,6 +136,12 @@ class StrategyTagResult(DimensionResult):
 
     evaluation_state: Literal["NOT_EVALUATED", "EVALUATED"] = "NOT_EVALUATED"
 
+    @model_validator(mode="after")
+    def evidence_bearing_assertion(self) -> "StrategyTagResult":
+        if self.status != "UNKNOWN" and not self.evidence:
+            raise ValueError("Tag assertions require evidence; absent evidence is UNKNOWN")
+        return self
+
 
 class ClassificationSnapshot(_AdditiveContract):
     _optional_metadata = ("strategy_tag_results", "strategy_tags")
@@ -145,12 +154,28 @@ class ClassificationSnapshot(_AdditiveContract):
     product_structure: DimensionResult
     market_attributes: DimensionResult
     review_items: tuple[str, ...] = ()
-    strategy_tag_results: dict[str, StrategyTagResult] | None = None
+    strategy_tag_results: Mapping[str, StrategyTagResult] | None = None
     strategy_tags: tuple[str, ...] | None = None
+
+    @field_validator("strategy_tag_results")
+    @classmethod
+    def freeze_tag_results(
+        cls, value: Mapping[str, StrategyTagResult] | None
+    ) -> Mapping[str, StrategyTagResult] | None:
+        # Copy before freezing so callers cannot mutate the snapshot through an input alias.
+        return MappingProxyType(dict(value)) if value is not None else None
+
+    @field_serializer("strategy_tag_results")
+    def serialize_tag_results(
+        self, value: Mapping[str, StrategyTagResult] | None
+    ) -> dict[str, StrategyTagResult] | None:
+        return dict(value) if value is not None else None
 
     @model_validator(mode="after")
     def versioned_extensions(self) -> "ClassificationSnapshot":
-        if self.enum_version == "3.0.0":
+        if "3.0.0" in (self.rule_version, self.enum_version):
+            if (self.rule_version, self.enum_version) != ("3.0.0", "3.0.0"):
+                raise ValueError("V3 snapshots require the registered 3.0.0 rule/enum version pair")
             for name, catalog in V3_CATALOG.items():
                 result = getattr(self, name)
                 values = (result.value,) if isinstance(result.value, str) else result.value
@@ -160,8 +185,10 @@ class ClassificationSnapshot(_AdditiveContract):
                 if getattr(self, name).evaluation_state == "PAUSED":
                     raise ValueError("Active dimensions cannot be PAUSED")
             for name in V3_PAUSED_DIMENSIONS:
-                if getattr(self, name).evaluation_state == "EVALUATED":
-                    raise ValueError("Paused dimensions cannot claim current evaluation")
+                if getattr(self, name).evaluation_state not in ("PAUSED", "NOT_EVALUATED"):
+                    raise ValueError(
+                        "V3 paused dimensions require PAUSED or NOT_EVALUATED metadata"
+                    )
             if self.strategy_tag_results is not None and not set(self.strategy_tag_results) <= set(
                 V3_STRATEGY_TAGS
             ):
