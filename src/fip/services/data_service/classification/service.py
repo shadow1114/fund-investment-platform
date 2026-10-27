@@ -15,9 +15,14 @@ from sqlalchemy.orm import Session
 from fip.services.data_service.classification.legacy import project_legacy
 from fip.services.data_service.classification.models import (
     DIMENSIONS,
+    V3_ACTIVE_DIMENSIONS,
+    V3_CATALOG,
+    V3_PAUSED_DIMENSIONS,
+    V3_STRATEGY_TAGS,
     ClassificationSnapshot,
     DimensionResult,
     Evidence,
+    StrategyTagResult,
 )
 from fip.services.data_service.classification.rules import CATALOG
 from fip.services.data_service.models.fund import (
@@ -44,12 +49,153 @@ class ReviewDecision(BaseModel):
     evidence: tuple[Evidence, ...] = ()
 
 
+class StrategyTagDecision(BaseModel):
+    """A tag is independently confirmed or rejected, never a strategy enum value."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    action: Literal["CONFIRM", "REJECT"]
+    evidence: tuple[Evidence, ...]
+
+
+def _observation_key(item: Evidence) -> str:
+    locator = item.locator or ""
+    if locator.startswith("identity:"):
+        try:
+            identity, _ = json.JSONDecoder().raw_decode(locator[len("identity:") :])
+        except ValueError as exc:
+            raise ValueError("invalid observation identity") from exc
+        # Row positions change when an upstream list is reordered. Necessary stable
+        # row identities belong inside identity, alongside provider/share/params.
+        locator = "identity:" + json.dumps(identity, sort_keys=True, ensure_ascii=False)
+    return json.dumps([item.source, item.raw_field, locator])
+
+
+def _observations(snapshot: ClassificationSnapshot) -> tuple[Evidence, ...]:
+    if snapshot.observations is not None:
+        return snapshot.observations
+    results = [getattr(snapshot, name) for name in DIMENSIONS]
+    results.extend((snapshot.strategy_tag_results or {}).values())
+    raw: dict[str, Evidence] = {}
+
+    def retain(item: Evidence) -> None:
+        if item.required_observations:
+            for required in item.required_observations:
+                retain(required)
+        else:
+            raw[_observation_key(item)] = item
+
+    for result in results:
+        for item in result.evidence:
+            retain(item)
+    return tuple(raw.values())
+
+
+def _active_dimensions(snapshot: ClassificationSnapshot) -> tuple[str, ...]:
+    return V3_ACTIVE_DIMENSIONS if snapshot.rule_version == "3.0.0" else DIMENSIONS
+
+
+def _changed_tags(old: ClassificationSnapshot, new: ClassificationSnapshot) -> set[str]:
+    changed = set()
+    for tag in V3_STRATEGY_TAGS:
+        prior = (old.strategy_tag_results or {}).get(tag)
+        incoming = (new.strategy_tag_results or {}).get(tag)
+        if _canonical(prior.model_dump(mode="json") if prior else None) != _canonical(
+            incoming.model_dump(mode="json") if incoming else None
+        ):
+            changed.add(tag)
+    return changed
+
+
+def _carry_paused(
+    incoming: ClassificationSnapshot, baseline: ClassificationSnapshot, revision_id: int
+) -> ClassificationSnapshot:
+    updates = {}
+    for name in V3_PAUSED_DIMENSIONS:
+        old = getattr(baseline, name)
+        if (
+            baseline.rule_version == "3.0.0"
+            and old.evaluation_state == "NOT_EVALUATED"
+            and old.carried_from_revision_id is None
+        ):
+            updates[name] = old
+            continue
+        if old.carried_from_revision_id is not None:
+            updates[name] = old
+            continue
+        values = (old.value,) if isinstance(old.value, str) else old.value
+        compatible = set((*values, *old.candidates)) <= set(V3_CATALOG[name])
+        provenance = {
+            "carried_from_revision_id": revision_id,
+            "source_rule_version": baseline.rule_version,
+            "source_enum_version": baseline.enum_version,
+        }
+        updates[name] = (
+            old.model_copy(update={"evaluation_state": "PAUSED", **provenance})
+            if compatible
+            else DimensionResult(
+                status="UNKNOWN",
+                evaluation_state="NOT_EVALUATED",
+                carried_from_revision_id=revision_id,
+                source_rule_version=baseline.rule_version,
+                source_enum_version=baseline.enum_version,
+            )
+        )
+    return ClassificationSnapshot.model_validate({**incoming.model_dump(), **updates})
+
+
+def review_case_is_active(case: FundClassificationReviewCase) -> bool:
+    """Paused cases stay PENDING for history; default queues omit them."""
+    return case.status == "PENDING" and case.details.get("evaluation_state") != "PAUSED"
+
+
+def _time_metadata(
+    available_at: dt.datetime,
+    published_at: dt.datetime | None,
+    provider_available_at: dt.datetime | None,
+    ingested_at: dt.datetime | None,
+    availability_quality: str | None,
+) -> dict[str, object]:
+    ingested_at = ingested_at or available_at
+    for timestamp in (available_at, published_at, provider_available_at, ingested_at):
+        if timestamp is not None and timestamp.utcoffset() is None:
+            raise ValueError("source timestamps must include timezone")
+    quality = "EXACT" if provider_available_at else "DERIVED" if published_at else "INFERRED"
+    if availability_quality is not None and availability_quality != quality:
+        raise ValueError("availability_quality must match source timestamps")
+    if (
+        (published_at and provider_available_at and provider_available_at < published_at)
+        or (ingested_at < (provider_available_at or published_at or ingested_at))
+        or available_at < (provider_available_at or published_at or available_at)
+    ):
+        raise ValueError("available_at/source timestamps are inconsistent")
+    return dict(
+        published_at=published_at,
+        provider_available_at=provider_available_at,
+        ingested_at=ingested_at,
+        availability_quality=quality,
+    )
+
+
 def _canonical(value: object) -> object:
     """Retrieval/classification timestamps and storage IDs are not semantic changes."""
     if isinstance(value, dict):
-        return {
-            k: _canonical(v) for k, v in value.items() if k not in {"classified_at", "payload_ref"}
-        }
+        result = {}
+        for k, v in value.items():
+            if k in {
+                "classified_at",
+                "payload_ref",
+                "published_at",
+                "provider_available_at",
+                "ingested_at",
+            }:
+                continue
+            if k == "locator" and isinstance(v, str) and v.startswith("identity:"):
+                try:
+                    v, _ = json.JSONDecoder().raw_decode(v[len("identity:") :])
+                except ValueError:
+                    pass
+            result[k] = _canonical(v)
+        return result
     if isinstance(value, list):
         return sorted((_canonical(v) for v in value), key=lambda v: json.dumps(v, sort_keys=True))
     return value
@@ -58,16 +204,17 @@ def _canonical(value: object) -> object:
 def _hash(intervals: Sequence[StoredInterval]) -> str:
     content = [
         (a.isoformat(), b.isoformat() if b else None, _canonical(s.to_dict()), _canonical(trading))
-        for a, b, s, trading in intervals
+        for a, b, s, trading in sorted(intervals, key=lambda interval: interval[0])
     ]
     return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
 
 def _validate_snapshot(snapshot: ClassificationSnapshot) -> None:
+    catalog = V3_CATALOG if snapshot.rule_version == "3.0.0" else CATALOG
     for name in DIMENSIONS:
         dim: DimensionResult = getattr(snapshot, name)
         values = (dim.value,) if isinstance(dim.value, str) else dim.value
-        if not values or not set(values) <= set(CATALOG[name]):
+        if not values or not set(values) <= set(catalog[name]):
             raise ValueError(f"invalid {name} values")
         if len(set(values)) != len(values) or ("UNKNOWN" in values and len(values) != 1):
             raise ValueError(f"invalid {name} labels")
@@ -79,8 +226,25 @@ def _validate_snapshot(snapshot: ClassificationSnapshot) -> None:
             raise ValueError(f"confirmed {name} requires evidence and a known value")
         if dim.status == "CONFIRMED" and not any(e.source != "NAME" for e in dim.evidence):
             raise ValueError(f"confirmed {name} requires non-name evidence")
-        if not set(dim.candidates) <= set(CATALOG[name]):
+        if not set(dim.candidates) <= set(catalog[name]):
             raise ValueError(f"invalid {name} candidates")
+
+
+def _assert_observations_visible(snapshot: ClassificationSnapshot, at: dt.datetime) -> None:
+    def check(item: Evidence) -> None:
+        if item.classified_at.utcoffset() is None or item.classified_at > at:
+            raise ValueError("available_at cannot predate classification evidence")
+        for required in item.required_observations or ():
+            check(required)
+
+    for item in snapshot.observations or ():
+        check(item)
+    for result in [
+        *(getattr(snapshot, name) for name in DIMENSIONS),
+        *(snapshot.strategy_tag_results or {}).values(),
+    ]:
+        for item in result.evidence:
+            check(item)
 
 
 class ClassificationService:
@@ -123,6 +287,126 @@ class ClassificationService:
             for r in rows
         ]
 
+    def active_review_cases(self, fund_id: int | None = None) -> list[FundClassificationReviewCase]:
+        query = (
+            select(FundClassificationReviewCase)
+            .where(FundClassificationReviewCase.status == "PENDING")
+            .order_by(FundClassificationReviewCase.id)
+        )
+        if fund_id is not None:
+            query = query.where(FundClassificationReviewCase.fund_id == fund_id)
+        return [case for case in self.session.scalars(query) if review_case_is_active(case)]
+
+    def _mark_paused_cases(self, fund_id: int) -> None:
+        for case in self.active_review_cases(fund_id):
+            scope = case.details.get("source_dimensions") or [case.details.get("dimension")]
+            if any(name in V3_PAUSED_DIMENSIONS for name in scope):
+                active = [
+                    name
+                    for name in scope
+                    if name in V3_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
+                ]
+                case.details = {
+                    **case.details,
+                    "source_dimensions": scope,
+                    "active_scope": active,
+                    "evaluation_state": "EVALUATED" if active else "PAUSED",
+                }
+
+    def refresh_v3(
+        self,
+        fund_id: int,
+        evidence: Sequence[Evidence],
+        *,
+        available_at: dt.datetime,
+        actor: str,
+        reason: str,
+        valid_from: dt.date | None = None,
+        diagnostics: Sequence[str] = (),
+        published_at: dt.datetime | None = None,
+        provider_available_at: dt.datetime | None = None,
+        ingested_at: dt.datetime | None = None,
+        availability_quality: str | None = None,
+    ) -> FundClassificationRevision:
+        """Replay only saved raw observations. Callers resolve product/share membership.
+
+        An omitted observation is retained; explicit empty replaces only its stable
+        identity. Failed sources supply diagnostics and no replacement evidence.
+        """
+        from .policy import load_policy
+        from .rules import classify
+
+        if (
+            available_at.utcoffset() is None
+            or any(
+                item.classified_at.utcoffset() is None or item.classified_at > available_at
+                for item in evidence
+            )
+            or (ingested_at is not None and available_at < ingested_at)
+        ):
+            raise ValueError("available_at cannot predate newly collected evidence")
+        self.lock_product(fund_id)
+        previous = self.latest(fund_id)
+        target = valid_from or available_at.date()
+        baseline = (
+            next(
+                (
+                    v[2]
+                    for v in self.intervals(previous.id)
+                    if v[0] <= target and (v[1] is None or target < v[1])
+                ),
+                None,
+            )
+            if previous
+            else None
+        )
+        retained = (
+            {_observation_key(item): item for item in _observations(baseline)} if baseline else {}
+        )
+        # Pending proposals carry raw observations that have not replaced the manual
+        # baseline. Use them for the next partial refresh rather than losing them.
+        if previous:
+            for case in self.active_review_cases(fund_id):
+                start = case.details.get("valid_from")
+                end = case.details.get("valid_to")
+                if (
+                    case.revision_id != previous.id
+                    or not isinstance(start, str)
+                    or dt.date.fromisoformat(start) > target
+                    or isinstance(end, str)
+                    and target >= dt.date.fromisoformat(end)
+                ):
+                    continue
+                proposal = case.details.get("intervals", [])
+                if proposal:
+                    for item in _observations(
+                        ClassificationSnapshot.model_validate(proposal[0][2])
+                    ):
+                        retained[_observation_key(item)] = item
+        for item in evidence:
+            if item.required_observations:
+                raise ValueError("refresh_v3 requires raw observations, not derived assertions")
+            retained[_observation_key(item)] = item
+        raw = tuple(retained.values())
+        result = classify(raw, classified_at=available_at, policy=load_policy(rule_version="3.0.0"))
+        result = result.model_copy(
+            update={"observations": raw, "source_diagnostics": tuple(sorted(set(diagnostics)))}
+        )
+        if baseline is not None and previous is not None:
+            result = _carry_paused(result, baseline, previous.id)
+        return self.write(
+            fund_id,
+            result,
+            valid_from=target,
+            available_at=available_at,
+            actor=actor,
+            reason=reason,
+            published_at=published_at,
+            provider_available_at=provider_available_at,
+            ingested_at=ingested_at,
+            availability_quality=availability_quality,
+        )
+
     def write(
         self,
         fund_id: int,
@@ -134,6 +418,10 @@ class ClassificationService:
         reason: str,
         valid_to: dt.date | None = None,
         reviewed: bool = False,
+        published_at: dt.datetime | None = None,
+        provider_available_at: dt.datetime | None = None,
+        ingested_at: dt.datetime | None = None,
+        availability_quality: str | None = None,
     ) -> FundClassificationRevision:
         if not actor.strip() or not reason.strip():
             raise ValueError("actor and reason are required")
@@ -170,6 +458,10 @@ class ClassificationService:
             actor=actor,
             reason=reason,
             reviewed=reviewed,
+            published_at=published_at,
+            provider_available_at=provider_available_at,
+            ingested_at=ingested_at,
+            availability_quality=availability_quality,
         )
 
     def replace_intervals(
@@ -181,20 +473,56 @@ class ClassificationService:
         actor: str,
         reason: str,
         reviewed: bool = False,
+        published_at: dt.datetime | None = None,
+        provider_available_at: dt.datetime | None = None,
+        ingested_at: dt.datetime | None = None,
+        availability_quality: str | None = None,
     ) -> FundClassificationRevision:
         if not actor.strip() or not reason.strip():
             raise ValueError("actor and reason are required")
         if available_at.tzinfo is None:
             raise ValueError("available_at must include timezone")
+        time_metadata = _time_metadata(
+            available_at, published_at, provider_available_at, ingested_at, availability_quality
+        )
         self.lock_product(fund_id)
+        previous = self.latest(fund_id)
+        prior = self.intervals(previous.id) if previous else []
         ordered: list[StoredInterval] = sorted(
             [(v[0], v[1], v[2], v[3] if len(v) == 4 else {"status": "UNKNOWN"}) for v in intervals],
             key=lambda v: v[0],
         )
         if not ordered:
             raise ValueError("revision must contain intervals")
+        carried: list[StoredInterval] = []
+        for start, end, value, trading in ordered:
+            if value.rule_version != "3.0.0" or previous is None:
+                carried.append((start, end, value, trading))
+                continue
+            boundaries = {start}
+            for old_start, old_end, _, _ in prior:
+                for point in (old_start, old_end):
+                    if point is not None and start < point and (end is None or point < end):
+                        boundaries.add(point)
+            points = sorted(boundaries)
+            for index, point in enumerate(points):
+                stop = points[index + 1] if index + 1 < len(points) else end
+                baseline = next(
+                    (v[2] for v in prior if v[0] <= point and (v[1] is None or point < v[1])), None
+                )
+                carried.append(
+                    (
+                        point,
+                        stop,
+                        _carry_paused(value, baseline, previous.id) if baseline else value,
+                        trading,
+                    )
+                )
+        ordered = carried
         for i, (start, end, snapshot, _) in enumerate(ordered):
             _validate_snapshot(snapshot)
+            if snapshot.rule_version == "3.0.0":
+                _assert_observations_visible(snapshot, available_at)
             if end is not None and end <= start:
                 raise ValueError("invalid interval")
             previous_end = ordered[i - 1][1] if i else start
@@ -214,7 +542,8 @@ class ClassificationService:
                 merged.append((start, end, value, trading))
         ordered = merged
         digest = _hash(ordered)
-        previous = self.latest(fund_id)
+        if any(value.rule_version == "3.0.0" for _, _, value, _ in ordered):
+            self._mark_paused_cases(fund_id)
         if previous is not None and previous.content_hash == digest and not reviewed:
             return previous
         if previous is not None and previous.reviewed and not reviewed:
@@ -231,11 +560,21 @@ class ClassificationService:
                     continue
                 differing = [
                     name
-                    for name in DIMENSIONS
+                    for name in _active_dimensions(value)
                     if old is None
                     or _canonical(getattr(old[2], name).model_dump(mode="json"))
                     != _canonical(getattr(value, name).model_dump(mode="json"))
                 ]
+                if old is not None:
+                    differing.extend(
+                        f"strategy_tags.{tag}" for tag in sorted(_changed_tags(old[2], value))
+                    )
+                versions_changed = old is not None and (
+                    old[2].rule_version,
+                    old[2].enum_version,
+                ) != (value.rule_version, value.enum_version)
+                if versions_changed:
+                    differing = list(dict.fromkeys([*_active_dimensions(value), *differing]))
                 for name in differing or ["asset_class"]:
                     self._case(
                         previous,
@@ -245,6 +584,10 @@ class ClassificationService:
                             "valid_from": start.isoformat(),
                             "valid_to": end.isoformat() if end else None,
                             "dimension": name,
+                            "changed_scope": differing,
+                            "source_dimensions": differing,
+                            "baseline": old[2].to_dict() if old else None,
+                            "incoming_version": value.rule_version,
                             "intervals": [
                                 [
                                     start.isoformat(),
@@ -266,10 +609,7 @@ class ClassificationService:
             content_hash=digest,
             classified_at=available_at,
             available_at=available_at,
-            ingested_at=available_at,
-            published_at=None,
-            provider_available_at=None,
-            availability_quality="INFERRED",
+            **time_metadata,
             reason=reason,
             actor=actor,
             reviewed=reviewed,
@@ -284,6 +624,41 @@ class ClassificationService:
                     FundClassificationReviewCase.status == "PENDING",
                 )
             ):
+                scope = case.details.get("source_dimensions") or [case.details.get("dimension")]
+                if snapshot.rule_version == "3.0.0" and any(
+                    name in V3_PAUSED_DIMENSIONS for name in scope
+                ):
+                    active = [
+                        name
+                        for name in scope
+                        if name in V3_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
+                    ]
+                    case.details = {
+                        **case.details,
+                        "source_dimensions": scope,
+                        "active_scope": [],
+                        "evaluation_state": "PAUSED",
+                    }
+                    if active and case.issue_type in {
+                        "NEW_EVIDENCE_AFTER_REVIEW",
+                        "GROUPING_UNCONFIRMED",
+                    }:
+                        self._case(
+                            revision,
+                            case.issue_key,
+                            case.issue_type,
+                            {
+                                **case.details,
+                                "source_dimensions": active,
+                                "historical_source_dimensions": scope,
+                                "historical_case_id": case.id,
+                                "evaluation_state": "EVALUATED",
+                                "active_scope": active,
+                            },
+                            available_at,
+                        )
+                    # Preserve the original mixed/paused issue on its revision.
+                    continue
                 if case.issue_type in {"NEW_EVIDENCE_AFTER_REVIEW", "GROUPING_UNCONFIRMED"}:
                     carry.append(case)
                 case.status = "SUPERSEDED"
@@ -301,13 +676,10 @@ class ClassificationService:
                     valid_from=start,
                     valid_to=end,
                     available_at=available_at,
-                    ingested_at=available_at,
-                    published_at=None,
-                    provider_available_at=None,
-                    availability_quality="INFERRED",
+                    **time_metadata,
                 )
             )
-            for name in DIMENSIONS:
+            for name in _active_dimensions(snapshot):
                 dimension = getattr(value, name)
                 if dimension.status != "CONFIRMED":
                     self._case(
@@ -318,6 +690,19 @@ class ClassificationService:
                             "dimension": name,
                             "valid_from": start.isoformat(),
                             "result": dimension.model_dump(mode="json"),
+                        },
+                        available_at,
+                    )
+            for tag, result in (value.strategy_tag_results or {}).items():
+                if result.status in {"CANDIDATE", "CONFLICT"}:
+                    self._case(
+                        revision,
+                        f"{start}:strategy_tags.{tag}",
+                        result.status,
+                        {
+                            "dimension": f"strategy_tags.{tag}",
+                            "valid_from": start.isoformat(),
+                            "result": result.model_dump(mode="json"),
                         },
                         available_at,
                     )
@@ -381,6 +766,9 @@ class ClassificationService:
         reason: str,
         can_review: bool,
         reviewed_at: dt.datetime | None = None,
+        tag_decisions: Mapping[str, StrategyTagDecision] | None = None,
+        accept_incoming_version: str | None = None,
+        reject_upgrade: bool = False,
     ) -> FundClassificationRevision:
         if not can_review:
             raise PermissionError("classification review capability required")
@@ -397,8 +785,8 @@ class ClassificationService:
             or case.status != "PENDING"
         ):
             raise ClassificationConflict("Classification revision changed; reload before reviewing")
-        if not decisions or not set(decisions) <= set(DIMENSIONS):
-            raise ValueError("dimension decisions are required")
+        if not actor.strip() or not reason.strip():
+            raise ValueError("actor and reason are required")
         at = reviewed_at or dt.datetime.now(dt.UTC)
         intervals = self.intervals(latest.id)
         target_start = case.details.get("valid_from")
@@ -435,6 +823,26 @@ class ClassificationService:
             if incoming_intervals
             else None
         )
+        if snapshot.rule_version == "3.0.0" or (incoming and incoming.rule_version == "3.0.0"):
+            return self._review_v3(
+                case,
+                latest,
+                snapshot,
+                incoming,
+                target=target,
+                end=end,
+                at=at,
+                decisions=decisions,
+                tag_decisions=tag_decisions or {},
+                accept_incoming_version=accept_incoming_version,
+                reject_upgrade=reject_upgrade,
+                actor=actor,
+                reason=reason,
+            )
+        if tag_decisions or reject_upgrade or accept_incoming_version:
+            raise ValueError("v3 review options require a v3 snapshot")
+        if not decisions or not set(decisions) <= set(DIMENSIONS):
+            raise ValueError("dimension decisions are required")
         updates: dict[str, object] = {}
         for name, decision in decisions.items():
             original: DimensionResult = getattr(snapshot, name)
@@ -516,3 +924,184 @@ class ClassificationService:
         )
         self.session.flush()
         return revision
+
+    def _review_v3(
+        self,
+        case: FundClassificationReviewCase,
+        latest: FundClassificationRevision,
+        baseline: ClassificationSnapshot,
+        incoming: ClassificationSnapshot | None,
+        *,
+        target: dt.date,
+        end: dt.date | None,
+        at: dt.datetime,
+        decisions: Mapping[str, ReviewDecision],
+        tag_decisions: Mapping[str, StrategyTagDecision],
+        accept_incoming_version: str | None,
+        reject_upgrade: bool,
+        actor: str,
+        reason: str,
+    ) -> FundClassificationRevision:
+        if at.utcoffset() is None:
+            raise ValueError("reviewed_at must include timezone")
+        if at < max(latest.available_at, case.created_at):
+            raise ValueError("reviewed_at cannot predate the baseline or proposal")
+        proposed = incoming or baseline
+        if proposed.rule_version != "3.0.0":
+            raise ValueError("v3 review requires the incoming version to be 3.0.0")
+        upgrade = (baseline.rule_version, baseline.enum_version) != (
+            proposed.rule_version,
+            proposed.enum_version,
+        )
+        if reject_upgrade:
+            if not upgrade or decisions or tag_decisions:
+                raise ValueError("reject_upgrade requires an upgrade and no scope decisions")
+            result = latest
+        else:
+            if upgrade and accept_incoming_version != proposed.rule_version:
+                raise ValueError("explicit acceptance of incoming version is required")
+            if (
+                accept_incoming_version is not None
+                and accept_incoming_version != proposed.rule_version
+            ):
+                raise ValueError("incoming version does not match proposal")
+            if set(decisions) != set(V3_ACTIVE_DIMENSIONS) or not set(tag_decisions) <= set(
+                V3_STRATEGY_TAGS
+            ):
+                raise ValueError(
+                    "v3 review scope requires both active dimensions and no paused decisions"
+                )
+            required_tags = _changed_tags(baseline, proposed)
+            dimension = str(case.details.get("dimension", ""))
+            if dimension.startswith("strategy_tags."):
+                required_tags.add(dimension.split(".", 1)[1])
+            if not required_tags <= set(tag_decisions):
+                raise ValueError("v3 review scope requires decisions for changed strategy tags")
+            proposed = _carry_paused(proposed, baseline, latest.id)
+            updates: dict[str, object] = {}
+            for name, decision in decisions.items():
+                original = getattr(baseline, name)
+                new = getattr(proposed, name)
+                if not decision.evidence:
+                    raise ValueError("review decisions require evidence")
+                values = (decision.value,) if isinstance(decision.value, str) else decision.value
+                allowed = set((*original.candidates, *new.candidates))
+                for dim in (original, new):
+                    if dim.status == "CONFIRMED":
+                        allowed.update((dim.value,) if isinstance(dim.value, str) else dim.value)
+                if decision.action == "CONFIRM" and not set(values) <= allowed:
+                    raise ValueError("confirmation must select a baseline or incoming candidate")
+                updates[name] = DimensionResult(
+                    status="UNKNOWN" if decision.action == "REJECT" else "CONFIRMED",
+                    value="UNKNOWN" if decision.action == "REJECT" else decision.value,
+                    evidence=original.evidence + new.evidence + decision.evidence,
+                    evaluation_state="EVALUATED",
+                )
+            tags = dict(proposed.strategy_tag_results or {})
+            for tag, tag_decision in tag_decisions.items():
+                if not tag_decision.evidence:
+                    raise ValueError("tag decisions require evidence")
+                evidence = tuple(
+                    e
+                    for source in (baseline, proposed)
+                    for e in (
+                        (source.strategy_tag_results or {})[tag].evidence
+                        if tag in (source.strategy_tag_results or {})
+                        else ()
+                    )
+                )
+                tags[tag] = StrategyTagResult(
+                    status="CONFIRMED" if tag_decision.action == "CONFIRM" else "UNKNOWN",
+                    value=tag if tag_decision.action == "CONFIRM" else "UNKNOWN",
+                    evidence=evidence + tag_decision.evidence,
+                    evaluation_state="EVALUATED",
+                    manual_action=tag_decision.action,
+                )
+            reviewed = ClassificationSnapshot.model_validate(
+                {
+                    **proposed.model_dump(),
+                    **updates,
+                    "strategy_tag_results": tags,
+                    "strategy_tags": None,
+                    "observations": _observations(proposed),
+                    "review_items": tuple(
+                        sorted(
+                            [
+                                f"{name}:{dim.status}"
+                                for name, dim in updates.items()
+                                if isinstance(dim, DimensionResult) and dim.status != "CONFIRMED"
+                            ]
+                            + [
+                                f"strategy_tags:{tag}:{value.status}"
+                                for tag, value in tags.items()
+                                if value.status in {"CANDIDATE", "CONFLICT"}
+                            ]
+                        )
+                    ),
+                }
+            )
+            _validate_snapshot(reviewed)
+            result = self.write(
+                case.fund_id,
+                reviewed,
+                valid_from=target,
+                valid_to=end,
+                available_at=at,
+                actor=actor,
+                reason=reason,
+                reviewed=True,
+            )
+        decided_scope = set(decisions) | {f"strategy_tags.{tag}" for tag in tag_decisions}
+        for rebased in self.active_review_cases(case.fund_id):
+            if (
+                rebased.revision_id == result.id
+                and rebased.issue_type == "NEW_EVIDENCE_AFTER_REVIEW"
+                and rebased.details.get("valid_from") == target.isoformat()
+                and rebased.details.get("dimension") in decided_scope
+            ):
+                rebased.status = "RESOLVED"
+                rebased.resolved_at = at
+                rebased.result_revision_id = result.id
+        historical_scope = [
+            name
+            for name in case.details.get("source_dimensions", [])
+            if name in V3_PAUSED_DIMENSIONS
+        ]
+        if historical_scope:
+            case.details = {
+                **case.details,
+                "evaluation_state": "PAUSED",
+                "active_scope": [],
+                "reviewed_scope": sorted(decided_scope),
+            }
+            case.status = "PENDING"
+        else:
+            case.status = "RESOLVED"
+            case.resolved_at = at
+            case.result_revision_id = result.id
+        self.session.add(
+            AuditLog(
+                resource_type="fund_classification",
+                resource_id=str(case.fund_id),
+                action="REVIEW",
+                operator=actor,
+                detail={
+                    "reason": reason,
+                    "case_id": case.id,
+                    "expected_revision": latest.id,
+                    "revision_id": result.id,
+                    "baseline": baseline.to_dict(),
+                    "incoming": incoming.to_dict() if incoming else None,
+                    "accepted_version": accept_incoming_version,
+                    "reject_upgrade": reject_upgrade,
+                    "decisions": {
+                        name: value.model_dump(mode="json") for name, value in decisions.items()
+                    },
+                    "tag_decisions": {
+                        name: value.model_dump(mode="json") for name, value in tag_decisions.items()
+                    },
+                },
+            )
+        )
+        self.session.flush()
+        return result

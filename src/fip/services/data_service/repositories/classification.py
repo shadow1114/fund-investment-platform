@@ -75,6 +75,11 @@ class SqlClassificationPitRepository:
             "available_at": _timestamp(revision.available_at),
             "classified_at": _timestamp(revision.classified_at),
             "availability_quality": revision.availability_quality,
+            "published_at": _timestamp(revision.published_at) if revision.published_at else None,
+            "provider_available_at": _timestamp(revision.provider_available_at)
+            if revision.provider_available_at
+            else None,
+            "ingested_at": _timestamp(revision.ingested_at),
             "source_summary": sorted(
                 {
                     e["source"]
@@ -104,6 +109,12 @@ class SqlClassificationPitRepository:
                 "enum_version": r.enum_version,
                 "available_at": _timestamp(r.available_at),
                 "classified_at": _timestamp(r.classified_at),
+                "published_at": _timestamp(r.published_at) if r.published_at else None,
+                "provider_available_at": _timestamp(r.provider_available_at)
+                if r.provider_available_at
+                else None,
+                "ingested_at": _timestamp(r.ingested_at),
+                "availability_quality": r.availability_quality,
                 "actor": r.actor,
                 "reason": r.reason,
                 "reviewed": r.reviewed,

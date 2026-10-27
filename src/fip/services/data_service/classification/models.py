@@ -86,7 +86,7 @@ class Evidence(_AdditiveContract):
 
 
 class DimensionResult(_AdditiveContract):
-    _optional_metadata = (
+    _optional_metadata: ClassVar[tuple[str, ...]] = (
         "evaluation_state",
         "carried_from_revision_id",
         "source_rule_version",
@@ -135,6 +135,11 @@ class StrategyTagResult(DimensionResult):
     """Independent tag assertion; a missing legacy result is represented by None."""
 
     evaluation_state: Literal["NOT_EVALUATED", "EVALUATED"] = "NOT_EVALUATED"
+    _optional_metadata: ClassVar[tuple[str, ...]] = (
+        *DimensionResult._optional_metadata,
+        "manual_action",
+    )
+    manual_action: Literal["CONFIRM", "REJECT"] | None = None
 
     @model_validator(mode="after")
     def evidence_bearing_assertion(self) -> "StrategyTagResult":
@@ -144,7 +149,12 @@ class StrategyTagResult(DimensionResult):
 
 
 class ClassificationSnapshot(_AdditiveContract):
-    _optional_metadata = ("strategy_tag_results", "strategy_tags")
+    _optional_metadata = (
+        "strategy_tag_results",
+        "strategy_tags",
+        "observations",
+        "source_diagnostics",
+    )
     scheme: Literal["FIP_CLASSIFICATION_V1"] = "FIP_CLASSIFICATION_V1"
     rule_version: str = "1.0.0"
     enum_version: str = "1.0.0"
@@ -156,6 +166,9 @@ class ClassificationSnapshot(_AdditiveContract):
     review_items: tuple[str, ...] = ()
     strategy_tag_results: Mapping[str, StrategyTagResult] | None = None
     strategy_tags: tuple[str, ...] | None = None
+    # Raw observations include explicit empty values, even when no assertion uses them.
+    observations: tuple[Evidence, ...] | None = None
+    source_diagnostics: tuple[str, ...] | None = None
 
     @field_validator("strategy_tag_results")
     @classmethod
