@@ -173,6 +173,8 @@ def parse_index_batch(
         if (
             not _fund_code(code)
             or code in codes
+            or not isinstance(row["跟踪标的"], str)
+            or not isinstance(row["跟踪方式"], str)
             or row["跟踪标的"] != "全部"
             or row["跟踪方式"] != indicator
         ):
@@ -296,12 +298,22 @@ def collect_index_batches(
                 )
             )
             continue
-        results.append(
-            parse_index_batch(
+        try:
+            parsed = parse_index_batch(
                 record,
                 batch_id=batch_id,
                 payload_ref=payload_ref,
                 verified_total=(verified_totals or {}).get(indicator),
             )
-        )
+        except Exception as exc:
+            parsed = IndexBatch(
+                batch_id,
+                indicator,
+                "MALFORMED",
+                record,
+                payload_ref,
+                diagnostics=(f"{type(exc).__name__}:{exc}",),
+                verified_total=(verified_totals or {}).get(indicator),
+            )
+        results.append(parsed)
     return tuple(results)

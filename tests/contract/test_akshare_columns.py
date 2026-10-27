@@ -12,6 +12,9 @@ from fip.services.data_service.adapters.akshare.datasets import DATASETS
 pytestmark = pytest.mark.contract
 
 PROBE_PARAMS: dict[str, dict[str, str]] = {
+    "fund_index_passive": {},
+    "fund_index_enhanced": {},
+    "fund_detail_xq": {"symbol": "000001", "timeout": "20"},
     "fund_list": {},
     "fund_overview": {"symbol": "000001"},
     "fund_nav": {"symbol": "000001"},
@@ -30,9 +33,9 @@ def test_upstream_still_provides_declared_columns(dataset):
 
 
 def test_every_dataset_has_probe_params():
-    assert set(PROBE_PARAMS) == set(DATASETS), (
-        "新增数据集时必须同时补探查参数，否则该数据集没有契约保护"
-    )
+    assert set(PROBE_PARAMS) == set(
+        DATASETS
+    ), "新增数据集时必须同时补探查参数，否则该数据集没有契约保护"
 
 
 @pytest.mark.parametrize(
@@ -58,9 +61,7 @@ def test_fund_split_handles_both_split_and_no_split_funds(symbol, expect_zero_ro
     [("161725", False), ("110022", True)],
     ids=["has_dividend_history", "no_dividend_history"],
 )
-def test_fund_distribution_handles_both_dividend_and_no_dividend_funds(
-    symbol, expect_zero_rows
-):
+def test_fund_distribution_handles_both_dividend_and_no_dividend_funds(symbol, expect_zero_rows):
     """与 fund_split 的空结果走的是同一套 _assert_columns 代码路径，但这是
     两个不同的数据集 —— 若只靠 split 测试“顺带”覆盖，一旦有人给 split
     加特例或收窄空结果分支，分红这边会静默失效而没有测试变红。161725 有
@@ -74,3 +75,33 @@ def test_fund_distribution_handles_both_dividend_and_no_dividend_funds(
     else:
         assert record.row_count > 0
 
+
+@pytest.mark.parametrize(
+    "dataset,function,columns,params",
+    [
+        (
+            "fund_index_passive",
+            "fund_info_index_em",
+            {"基金代码", "跟踪标的", "跟踪方式"},
+            {"symbol": "全部", "indicator": "被动指数型"},
+        ),
+        (
+            "fund_index_enhanced",
+            "fund_info_index_em",
+            {"基金代码", "跟踪标的", "跟踪方式"},
+            {"symbol": "全部", "indicator": "增强指数型"},
+        ),
+        (
+            "fund_detail_xq",
+            "fund_individual_basic_info_xq",
+            {"item", "value"},
+            {"symbol": "000001", "timeout": "20"},
+        ),
+    ],
+)
+def test_classification_dataset_probe_contracts(dataset, function, columns, params):
+    """Offline declarations only: never instantiate/fetch a live adapter here."""
+    spec = DATASETS[dataset]
+    assert spec.callable_name == function
+    assert spec.required_columns == columns
+    assert {**spec.fixed_params, **PROBE_PARAMS[dataset]} == params

@@ -36,6 +36,7 @@ INDEX_COLUMNS = [
 @pytest.fixture(autouse=True)
 def block_default_provider_calls(monkeypatch):
     import socket
+    import subprocess
 
     import requests
 
@@ -49,6 +50,22 @@ def block_default_provider_calls(monkeypatch):
     monkeypatch.setattr(requests.sessions.Session, "request", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
+    original_popen = subprocess.Popen
+
+    def guarded_popen(command, *args, **kwargs):
+        # Only the reviewed local sleeping-child timeout fixture may start a process.
+        if (
+            isinstance(command, list)
+            and len(command) == 4
+            and command[1] == "-c"
+            and command[2]
+            == ("import pathlib,sys,time; time.sleep(1); pathlib.Path(sys.argv[1]).touch()")
+            and not kwargs.get("shell")
+        ):
+            return original_popen(command, *args, **kwargs)
+        pytest.fail("unreviewed child process forbidden in offline adapter tests")
+
+    monkeypatch.setattr(subprocess, "Popen", guarded_popen)
 
 
 def sources():
@@ -586,7 +603,7 @@ def test_snowball_ignores_nontext_metadata_without_discarding_classification_fie
     assert len(result.evidence) == 4
 
 
-def test_mixed_snowball_serialization_failure_retains_raw_response(monkeypatch):
+def test_snowball_classification_value_contract_failure_retains_raw_response(monkeypatch):
     import base64
 
     import requests
@@ -601,6 +618,7 @@ def test_mixed_snowball_serialization_failure_retains_raw_response(monkeypatch):
         requests.get("https://offline.invalid")
         frame = snowball_frame()
         frame.loc[frame["item"] == "最新规模", "value"] = 123.4
+        frame.loc[frame["item"] == "投资策略", "value"] = 123.4
         return frame
 
     result = module.capture_source(
@@ -612,3 +630,122 @@ def test_mixed_snowball_serialization_failure_retains_raw_response(monkeypatch):
     assert not result["retryable"]
     assert "Arrow" in result["error"]
     assert base64.b64decode(result["raw"]) == response.content
+
+
+@pytest.mark.parametrize("transport", ["isolated", "injected"])
+def test_mixed_snowball_metadata_reaches_adapter_parser_without_changing_evidence(
+    monkeypatch,
+    transport,
+):
+    import json
+    import subprocess
+
+    import requests
+
+    from fip.services.data_service.adapters.akshare import client, source_worker
+
+    raw = b'{"data":{"fd_code":"000001","totshare":123.4}}'
+    response = requests.Response()
+    response.status_code = 200
+    response._content = raw
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
+    frame = snowball_frame()
+    frame.loc[frame["item"] == "最新规模", "value"] = 123.4
+    frame.loc[frame["item"] == "投资目标", "value"] = None
+
+    def provider(**params):
+        assert params == {"symbol": "000001", "timeout": 20.0}
+        requests.get("https://offline.invalid")
+        return frame.copy()
+
+    def run(command, **kwargs):
+        assert command[2] == "fip.services.data_service.adapters.akshare.source_worker"
+        envelope = source_worker.capture_source(
+            command[3],
+            json.loads(command[4]),
+            caller=provider,
+        )
+        return subprocess.CompletedProcess(command, 0, json.dumps(envelope).encode(), b"")
+
+    monkeypatch.setattr(client, "_throttle_overview", lambda: None)
+    monkeypatch.setattr(subprocess, "run", run)
+    adapter = AkShareSourceAdapter(clock=lambda: NOW)
+    if transport == "injected":
+        adapter = AkShareSourceAdapter(
+            clock=lambda: NOW, caller=lambda name, **params: provider(**params)
+        )
+    payload = adapter.fetch("fund_detail_xq", symbol="000001")
+    result = sources().parse_snowball_detail(payload, payload_ref="raw:50")
+    assert result.state == "VALID"
+    assert result.field_states["投资目标"] == "EMPTY"
+    assert [(e.raw_field, e.raw_value) for e in result.evidence] == [
+        ("基金类型", "混合型-偏股"),
+        ("投资策略", "采用主动管理和多因子模型"),
+        ("投资目标", ""),
+        ("业绩比较基准", "沪深300指数收益率*80%"),
+    ]
+    restored = pd.read_parquet(io.BytesIO(payload.payload))
+    assert restored.loc[restored["item"] == "最新规模", "value"].iloc[0] == "123.4"
+    assert frame.loc[frame["item"] == "最新规模", "value"].iloc[0] == 123.4
+
+
+def test_nullable_index_context_reports_malformed_and_collects_other_indicator():
+    def caller(name, **params):
+        frame = index_frame(indicator=params["indicator"])
+        if params["indicator"] == "被动指数型":
+            # Nullable pandas string dtype preserves pd.NA through parquet roundtrip.
+            frame["跟踪标的"] = pd.Series([pd.NA, "全部"], dtype="string")
+        return frame
+
+    results = sources().collect_index_batches(
+        AkShareSourceAdapter(caller=caller, clock=lambda: NOW),
+        batch_id="nullable",
+        payload_refs={"被动指数型": "raw:60", "增强指数型": "raw:61"},
+        verified_totals={"被动指数型": 2, "增强指数型": 2},
+    )
+    assert [batch.state for batch in results] == ["MALFORMED", "COMPLETE"]
+    assert results[0].diagnostics
+    assert not results[0].may_withdraw_prior
+    assert results[1].fund_codes == ("000001", "012345")
+
+
+def test_parse_exception_does_not_skip_independent_enhanced_batch(monkeypatch):
+    module = sources()
+    parse = module.parse_index_batch
+
+    def parse_with_nullable_failure(record, **kwargs):
+        if record.dataset == "fund_index_passive":
+            raise TypeError("boolean value of NA is ambiguous")
+        return parse(record, **kwargs)
+
+    monkeypatch.setattr(module, "parse_index_batch", parse_with_nullable_failure)
+    results = module.collect_index_batches(
+        AkShareSourceAdapter(
+            caller=lambda name, **params: index_frame(indicator=params["indicator"]),
+            clock=lambda: NOW,
+        ),
+        batch_id="parse-error",
+        payload_refs={"被动指数型": "raw:62", "增强指数型": "raw:63"},
+        verified_totals={"增强指数型": 2},
+    )
+    assert [batch.state for batch in results] == ["MALFORMED", "COMPLETE"]
+    assert "TypeError" in results[0].diagnostics[0]
+    assert results[0].record.payload
+    assert not results[0].may_withdraw_prior
+
+
+def test_offline_guard_blocks_source_provider_child_before_process_creation():
+    import sys
+
+    from fip.services.data_service.adapters.akshare import client
+
+    with pytest.raises(pytest.fail.Exception, match="unreviewed child process"):
+        client._run_isolated(
+            [
+                sys.executable,
+                "-m",
+                "fip.services.data_service.adapters.akshare.source_worker",
+                "fund_info_index_em",
+                "{}",
+            ]
+        )

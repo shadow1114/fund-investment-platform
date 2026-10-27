@@ -15,6 +15,7 @@ import pandas as pd
 
 from fip.platform.source.port import SourceRecord
 from fip.services.data_service.adapters.akshare.datasets import DATASETS, DatasetSpec
+from fip.services.data_service.adapters.akshare.source_worker import normalize_snowball_metadata
 
 
 class AkShareContractError(RuntimeError):
@@ -201,6 +202,8 @@ class AkShareSourceAdapter:
         else:
             frame = self._caller(spec.callable_name, **call_params)
 
+        if dataset == "fund_detail_xq":
+            frame = normalize_snowball_metadata(frame)
         buffer = io.BytesIO()
         frame.to_parquet(buffer, index=False)
         record = SourceRecord(
