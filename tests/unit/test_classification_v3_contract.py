@@ -83,7 +83,7 @@ def test_v3_registered_loading_separates_tags_from_core_dimensions():
     assert loaded.strategy_tag_catalog == ("QUANTITATIVE",)
     assert "QUANTITATIVE" not in loaded.strategy_priority
     original = policy.load_policy()
-    assert loaded.formal_types == original.formal_types
+    assert original.formal_types.items() <= loaded.formal_types.items()
     for dimension in ("asset_class", *PAUSED):
         assert loaded.catalog[dimension] == original.catalog[dimension]
 

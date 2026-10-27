@@ -2,9 +2,10 @@
 
 from pathlib import Path
 from types import MappingProxyType
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .models import (
     DIMENSIONS,
@@ -23,6 +24,16 @@ POLICY_REGISTRY = MappingProxyType(
 )
 
 
+class IndexAssetEntry(BaseModel):
+    """Literal target mapping; references identify curation, not a live verification."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    asset_class: str
+    provider: str = Field(min_length=1)
+    reference: str = Field(min_length=1)
+    verification: Literal["CURATED_NOT_LIVE_VERIFIED"]
+
+
 class ClassificationPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     scheme: str = "FIP_CLASSIFICATION_V1"
@@ -34,6 +45,8 @@ class ClassificationPolicy(BaseModel):
     active_dimensions: tuple[str, ...] = DIMENSIONS
     paused_dimensions: tuple[str, ...] = ()
     strategy_tag_catalog: tuple[str, ...] = ()
+    index_asset_mapping_version: str | None = None
+    index_assets: dict[str, IndexAssetEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def semantic_contract(self) -> "ClassificationPolicy":
@@ -51,6 +64,18 @@ class ClassificationPolicy(BaseModel):
             raise ValueError("Classification catalog must cover all five dimensions uniquely")
         if not set(self.formal_types.values()) <= set(self.catalog["asset_class"]):
             raise ValueError("Formal type mapping contains an unknown asset value")
+        if self.index_assets and (
+            not self.index_asset_mapping_version
+            or not self.index_asset_mapping_version.strip()
+            or any(
+                not target.strip()
+                or entry.asset_class not in set(self.catalog["asset_class"]) - {"UNKNOWN"}
+                or not entry.provider.strip()
+                or not entry.reference.strip()
+                for target, entry in self.index_assets.items()
+            )
+        ):
+            raise ValueError("Index assets require a mapping version, known assets and provenance")
         if set(self.strategy_priority) != set(self.catalog["strategy"]) - {"UNKNOWN"} or len(
             self.strategy_priority
         ) != len(set(self.strategy_priority)):
