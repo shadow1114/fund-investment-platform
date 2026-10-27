@@ -57,17 +57,36 @@ class StrategyTagDecision(BaseModel):
     evidence: tuple[Evidence, ...]
 
 
-def _observation_key(item: Evidence) -> str:
+def _source_identity(item: Evidence) -> dict[str, object] | None:
     locator = item.locator or ""
     if locator.startswith("identity:"):
         try:
             identity, _ = json.JSONDecoder().raw_decode(locator[len("identity:") :])
-        except ValueError as exc:
-            raise ValueError("invalid observation identity") from exc
+        except ValueError:
+            return None
+        if (
+            isinstance(identity, dict)
+            and all(
+                isinstance(identity.get(key), str) and identity[key].strip()
+                for key in ("provider", "dataset", "provider_fund_code", "raw_field")
+            )
+            and identity["raw_field"] == item.raw_field
+            and isinstance(identity.get("params"), dict)
+        ):
+            return identity
+    return None
+
+
+def _observation_key(item: Evidence) -> str:
+    identity = _source_identity(item)
+    if identity is not None:
         # Row positions change when an upstream list is reordered. Necessary stable
         # row identities belong inside identity, alongside provider/share/params.
         locator = "identity:" + json.dumps(identity, sort_keys=True, ensure_ascii=False)
-    return json.dumps([item.source, item.raw_field, locator])
+        return json.dumps([item.source, item.raw_field, locator])
+    # An incomplete legacy locator cannot prove source/share equivalence. Preserve
+    # distinct immutable records; a new partial refresh may not overwrite them.
+    return "legacy:" + item.model_dump_json()
 
 
 def _observations(snapshot: ClassificationSnapshot) -> tuple[Evidence, ...]:
@@ -247,11 +266,74 @@ def _assert_observations_visible(snapshot: ClassificationSnapshot, at: dt.dateti
             check(item)
 
 
+def verified_tag_rejections(
+    session: Session,
+    fund_id: int,
+    snapshot: ClassificationSnapshot,
+    *,
+    visible_until: dt.datetime,
+) -> frozenset[str]:
+    """Manual admission requires an actual matching review, never a JSON flag alone."""
+    requested = {
+        tag: result
+        for tag, result in (snapshot.strategy_tag_results or {}).items()
+        if result.manual_action == "REJECT"
+    }
+    if not requested:
+        return frozenset()
+    verified = set()
+    audits = session.scalars(
+        select(AuditLog).where(
+            AuditLog.resource_type == "fund_classification",
+            AuditLog.resource_id == str(fund_id),
+            AuditLog.action == "REVIEW",
+            AuditLog.created_at <= visible_until,
+        )
+    )
+    for audit in audits:
+        detail = audit.detail or {}
+        revision_id = detail.get("revision_id")
+        revision = (
+            session.get(FundClassificationRevision, revision_id)
+            if isinstance(revision_id, int)
+            else None
+        )
+        case_id = detail.get("case_id")
+        case = (
+            session.get(FundClassificationReviewCase, case_id) if isinstance(case_id, int) else None
+        )
+        if (
+            revision is None
+            or not revision.reviewed
+            or revision.fund_id != fund_id
+            or revision.available_at > visible_until
+            or (revision.rule_version, revision.enum_version)
+            != (snapshot.rule_version, snapshot.enum_version)
+            or case is None
+            or case.fund_id != fund_id
+            or case.revision_id != detail.get("expected_revision")
+            or not audit.operator.strip()
+            or not str(detail.get("reason", "")).strip()
+        ):
+            continue
+        result_tags = detail.get("result_tag_results") or {}
+        decisions = detail.get("tag_decisions") or {}
+        for tag, result in requested.items():
+            if (
+                decisions.get(tag, {}).get("action") == "REJECT"
+                and decisions.get(tag, {}).get("evidence")
+                and result_tags.get(tag) == result.model_dump(mode="json")
+            ):
+                verified.add(tag)
+    return frozenset(verified)
+
+
 class ClassificationService:
     """Never commits: caller owns the transaction including raw ingestion and audit."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
+        self._authorized_tag_rejections: dict[str, StrategyTagResult] = {}
 
     def lock_product(self, fund_id: int) -> None:
         product = self.session.scalar(select(Fund).where(Fund.id == fund_id).with_for_update())
@@ -345,6 +427,8 @@ class ClassificationService:
             or (ingested_at is not None and available_at < ingested_at)
         ):
             raise ValueError("available_at cannot predate newly collected evidence")
+        if any(_source_identity(item) is None for item in evidence):
+            raise ValueError("refresh_v3 requires stable provider/share observation identity")
         self.lock_product(fund_id)
         previous = self.latest(fund_id)
         target = valid_from or available_at.date()
@@ -664,7 +748,16 @@ class ClassificationService:
                 case.status = "SUPERSEDED"
                 case.resolved_at = available_at
         for start, end, value, trading in ordered:
-            projection = project_legacy(value, grouping_confirmed=True)
+            projection = project_legacy(
+                value,
+                grouping_confirmed=True,
+                verified_tag_rejections=frozenset(
+                    tag
+                    for tag, result in self._authorized_tag_rejections.items()
+                    if (value.strategy_tag_results or {}).get(tag) == result
+                )
+                | verified_tag_rejections(self.session, fund_id, value, visible_until=available_at),
+            )
             self.session.add(
                 FundClassificationHistory(
                     fund_id=fund_id,
@@ -785,6 +878,8 @@ class ClassificationService:
             or case.status != "PENDING"
         ):
             raise ClassificationConflict("Classification revision changed; reload before reviewing")
+        if not review_case_is_active(case):
+            raise ValueError("paused historical classification cases cannot be reviewed")
         if not actor.strip() or not reason.strip():
             raise ValueError("actor and reason are required")
         at = reviewed_at or dt.datetime.now(dt.UTC)
@@ -1041,16 +1136,25 @@ class ClassificationService:
                 }
             )
             _validate_snapshot(reviewed)
-            result = self.write(
-                case.fund_id,
-                reviewed,
-                valid_from=target,
-                valid_to=end,
-                available_at=at,
-                actor=actor,
-                reason=reason,
-                reviewed=True,
-            )
+            # Only this authorized/CAS-checked review path may admit newly rejected
+            # tags while its revision and matching audit are built atomically.
+            prior_scope = self._authorized_tag_rejections
+            self._authorized_tag_rejections = {
+                tag: tags[tag] for tag, value in tag_decisions.items() if value.action == "REJECT"
+            }
+            try:
+                result = self.write(
+                    case.fund_id,
+                    reviewed,
+                    valid_from=target,
+                    valid_to=end,
+                    available_at=at,
+                    actor=actor,
+                    reason=reason,
+                    reviewed=True,
+                )
+            finally:
+                self._authorized_tag_rejections = prior_scope
         decided_scope = set(decisions) | {f"strategy_tags.{tag}" for tag in tag_decisions}
         for rebased in self.active_review_cases(case.fund_id):
             if (
@@ -1094,6 +1198,15 @@ class ClassificationService:
                     "incoming": incoming.to_dict() if incoming else None,
                     "accepted_version": accept_incoming_version,
                     "reject_upgrade": reject_upgrade,
+                    "result_tag_results": {
+                        tag: value.model_dump(mode="json")
+                        for tag, value in (proposed.strategy_tag_results or {}).items()
+                    }
+                    if reject_upgrade
+                    else {
+                        tag: value.model_dump(mode="json")
+                        for tag, value in (reviewed.strategy_tag_results or {}).items()
+                    },
                     "decisions": {
                         name: value.model_dump(mode="json") for name, value in decisions.items()
                     },
@@ -1101,6 +1214,7 @@ class ClassificationService:
                         name: value.model_dump(mode="json") for name, value in tag_decisions.items()
                     },
                 },
+                created_at=at,
             )
         )
         self.session.flush()

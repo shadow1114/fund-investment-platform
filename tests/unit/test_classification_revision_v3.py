@@ -323,7 +323,11 @@ def test_v3_upgrade_requires_explicit_version_two_dimensions_and_changed_tag():
     assert audit.detail["baseline"]["rule_version"] == "1.0.0"
     assert audit.detail["incoming"]["rule_version"] == "3.0.0"
     assert audit.detail["tag_decisions"]["QUANTITATIVE"]["action"] == "REJECT"
-    assert project_legacy(snapshot, grouping_confirmed=True).value == "ACTIVE_EQUITY"
+    assert project_legacy(snapshot, grouping_confirmed=True).value is None
+    assert (
+        SqlClassificationPitRepository(session, LATER).current(1).classification_code
+        == "ACTIVE_EQUITY"
+    )
     with pytest.raises(module.ClassificationConflict):
         service.review(case.id, decisions={}, **kwargs)
 
@@ -598,7 +602,11 @@ def test_manual_tag_rejection_is_persisted_and_can_admit_evaluated_nonquant_acti
     )
     result = service.intervals(revision.id)[-1][2]
     assert result.strategy_tag_results["QUANTITATIVE"].manual_action == "REJECT"
-    assert project_legacy(result, grouping_confirmed=True).value == "ACTIVE_EQUITY"
+    assert project_legacy(result, grouping_confirmed=True).value is None
+    assert (
+        SqlClassificationPitRepository(session, LATER).current(1).classification_code
+        == "ACTIVE_EQUITY"
+    )
     service.refresh_v3(
         1,
         [ev("investment_strategy", "本基金采用量化模型和主动管理策略。", at=LATER)],
@@ -763,3 +771,169 @@ def test_v3_interval_revision_does_not_create_paused_cases_for_copied_v1_history
         and c.details.get("dimension") in {"geography", "product_structure", "market_attributes"}
         for c in service.active_review_cases(1)
     )
+
+
+def test_paused_case_cannot_be_reviewed_directly_with_current_v1_baseline_revision():
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    baseline = persist(session, snap(v3=False), reviewed=True)
+    case = next(
+        c for c in service.active_review_cases(1) if c.details.get("dimension") == "geography"
+    )
+    persist(session, snap(), at=LATER)
+    before = list(session.rows)
+    assert case.details["evaluation_state"] == "PAUSED"
+    with pytest.raises(ValueError, match="paused"):
+        service.review(
+            case.id,
+            expected_revision=baseline.id,
+            decisions={"geography": decision("US")},
+            actor="reviewer",
+            reason="must remain historical",
+            can_review=True,
+            reviewed_at=LATER,
+        )
+    assert session.rows == before
+    assert service.latest(1) is baseline
+    assert case.status == "PENDING"
+    assert case.resolved_at is None
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        None,
+        "p.2",
+        "identity:{};row:0",
+        'identity:{"provider":"SNOWBALL","dataset":"fund_detail_xq","provider_fund_code":"","params":{},"raw_field":"formal_type"};row:0',
+    ],
+)
+def test_new_refresh_input_requires_stable_provider_share_identity(locator):
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    baseline = persist(session)
+    unsafe = ev("formal_type", "").model_copy(update={"locator": locator})
+    before = list(session.rows)
+    with pytest.raises(ValueError, match="identity"):
+        service.refresh_v3(1, [unsafe], available_at=LATER, actor="source", reason="unsafe empty")
+    assert session.rows == before
+    assert service.latest(1) is baseline
+    assert service.intervals(baseline.id)[-1][2].asset_class.value == "EQUITY"
+
+
+def test_incomplete_legacy_observations_are_preserved_separately_during_safe_partial_refresh():
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    share_a = ev("formal_type", "股票型", payload="raw:A").model_copy(update={"locator": None})
+    share_b = ev("formal_type", "债券型-长债", payload="raw:B").model_copy(update={"locator": None})
+    persist(session, snap(share_a, share_b))
+    revision = service.refresh_v3(
+        1,
+        [ev("investment_strategy", "本基金采用主动管理策略。")],
+        available_at=LATER,
+        actor="source",
+        reason="other physical field",
+    )
+    result = service.intervals(revision.id)[-1][2]
+    assert result.asset_class.status == "CONFLICT"
+    assert {e.payload_ref for e in result.observations if e.raw_field == "formal_type"} == {
+        "raw:A",
+        "raw:B",
+    }
+
+
+def test_ordinary_write_cannot_admit_unaudited_manual_tag_rejection():
+    session = MemorySession()
+    tag = StrategyTagResult(
+        status="UNKNOWN",
+        evaluation_state="EVALUATED",
+        manual_action="REJECT",
+        evidence=(ev("strategy", "unreviewed claim"),),
+    )
+    snapshot = snap().model_copy(
+        update={"strategy_tag_results": {"QUANTITATIVE": tag}, "strategy_tags": ()}
+    )
+    assert project_legacy(snapshot, grouping_confirmed=True).value is None
+    persist(session, snapshot, reviewed=True)
+    assert SqlClassificationPitRepository(session, NOW).current(1).classification_code == "UNKNOWN"
+
+
+def test_audited_review_admits_manual_tag_rejection_only_for_matching_result_tag():
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    baseline = persist(session, snap(ev("formal_type", "股票型")))
+    case = pending(session, baseline)
+    revision = service.review(
+        case.id,
+        expected_revision=baseline.id,
+        decisions={"asset_class": decision("EQUITY"), "strategy": decision()},
+        tag_decisions={
+            "QUANTITATIVE": module.StrategyTagDecision(
+                action="REJECT", evidence=(ev("strategy", "verified rejection"),)
+            )
+        },
+        actor="reviewer",
+        reason="contract rules out quant",
+        can_review=True,
+        reviewed_at=LATER,
+    )
+    current = SqlClassificationPitRepository(session, LATER).current(1)
+    assert current.classification_code == "ACTIVE_EQUITY"
+    audit = next(r for r in session.rows if isinstance(r, AuditLog) and r.action == "REVIEW")
+    assert audit.detail["result_tag_results"]["QUANTITATIVE"]["manual_action"] == "REJECT"
+    audit.detail = {**audit.detail, "result_tag_results": {}}
+    assert (
+        SqlClassificationPitRepository(session, LATER).current(1).classification_code == "UNKNOWN"
+    )
+    assert service.latest(1) is revision
+
+
+def test_authorized_tag_admission_is_bound_to_exact_reviewed_result_across_intervals():
+    from fip.services.data_service.models.fund import FundClassificationHistory
+
+    session = MemorySession()
+    service = module.ClassificationService(session)
+    forged = StrategyTagResult(
+        status="UNKNOWN",
+        evaluation_state="EVALUATED",
+        manual_action="REJECT",
+        evidence=(ev("strategy", "unreviewed historical claim"),),
+    )
+    historical = snap().model_copy(
+        update={"strategy_tag_results": {"QUANTITATIVE": forged}, "strategy_tags": ()}
+    )
+    tomorrow = DAY + dt.timedelta(days=1)
+    baseline = service.replace_intervals(
+        1,
+        [(DAY, tomorrow, historical), (tomorrow, None, snap(ev("formal_type", "股票型")))],
+        available_at=NOW,
+        actor="source",
+        reason="two intervals",
+    )
+    case = next(
+        c
+        for c in service.active_review_cases(1)
+        if c.details.get("valid_from") == tomorrow.isoformat()
+    )
+    reviewed = service.review(
+        case.id,
+        expected_revision=baseline.id,
+        decisions={"asset_class": decision("EQUITY"), "strategy": decision()},
+        tag_decisions={
+            "QUANTITATIVE": module.StrategyTagDecision(
+                action="REJECT", evidence=(ev("strategy", "authorized different result"),)
+            )
+        },
+        actor="reviewer",
+        reason="one reviewed interval only",
+        can_review=True,
+        reviewed_at=LATER,
+    )
+    old_interval = next(
+        r
+        for r in session.rows
+        if isinstance(r, FundClassificationHistory)
+        and r.revision_id == reviewed.id
+        and r.valid_from == DAY
+    )
+    assert old_interval.classification_code == "UNKNOWN"

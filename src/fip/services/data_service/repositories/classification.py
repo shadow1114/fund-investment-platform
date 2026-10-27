@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from fip.platform.decision_data.pit import ClassificationPoint
 from fip.services.data_service.classification import ClassificationSnapshot, project_legacy
+from fip.services.data_service.classification.service import verified_tag_rejections
 from fip.services.data_service.models.fund import (
     Fund,
     FundClassificationHistory,
@@ -148,6 +149,9 @@ class SqlClassificationPitRepository:
             projection = project_legacy(
                 snapshot,
                 grouping_confirmed=(product is not None and product.grouping_status == "CONFIRMED"),
+                verified_tag_rejections=verified_tag_rejections(
+                    self._session, fund_id, snapshot, visible_until=self._visible_until
+                ),
             )
             return ClassificationPoint(
                 projection.value or "UNKNOWN",

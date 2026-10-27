@@ -14,7 +14,10 @@ class LegacyProjection:
 
 
 def project_legacy(
-    snapshot: ClassificationSnapshot, *, grouping_confirmed: bool
+    snapshot: ClassificationSnapshot,
+    *,
+    grouping_confirmed: bool,
+    verified_tag_rejections: frozenset[str] = frozenset(),
 ) -> LegacyProjection:
     if not grouping_confirmed:
         return LegacyProjection(None, "PRODUCT_GROUPING_UNCONFIRMED")
@@ -40,6 +43,7 @@ def project_legacy(
                     and tag.evaluation_state == "EVALUATED"
                     and (
                         tag.manual_action == "REJECT"
+                        and "QUANTITATIVE" in verified_tag_rejections
                         or bool(tag.evidence)
                         and all(
                             e.rule_id == "TAG_QUANTITATIVE"
