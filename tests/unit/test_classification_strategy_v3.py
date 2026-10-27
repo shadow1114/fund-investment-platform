@@ -521,6 +521,7 @@ def test_review_unrelated_enhancement_does_not_change_passive_strategy(text):
     [
         "本基金通过复制沪深300指数，并主动增强获取超额收益。",
         "本基金通过复制沪深300指数并主动增强获取超额收益。",
+        "本基金通过复制沪深300指数并主动增强以获取超额收益。",
         "本基金通过主动管理增强指数投资组合。",
     ],
 )
