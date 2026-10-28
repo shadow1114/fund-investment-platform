@@ -2,11 +2,11 @@ import { Button, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type {
-  FundIngestionTask,
-  FundIngestionPreview,
-} from "../api/generated/m17.schemas";
-import { getSessionQueryOptions } from "../api/queries";
+import type { FundIngestionPreview } from "../api/generated/m17.schemas";
+import {
+  getSessionQueryOptions,
+  getLatestIngestionQueryOptions,
+} from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { PageHeader } from "../components/PageHeader";
 import { IngestionHistoryTable } from "../features/ingestion/IngestionHistoryTable";
@@ -17,7 +17,13 @@ import styles from "./DataIngestionPage.module.css";
 export const DataIngestionPage = () => {
   const session = useQuery(getSessionQueryOptions());
   const [search, setSearch] = useSearchParams();
-  const [latest, setLatest] = useState<FundIngestionTask>();
+  const latestQuery = useQuery({
+    ...getLatestIngestionQueryOptions(true),
+    enabled:
+      session.isSuccess &&
+      session.data.capabilities.can_manage_data_ingestion === true,
+  });
+  const latest = latestQuery.data?.items[0];
   const [preview, setPreview] = useState<FundIngestionPreview>();
   const operationId = search.get("operation_id");
   if (session.isPending)
@@ -61,9 +67,11 @@ export const DataIngestionPage = () => {
             · 最近更新时间：
             {latest?.finished_at
               ? new Date(latest.finished_at).toLocaleString("zh-CN")
-              : latest
-                ? "最近任务尚未完成"
-                : "暂无任务记录"}
+              : latestQuery.isError
+                ? "暂不可用"
+                : latestQuery.isPending
+                  ? "正在读取…"
+                  : "暂无已完成任务"}
           </Text>
         }
       />
@@ -89,7 +97,7 @@ export const DataIngestionPage = () => {
           }
         />
       )}
-      <IngestionHistoryTable onLatest={setLatest} />
+      <IngestionHistoryTable />
     </Stack>
   );
 };

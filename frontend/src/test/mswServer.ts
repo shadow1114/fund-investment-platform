@@ -29,6 +29,13 @@ export const resetRequestLog = () => {
 };
 
 export const contractHandlers = [
+  http.get("/api/v1/fund-ingestions", () =>
+    HttpResponse.json({
+      data: { items: [], page: 1, page_size: 20, total: 0 },
+      meta: {},
+      error: null,
+    }),
+  ),
   http.get("/api/v1/fund-classifications/catalog", () =>
     HttpResponse.json(classificationCatalog),
   ),

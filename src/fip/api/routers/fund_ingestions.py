@@ -901,6 +901,7 @@ def list_ingestion_history(
     scope_type: Literal["SINGLE", "SELECTED", "ALL"] | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
+    sort: Literal["created_at", "finished_at"] = "created_at",
     principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     from sqlalchemy import func
@@ -940,10 +941,15 @@ def list_ingestion_history(
         if created_to:
             where.append(CalculationJob.created_at <= created_to)
         total = session.scalar(select(func.count()).select_from(CalculationJob).where(*where)) or 0
+        ordering = (
+            CalculationJob.finished_at.desc().nulls_last()
+            if sort == "finished_at"
+            else CalculationJob.created_at.desc()
+        )
         rows = session.scalars(
             select(CalculationJob)
             .where(*where)
-            .order_by(CalculationJob.created_at.desc(), CalculationJob.id.desc())
+            .order_by(ordering, CalculationJob.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

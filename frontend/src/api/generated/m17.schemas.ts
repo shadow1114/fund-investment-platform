@@ -2567,6 +2567,10 @@ export type ListFundIngestionHistoryParams = {
   scope_type?: ListFundIngestionHistoryScopeType;
   created_from?: string;
   created_to?: string;
+  /**
+   * Descending order; finished_at puts unfinished operations last.
+   */
+  sort?: ListFundIngestionHistorySort;
 };
 
 export type ListFundIngestionHistoryStatus =
@@ -2598,6 +2602,15 @@ export const ListFundIngestionHistoryScopeType = {
   SINGLE: "SINGLE",
   SELECTED: "SELECTED",
   ALL: "ALL",
+} as const;
+
+export type ListFundIngestionHistorySort =
+  (typeof ListFundIngestionHistorySort)[keyof typeof ListFundIngestionHistorySort];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundIngestionHistorySort = {
+  created_at: "created_at",
+  finished_at: "finished_at",
 } as const;
 
 export type ListFundIngestionItemsParams = {

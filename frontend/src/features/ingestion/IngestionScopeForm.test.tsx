@@ -1,3 +1,5 @@
+import { Link, Routes, Route } from "react-router-dom";
+import { PageLayout } from "../../components/PageLayout";
 import { QueryClient } from "@tanstack/react-query";
 import {
   cleanup,
@@ -606,7 +608,9 @@ describe("fund data center", () => {
     expect(requests.at(-1)?.searchParams.get("dataset")).toBe("NAV");
     expect(requests.at(-1)?.searchParams.get("scope_type")).toBe("ALL");
     expect(requests.at(-1)?.searchParams.get("status")).toBe("RUNNING");
-    expect(requests.at(-1)?.searchParams.get("created_to")).toBeTruthy();
+    expect(requests.at(-1)?.searchParams.get("created_to")).toMatch(
+      /\.999999Z$/,
+    );
   });
   it("reuses the idempotency key when the first submission response fails", async () => {
     const user = userEvent.setup();
@@ -655,5 +659,118 @@ describe("fund data center", () => {
     ).not.toBeInTheDocument();
     expect(itemRequests).toHaveLength(0);
     expect(submissions).toHaveLength(0);
+  });
+  it("refreshes fund caches when a job completes after leaving its detail route", async () => {
+    const user = userEvent.setup();
+    let completed = false;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    const keys = [
+      ["fund-detail", "000001", "2026-10-27"],
+      ["fund-nav", "000001", "2026-10-27"],
+      ["api", "funds", "000001", "basic-info-history", "2026-10-27"],
+    ];
+    for (const key of keys) client.setQueryData(key, {});
+    server.use(...handlers());
+    server.use(
+      http.get("/api/v1/fund-ingestions", ({ request }) => {
+        const sort = new URL(request.url).searchParams.get("sort");
+        const items =
+          completed && sort === "finished_at"
+            ? [
+                {
+                  ...task,
+                  status: "COMPLETED",
+                  finished_at: "2026-10-28T10:00:00Z",
+                },
+              ]
+            : [];
+        return HttpResponse.json(
+          envelope({ items, page: 1, page_size: 1, total: items.length }),
+        );
+      }),
+    );
+    renderWorkbench(
+      <PageLayout>
+        <Routes>
+          <Route
+            path="/data-ingestion"
+            element={
+              <>
+                <Link to="/elsewhere">离开任务详情</Link>
+                <DataIngestionPage />
+              </>
+            }
+          />
+          <Route path="/elsewhere" element={<h1>其他工作区页面</h1>} />
+        </Routes>
+      </PageLayout>,
+      { route: "/data-ingestion?operation_id=ING-001", queryClient: client },
+    );
+    await screen.findByRole("heading", { name: "任务 ING-001" });
+    await user.click(screen.getByRole("link", { name: "离开任务详情" }));
+    await screen.findByRole("heading", { name: "其他工作区页面" });
+    expect(client.getQueryState(keys[0])?.isInvalidated).toBe(false);
+    completed = true;
+    await waitFor(
+      () => {
+        for (const key of keys)
+          expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+      },
+      { timeout: 4000 },
+    );
+    expect(submissions).toHaveLength(0);
+  });
+  it("keeps the independently latest finished operation in the header across history filters and pages", async () => {
+    const user = userEvent.setup();
+    const requests: URL[] = [];
+    const finish = "2026-10-28T11:23:45Z";
+    renderPage("/data-ingestion", undefined, [
+      http.get("/api/v1/fund-ingestions", ({ request }) => {
+        const url = new URL(request.url);
+        requests.push(url);
+        const latest =
+          url.searchParams.get("sort") === "finished_at" &&
+          url.searchParams.get("status") === "COMPLETED";
+        return HttpResponse.json(
+          envelope({
+            items: latest
+              ? [
+                  {
+                    ...task,
+                    operation_id: "finished-latest",
+                    source: "VERIFIED_SOURCE",
+                    status: "COMPLETED",
+                    created_at: "2026-10-25T00:00:00Z",
+                    finished_at: finish,
+                  },
+                ]
+              : [task],
+            page: Number(url.searchParams.get("page") ?? 1),
+            page_size: 20,
+            total: 21,
+          }),
+        );
+      }),
+    ]);
+    const header = await screen.findByText(
+      (_, element) =>
+        element?.tagName === "P" &&
+        Boolean(
+          element.textContent?.includes("最近更新时间：") &&
+          element.textContent.includes("VERIFIED_SOURCE"),
+        ),
+    );
+    expect(header).toHaveTextContent(new Date(finish).toLocaleString("zh-CN"));
+    await user.selectOptions(screen.getByLabelText("历史状态"), "RUNNING");
+    await user.click(await screen.findByRole("button", { name: "历史下一页" }));
+    await waitFor(() =>
+      expect(requests.some((url) => url.searchParams.get("page") === "2")).toBe(
+        true,
+      ),
+    );
+    expect(header).toHaveTextContent("VERIFIED_SOURCE");
+    expect(header).toHaveTextContent(new Date(finish).toLocaleString("zh-CN"));
   });
 });

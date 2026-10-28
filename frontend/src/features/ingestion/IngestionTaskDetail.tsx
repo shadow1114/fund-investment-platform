@@ -19,6 +19,7 @@ import {
   getIngestionItemsQueryOptions,
   getIngestionTaskQueryOptions,
   ingestionKeys,
+  invalidateIngestionFundData,
 } from "../../api/queries";
 import { ErrorState } from "../../components/ErrorState";
 import { IngestionCounts, ingestionStatusLabel } from "./IngestionHistoryTable";
@@ -66,11 +67,7 @@ export const IngestionTaskDetail = ({
     // Prefix invalidation reaches every as-of-date, NAV and basic-info variant.
     // ALL must not enumerate fund IDs in the browser.
     void Promise.all([
-      client.invalidateQueries({ queryKey: ["api", "funds"] }),
-      client.invalidateQueries({ queryKey: ["fund-research"] }),
-      ...["fund-detail", "fund-nav", "fund-evaluation", "fund-score"].map(
-        (prefix) => client.invalidateQueries({ queryKey: [prefix] }),
-      ),
+      invalidateIngestionFundData(client),
       client.invalidateQueries({ queryKey: ingestionKeys.history }),
       client.invalidateQueries({ queryKey: ingestionKeys.items(operationId) }),
     ]);

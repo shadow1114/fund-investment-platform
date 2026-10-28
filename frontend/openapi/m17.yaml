@@ -222,6 +222,10 @@ paths:
         - name: created_to
           in: query
           schema: {type: string, format: date-time}
+        - name: sort
+          in: query
+          description: Descending order; finished_at puts unfinished operations last.
+          schema: {type: string, enum: [created_at, finished_at], default: created_at}
       responses:
         "200":
           description: Paginated ingestion history

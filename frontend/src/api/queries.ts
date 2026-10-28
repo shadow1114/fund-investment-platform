@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import {
   getFundIngestion,
@@ -283,3 +283,30 @@ export const getIngestionItemsQueryOptions = (
     enabled: Boolean(id),
     refetchInterval: running ? 2500 : false,
   });
+
+export const getLatestIngestionQueryOptions = (completedOnly = false) =>
+  queryOptions({
+    queryKey: ["api", "ingestion-latest", completedOnly],
+    queryFn: async () =>
+      unwrapResponse(
+        await listFundIngestionHistory({
+          page: 1,
+          page_size: 1,
+          sort: "finished_at",
+          status: completedOnly ? "COMPLETED" : undefined,
+        }),
+      ),
+    refetchInterval: 2500,
+  });
+
+export const invalidateIngestionFundData = (client: QueryClient) =>
+  Promise.all([
+    client.invalidateQueries({ queryKey: ["api", "funds"] }),
+    ...[
+      "fund-research",
+      "fund-detail",
+      "fund-nav",
+      "fund-evaluation",
+      "fund-score",
+    ].map((prefix) => client.invalidateQueries({ queryKey: [prefix] })),
+  ]);

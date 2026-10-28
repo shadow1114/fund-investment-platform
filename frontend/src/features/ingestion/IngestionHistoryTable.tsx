@@ -8,7 +8,7 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   FundIngestionTask,
@@ -50,11 +50,7 @@ export const IngestionCounts = ({ task }: { task: FundIngestionTask }) => {
     </>
   );
 };
-export const IngestionHistoryTable = ({
-  onLatest,
-}: {
-  onLatest?: (task: FundIngestionTask | undefined) => void;
-}) => {
+export const IngestionHistoryTable = () => {
   const [params, setParams] = useState<ListFundIngestionHistoryParams>({
     page: 1,
     page_size: 20,
@@ -64,9 +60,6 @@ export const IngestionHistoryTable = ({
   const invalidDates = Boolean(from && to && from > to);
   const query = useQuery(getIngestionHistoryQueryOptions(params));
   const latest = query.data?.items[0];
-  useEffect(() => {
-    onLatest?.(latest);
-  }, [latest, onLatest]);
   return (
     <section aria-labelledby="ingestion-history-title">
       <h2 id="ingestion-history-title">抓取历史</h2>
@@ -82,14 +75,11 @@ export const IngestionHistoryTable = ({
                 label,
               })),
             ]}
-            onChange={(event) =>
-              setParams((current) => ({
-                ...current,
-                dataset: (event.currentTarget.value ||
-                  undefined) as typeof params.dataset,
-                page: 1,
-              }))
-            }
+            onChange={(event) => {
+              const value = (event.currentTarget.value ||
+                undefined) as typeof params.dataset;
+              setParams((current) => ({ ...current, dataset: value, page: 1 }));
+            }}
           />
           <NativeSelect
             label="历史状态"
@@ -102,14 +92,11 @@ export const IngestionHistoryTable = ({
               { value: "CANCELLED", label: "已取消" },
               { value: "BLOCKED", label: "阻断" },
             ]}
-            onChange={(event) =>
-              setParams((current) => ({
-                ...current,
-                status: (event.currentTarget.value ||
-                  undefined) as typeof params.status,
-                page: 1,
-              }))
-            }
+            onChange={(event) => {
+              const value = (event.currentTarget.value ||
+                undefined) as typeof params.status;
+              setParams((current) => ({ ...current, status: value, page: 1 }));
+            }}
           />
           <NativeSelect
             label="历史范围"
@@ -121,14 +108,15 @@ export const IngestionHistoryTable = ({
                 label,
               })),
             ]}
-            onChange={(event) =>
+            onChange={(event) => {
+              const value = (event.currentTarget.value ||
+                undefined) as typeof params.scope_type;
               setParams((current) => ({
                 ...current,
-                scope_type: (event.currentTarget.value ||
-                  undefined) as typeof params.scope_type,
+                scope_type: value,
                 page: 1,
-              }))
-            }
+              }));
+            }}
           />
         </Group>
         <form
@@ -141,8 +129,11 @@ export const IngestionHistoryTable = ({
                 created_from: from
                   ? new Date(`${from}T00:00:00`).toISOString()
                   : undefined,
+                // Preserve the final PostgreSQL microsecond of the selected local day.
                 created_to: to
-                  ? new Date(`${to}T23:59:59.999`).toISOString()
+                  ? new Date(`${to}T23:59:59.999`)
+                      .toISOString()
+                      .replace(".999Z", ".999999Z")
                   : undefined,
               }));
           }}
