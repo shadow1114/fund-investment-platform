@@ -3,15 +3,141 @@ import {
   emptyClassificationHistory,
 } from "../../test/classificationFixtures";
 import { sessionEnvelope } from "../../test/contractFixtures";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import type { ChangeEvent } from "react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { renderWorkbench } from "../../test/render";
 
 import { FundResearchPage } from "../../pages/FundResearchPage";
+
+vi.mock("@mantine/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mantine/core")>();
+  const NativeMultiSelect = ({
+    label,
+    "aria-label": ariaLabel,
+    data,
+    value,
+    onChange,
+  }: {
+    label: string;
+    "aria-label"?: string;
+    data: { value: string; label: string }[];
+    value: string[];
+    onChange: (value: string[]) => void;
+  }) => (
+    <label>
+      {label}
+      <select
+        aria-label={ariaLabel ?? label}
+        multiple
+        value={value}
+        onChange={(event) =>
+          onChange(
+            Array.from(
+              event.currentTarget.selectedOptions,
+              (option) => option.value,
+            ),
+          )
+        }
+      >
+        {data.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const NativeSelect = ({
+    label,
+    "aria-label": ariaLabel,
+    data,
+    value,
+    onChange,
+  }: {
+    label: string;
+    "aria-label"?: string;
+    data: { value: string; label: string }[];
+    value: string | null;
+    onChange: (value: string | null) => void;
+  }) => (
+    <label>
+      {label}
+      <select
+        aria-label={ariaLabel ?? label}
+        value={value ?? ""}
+        onChange={(event) => onChange(event.currentTarget.value || null)}
+      >
+        {data.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const NativeInput = ({
+    label,
+    "aria-label": ariaLabel,
+    value,
+    onChange,
+  }: {
+    label: string;
+    "aria-label"?: string;
+    value: string;
+    onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  }) => (
+    <label>
+      {label}
+      <input
+        aria-label={ariaLabel ?? label}
+        value={value}
+        onChange={onChange}
+      />
+    </label>
+  );
+  const NativeTagsInput = ({
+    label,
+    "aria-label": ariaLabel,
+    value,
+    onChange,
+  }: {
+    label: string;
+    "aria-label"?: string;
+    value: string[];
+    onChange: (value: string[]) => void;
+  }) => (
+    <label>
+      {label}
+      <input
+        aria-label={ariaLabel ?? label}
+        value={value.join(",")}
+        onChange={(event) =>
+          onChange(event.currentTarget.value.split(",").filter(Boolean))
+        }
+      />
+    </label>
+  );
+  return {
+    ...actual,
+    MultiSelect: NativeMultiSelect,
+    Select: NativeSelect,
+    TagsInput: NativeTagsInput,
+    TextInput: NativeInput,
+  };
+});
 
 const requests: URL[] = [];
 
@@ -64,16 +190,10 @@ const renderPage = (initialEntry: string) => {
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
 
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route path="/funds" element={<FundResearchPage />} />
-          <Route path="/funds/:fundId" element={<div>基金详情路由</div>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return renderWorkbench(<FundResearchPage />, {
+    route: initialEntry,
+    queryClient: client,
+  });
 };
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -105,11 +225,13 @@ describe("FundResearchPage", () => {
       order: "asc",
     });
     expect(screen.getByText("点时数据：是")).toBeVisible();
-    expect(screen.getByText("classification_version: class-v3")).toBeVisible();
+    await userEvent.setup().click(screen.getByText("查看来源版本"));
+    expect(screen.getByText("classification_version")).toBeVisible();
+    expect(screen.getByText("class-v3")).toBeVisible();
     expect(screen.getByText("精确 18")).toBeVisible();
     expect(
       screen.getByRole("link", { name: "Alpha 稳健基金" }),
-    ).toHaveAttribute("href", "/funds/000001?as_of_date=2026-09-16");
+    ).toHaveAttribute("href", expect.stringContaining("as_of_date=2026-09-16"));
   });
 
   it("applies only active classification filters while preserving the legacy URL state", async () => {
@@ -130,7 +252,7 @@ describe("FundResearchPage", () => {
       await screen.findByRole("listbox", { name: "资产类别" }),
       ["BOND"],
     );
-    await user.click(screen.getByRole("button", { name: "查询" }));
+    await user.click(screen.getByRole("button", { name: "查询基金" }));
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[1].searchParams.get("asset_class")).toBe("BOND");
     expect(requests[1].searchParams.get("classification_status")).toBe(
@@ -142,7 +264,14 @@ describe("FundResearchPage", () => {
     const user = userEvent.setup();
     renderPage("/funds?fund_name=Alpha&page=2&page_size=10");
 
-    expect(await screen.findByText("第 2 / 3 页，共 21 只基金")).toBeVisible();
+    expect(
+      await screen.findByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          (element.textContent?.includes("第 2 / 3 页 · 共 21 只基金") ??
+            false),
+      ),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "下一页" }));
 
     await waitFor(() => expect(requests).toHaveLength(2));
@@ -154,16 +283,16 @@ describe("FundResearchPage", () => {
     const user = userEvent.setup();
     renderPage("/funds");
 
-    expect(await screen.findByText("Alpha 稳健基金")).toBeVisible();
-    await user.type(
-      screen.getByRole("textbox", { name: "生命周期状态（逗号分隔）" }),
-      "NORMAL,LIQUIDATED",
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await user.selectOptions(
+      screen.getByRole("listbox", { name: "生命周期状态" }),
+      ["NORMAL", "LIQUIDATED"],
     );
-    await user.type(
-      screen.getByRole("textbox", { name: "投资资格（逗号分隔）" }),
-      "FULLY_ELIGIBLE,HOLD_ONLY",
+    await user.selectOptions(
+      screen.getByRole("listbox", { name: "投资资格" }),
+      ["FULLY_ELIGIBLE", "HOLD_ONLY"],
     );
-    await user.click(screen.getByRole("button", { name: "查询" }));
+    await user.click(screen.getByRole("button", { name: "查询基金" }));
 
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[1].searchParams.get("lifecycle_status")).toBe(
@@ -213,8 +342,9 @@ describe("FundResearchPage", () => {
       ),
     );
     renderPage("/funds");
-    expect(
-      await screen.findByText("HTTP 503 · FUNDS_UNAVAILABLE"),
-    ).toBeVisible();
+    expect(await screen.findByText("Fund service unavailable")).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "请求失败 · 503 FUNDS_UNAVAILABLE",
+    );
   });
 });

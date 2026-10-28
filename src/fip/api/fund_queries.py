@@ -129,19 +129,24 @@ def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
             return False
     statuses = filters.get("classification_status")
     if statuses:
+        active_dimensions = (
+            set(catalog.active_dimensions)
+            if catalog is not None
+            else {
+                "asset_class",
+                "strategy",
+                "geography",
+                "product_structure",
+                "market_attributes",
+            }
+        )
         present = (
             {
                 v.get("status")
                 for k, v in classification.items()
-                if k
-                in {
-                    "asset_class",
-                    "strategy",
-                    "geography",
-                    "product_structure",
-                    "market_attributes",
-                }
+                if k in active_dimensions
                 and isinstance(v, Mapping)
+                and v.get("evaluation_state") not in {"PAUSED", "NOT_EVALUATED"}
             }
             if isinstance(classification, Mapping)
             else {"UNKNOWN"}

@@ -396,3 +396,28 @@ def test_dimension_filter_requires_confirmed_matching_final_value(status, value)
     data = snap().to_dict()
     data["asset_class"].update(status=status, value=value)
     assert not _matches({"classification": data}, {"asset_class": ("EQUITY",)})
+
+
+def test_classification_status_ignores_v3_paused_and_not_evaluated_dimensions():
+    data = snap().to_dict()
+    data["asset_class"].update(status="CONFIRMED", value="EQUITY")
+    data["strategy"].update(status="CONFIRMED", value="ACTIVE")
+    data["geography"].update(status="UNKNOWN", value="UNKNOWN", evaluation_state="PAUSED")
+    data["product_structure"].update(
+        status="UNKNOWN", value="UNKNOWN", evaluation_state="NOT_EVALUATED"
+    )
+    data["market_attributes"].update(status="UNKNOWN", value="UNKNOWN", evaluation_state="PAUSED")
+
+    row = {"classification": data}
+
+    assert not _matches(row, {"classification_status": ("UNKNOWN",)})
+    assert _matches(row, {"classification_status": ("CONFIRMED",)})
+
+
+def test_legacy_classification_status_keeps_all_dimensions_in_scope():
+    data = snap(v3=False).to_dict()
+    data["asset_class"].update(status="CONFIRMED", value="EQUITY")
+    data["strategy"].update(status="CONFIRMED", value="ACTIVE")
+    data["geography"].update(status="UNKNOWN", value="UNKNOWN")
+
+    assert _matches({"classification": data}, {"classification_status": ("UNKNOWN",)})
