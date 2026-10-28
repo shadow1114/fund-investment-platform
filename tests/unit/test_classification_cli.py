@@ -130,7 +130,11 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
     monkeypatch.setattr(
         cli,
         "_classify_saved_v3",
-        lambda *_args, **_kwargs: (snapshot, "WRITE_REVISION"),
+        lambda *_args, **_kwargs: (
+            snapshot,
+            "WRITE_REVISION",
+            ("asset_class:UNRECOGNIZED",),
+        ),
     )
     monkeypatch.setattr(cli, "_service", lambda *_args: (_ for _ in ()).throw(AssertionError()))
     from fip.services.data_service.classification import service as classification_service
@@ -150,7 +154,10 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
         ]
     )
     assert session.commits == 0
-    assert '"dry_run": true' in capsys.readouterr().out
+    output = capsys.readouterr().out.splitlines()
+    assert '"dry_run": true' in output[-1]
+    assert json.loads(output[0])["unrecognized_reasons"] == ["asset_class:UNRECOGNIZED"]
+    assert "asset_class:UNRECOGNIZED" in json.loads(output[-1])["summary"]["unrecognized_reasons"]
 
 
 def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeypatch):
@@ -175,11 +182,60 @@ def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeyp
     monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args: ())
     before = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
 
-    snapshot, action = cli._classify_saved_v3(
+    snapshot, action, reasons = cli._classify_saved_v3(
         session, 1, "000001", payload, actor="operator", dry_run=True
     )
 
     after = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
     assert snapshot.rule_version == "3.0.0"
     assert action in {"WRITE_REVISION", "CREATE_REVIEW"}
+    assert reasons == ("strategy:UNKNOWN",)
     assert after == before
+
+
+def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
+    import datetime as dt
+
+    from fip.services.data_service.classification.models import Evidence
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.models.raw import RawPayload
+    from tests.unit.test_classification_revision_v3 import MemorySession
+
+    frame = pd.DataFrame(
+        [{"基金代码": "000001", "基金简称": "测试基金", "基金类型": "混合型-偏股"}]
+    )
+    payload = RawPayload(
+        id=17,
+        dataset_id=2,
+        payload=frame.to_parquet(index=False),
+        row_count=1,
+        ingested_at=dt.datetime(2026, 10, 28, tzinfo=dt.UTC),
+        request_params={},
+        published_at=None,
+        provider_available_at=None,
+    )
+    later = Evidence(
+        source="AGGREGATOR",
+        rule_id="SOURCE",
+        confidence="PUBLIC_AGGREGATOR",
+        classified_at=dt.datetime(2026, 10, 30, tzinfo=dt.UTC),
+        raw_field="基金类型",
+        normalized_field="formal_type",
+        raw_value="债券型-长债",
+        locator=(
+            'identity:{"provider":"SNOWBALL","dataset":"fund_detail_xq",'
+            '"provider_fund_code":"000001","raw_field":"基金类型",'
+            '"params":{"symbol":"000001"}};row:8'
+        ),
+    )
+    session = MemorySession()
+    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args: (later,))
+    captured = {}
+
+    def refresh(_self, _fund_id, _evidence, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id=22)
+
+    monkeypatch.setattr(ClassificationService, "refresh_v3", refresh)
+    cli._classify_saved_v3(session, 1, "000001", payload, actor="operator", dry_run=False)
+    assert captured["valid_from"] == dt.date(2026, 10, 30)

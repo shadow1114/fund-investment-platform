@@ -80,6 +80,13 @@ def merge_snapshot_observations(
     return tuple(merged[key] for key in sorted(merged))
 
 
+def evidence_effective_date(
+    fallback: dt.date, observations: tuple[Evidence, ...] | list[Evidence]
+) -> dt.date:
+    """Never make a classification effective before any included evidence existed."""
+    return max((fallback, *(item.classified_at.date() for item in observations)))
+
+
 def should_fetch_snowball(
     snapshot: ClassificationSnapshot,
     *,

@@ -310,6 +310,7 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
         "rule_version": final_snapshot.rule_version,
         "enum_version": final_snapshot.enum_version,
         "classification": final_snapshot.to_dict(),
+        "unrecognized_reasons": list(preview.unrecognized_reasons),
         "source_freshness": source_freshness,
         "diagnostics": diagnostics,
         "paused_dimensions": ["geography", "product_structure", "market_attributes"],

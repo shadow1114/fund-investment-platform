@@ -326,7 +326,7 @@ def _classify_saved_v3(
     *,
     actor: str,
     dry_run: bool,
-) -> tuple[ClassificationSnapshot, str]:
+) -> tuple[ClassificationSnapshot, str, tuple[str, ...]]:
     from fip.services.data_service.adapters.akshare.classification_sources import (
         parse_fund_list_observations,
         source_record_from_payload,
@@ -334,6 +334,7 @@ def _classify_saved_v3(
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.classification.workflow import (
         classify_v3_preview,
+        evidence_effective_date,
         merge_snapshot_observations,
         preview_classification,
     )
@@ -344,7 +345,7 @@ def _classify_saved_v3(
     )
     evidence = (*listed.get(symbol, ()), *_saved_v3_source_evidence(session, symbol))
     service = ClassificationService(session)
-    target = payload.ingested_at.date()
+    target = evidence_effective_date(payload.ingested_at.date(), evidence)
     previous, interval = _latest_classification_interval(service, fund_id, target)
     baseline = interval[2] if interval else None
     revision_id = previous.id if previous else None
@@ -370,7 +371,7 @@ def _classify_saved_v3(
             valid_from=target,
             ingested_at=payload.ingested_at,
         )
-    return preview.snapshot, action
+    return preview.snapshot, action, preview.unrecognized_reasons
 
 
 def cmd_classification(args: argparse.Namespace) -> None:
@@ -509,6 +510,7 @@ def cmd_classification(args: argparse.Namespace) -> None:
         actions: dict[str, int] = {}
         unknown_types: set[str] = set()
         grouping: set[int] = set()
+        unrecognized_reasons: set[str] = set()
         for payload in payloads:
             frame = pd.read_parquet(io.BytesIO(payload.payload))
             for _, row in frame.iterrows():
@@ -520,7 +522,7 @@ def cmd_classification(args: argparse.Namespace) -> None:
                 if args.fund_id and args.fund_id != share.fund_id:
                     continue
                 if args.rule_version == "3.0.0":
-                    snapshot, action = _classify_saved_v3(
+                    snapshot, action, reasons = _classify_saved_v3(
                         session,
                         share.fund_id,
                         symbol,
@@ -545,17 +547,21 @@ def cmd_classification(args: argparse.Namespace) -> None:
                         preview_classification,
                     )
 
-                    action = preview_classification(
+                    preview = preview_classification(
                         snapshot,
                         baseline=baseline,
                         baseline_reviewed=bool(previous and previous.reviewed),
-                    ).action
+                    )
+                    action = preview.action
+                    reasons = preview.unrecognized_reasons
+                unrecognized_reasons.update(reasons)
                 print(
                     json.dumps(
                         {
                             "symbol": symbol,
                             "fund_id": share.fund_id,
                             "action": action,
+                            "unrecognized_reasons": reasons,
                             "classification": snapshot.to_dict(),
                         },
                         ensure_ascii=False,
@@ -598,6 +604,7 @@ def cmd_classification(args: argparse.Namespace) -> None:
                         "unrecognized_types": sorted(unknown_types),
                         "unconfirmed_grouping_fund_ids": sorted(grouping),
                         "actions": actions,
+                        "unrecognized_reasons": sorted(unrecognized_reasons),
                         "strategy_tag_states": tag_states,
                     }
                 },

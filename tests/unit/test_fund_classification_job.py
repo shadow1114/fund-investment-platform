@@ -2,6 +2,7 @@
 
 import datetime as dt
 import io
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pandas as pd
@@ -133,3 +134,85 @@ def test_payload_persistence_failure_does_not_suppress_other_index_batch(monkeyp
     passive, enhanced = job.result_payload["items"]
     assert any("PERSIST_FAILED:OSError" in item for item in passive["diagnostics"])
     assert enhanced["payload_id"] == 101
+
+
+def test_single_fund_job_includes_preview_unrecognized_reasons(monkeypatch):
+    import fip.platform.jobs.fund_classification as classification_job
+    import fip.services.data_service.adapters.akshare.client as client
+    from fip.services.data_service.classification import workflow
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.ingest import IngestService
+    from tests.unit.test_classification_revision_v3 import MemorySession
+
+    overview_frame = pd.DataFrame([{"基金类型": "混合型-偏股"}])
+    detail_frame = pd.DataFrame(
+        [("基金代码", "000001"), ("投资策略", "采用主动管理和多因子模型")],
+        columns=["item", "value"],
+    )
+    overview_buffer = io.BytesIO()
+    overview_frame.to_parquet(overview_buffer, index=False)
+    detail_buffer = io.BytesIO()
+    detail_frame.to_parquet(detail_buffer, index=False)
+
+    class FundAdapter:
+        def fetch(self, dataset: str, **params: str):
+            if dataset == "fund_overview":
+                return SourceRecord(
+                    dataset, overview_buffer.getvalue(), 1, NOW, {"symbol": "000001"}
+                )
+            assert dataset == "fund_detail_xq"
+            return SourceRecord(
+                dataset,
+                detail_buffer.getvalue(),
+                2,
+                NOW,
+                {"symbol": "000001", "timeout": "20"},
+            )
+
+    adapter = FundAdapter()
+    monkeypatch.setattr(client, "AkShareSourceAdapter", lambda: adapter)
+    monkeypatch.setattr(classification_job, "_latest_payload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        classification_job,
+        "_existing_index_evidence",
+        lambda *_args, **_kwargs: ((), ("INDEX_BATCH_MISSING",), {}),
+    )
+    payload_ids = iter((101, 102))
+    monkeypatch.setattr(
+        IngestService,
+        "_store_raw",
+        lambda self, record: SimpleNamespace(id=next(payload_ids)),
+    )
+    monkeypatch.setattr(
+        ClassificationService,
+        "refresh_v3",
+        lambda self, *_args, **_kwargs: SimpleNamespace(id=55),
+    )
+    original_preview = workflow.preview_classification
+    monkeypatch.setattr(
+        workflow,
+        "preview_classification",
+        lambda *args, **kwargs: replace(
+            original_preview(*args, **kwargs),
+            unrecognized_reasons=("asset_class:UNRECOGNIZED",),
+        ),
+    )
+    job = SimpleNamespace(
+        execution_id="JOB-REFRESH",
+        job_payload={
+            "action": "refresh_fund",
+            "fund_id": 1,
+            "symbol": "000001",
+            "actor": "operator",
+        },
+        result_payload=None,
+        progress=0,
+    )
+    outcome = handle_fund_classification(JobContext(job, MemorySession(), "worker-1", NOW))
+    assert outcome.status == "COMPLETED"
+    assert job.result_payload["unrecognized_reasons"] == ["asset_class:UNRECOGNIZED"]
+    assert job.result_payload["source_freshness"]["fund_detail_xq"]["state"] == "PARTIAL"
+    assert (
+        job.result_payload["source_freshness"]["fund_detail_xq"]["field_states"]["投资策略"]
+        == "PRESENT"
+    )
