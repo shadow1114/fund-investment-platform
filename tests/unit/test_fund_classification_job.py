@@ -142,7 +142,7 @@ def test_single_fund_job_includes_preview_unrecognized_reasons(monkeypatch):
     from fip.services.data_service.classification import workflow
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.ingest import IngestService
-    from tests.unit.test_classification_revision_v3 import MemorySession
+    from tests.unit.test_classification_revision import MemorySession
 
     overview_frame = pd.DataFrame([{"基金类型": "混合型-偏股"}])
     detail_frame = pd.DataFrame(
@@ -185,7 +185,7 @@ def test_single_fund_job_includes_preview_unrecognized_reasons(monkeypatch):
     )
     monkeypatch.setattr(
         ClassificationService,
-        "refresh_v3",
+        "refresh",
         lambda self, *_args, **_kwargs: SimpleNamespace(id=55),
     )
     original_preview = workflow.preview_classification

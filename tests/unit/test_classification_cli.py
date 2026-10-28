@@ -10,11 +10,11 @@ import pytest
 from fip.platform import cli
 
 
-def test_classify_parser_has_explicit_v3_and_bounded_defaults(monkeypatch):
+def test_classify_parser_has_one_ruleset_and_bounded_defaults(monkeypatch):
     parsed = {}
     monkeypatch.setattr(cli, "cmd_classification", lambda args: parsed.update(vars(args)))
-    cli.main(["classify-funds", "--actor", "operator", "--rule-version", "3.0.0"])
-    assert parsed["rule_version"] == "3.0.0"
+    cli.main(["classify-funds", "--actor", "operator"])
+    assert "rule_version" not in parsed
     assert parsed["limit"] == 100
     assert parsed["batch_size"] == 50
     assert parsed["dry_run"] is False
@@ -82,7 +82,7 @@ def test_single_fund_refresh_dry_run_makes_no_adapter_calls_or_writes(monkeypatc
     assert output["fund_id"] == 8
 
 
-def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(monkeypatch, capsys):
+def test_classification_replay_never_constructs_or_fetches_source_adapter(monkeypatch, capsys):
     from fip.services.data_service.classification import classify
     from fip.services.data_service.classification.policy import load_policy
     from fip.services.data_service.models.raw import RawPayload
@@ -123,13 +123,13 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
     snapshot = classify(
         [],
         classified_at=pd.Timestamp("2026-10-28T00:00:00Z").to_pydatetime(),
-        policy=load_policy(rule_version="3.0.0"),
+        policy=load_policy(),
     )
     monkeypatch.setattr(cli, "_session", lambda: session)
     monkeypatch.setattr(cli, "_resolve", lambda _session, _symbol: SimpleNamespace(fund_id=8))
     monkeypatch.setattr(
         cli,
-        "_classify_saved_v3",
+        "_classify_saved",
         lambda *_args, **_kwargs: (
             snapshot,
             "WRITE_REVISION",
@@ -146,8 +146,6 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
             "classify-funds",
             "--actor",
             "operator",
-            "--rule-version",
-            "3.0.0",
             "--dry-run",
             "--symbol",
             "000001",
@@ -160,7 +158,7 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
     assert "asset_class:UNRECOGNIZED" in json.loads(output[-1])["summary"]["unrecognized_reasons"]
 
 
-def test_v3_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, capsys):
+def test_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, capsys):
     import datetime as dt
 
     from fip.services.data_service.classification import classify
@@ -210,7 +208,7 @@ def test_v3_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, 
             self.commits += 1
 
     session = FakeSession()
-    snapshot = classify([], classified_at=cutoff, policy=load_policy(rule_version="3.0.0"))
+    snapshot = classify([], classified_at=cutoff, policy=load_policy())
     calls = []
     monkeypatch.setattr(cli, "_session", lambda: session)
     monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
@@ -221,14 +219,14 @@ def test_v3_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, 
     )
     monkeypatch.setattr(
         cli,
-        "_classify_saved_v3",
+        "_classify_saved",
         lambda _session, _fund_id, symbol, _payload, **kwargs: calls.append(
             ("classify", symbol, kwargs["cutoff"])
         )
         or (snapshot, "NO_CHANGE", ()),
     )
 
-    cli.main(["classify-funds", "--actor", "operator", "--rule-version", "3.0.0", "--dry-run"])
+    cli.main(["classify-funds", "--actor", "operator", "--dry-run"])
 
     assert [item[1] for item in calls if item[0] == "resolve"] == ["000001"]
     assert [item[1:] for item in calls if item[0] == "classify"] == [("000001", cutoff)]
@@ -236,10 +234,10 @@ def test_v3_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, 
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["summary"]["processed"] == 1
 
 
-def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeypatch):
+def test_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeypatch):
     from fip.services.data_service.models.fund import FundClassificationRevision
     from fip.services.data_service.models.raw import RawPayload
-    from tests.unit.test_classification_revision_v3 import MemorySession
+    from tests.unit.test_classification_revision import MemorySession
 
     frame = pd.DataFrame(
         [{"基金代码": "000001", "基金简称": "测试基金", "基金类型": "混合型-偏股"}]
@@ -255,28 +253,28 @@ def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeyp
         provider_available_at=None,
     )
     session = MemorySession()
-    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(cli, "_saved_source_evidence", lambda *_args, **_kwargs: ())
     before = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
     cutoff = pd.Timestamp("2026-10-28T12:00:00Z").to_pydatetime()
 
-    snapshot, action, reasons = cli._classify_saved_v3(
+    snapshot, action, reasons = cli._classify_saved(
         session, 1, "000001", payload, cutoff=cutoff, actor="operator", dry_run=True
     )
 
     after = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
-    assert snapshot.rule_version == "3.0.0"
+    assert snapshot.scheme == "FIP_CLASSIFICATION"
     assert action in {"WRITE_REVISION", "CREATE_REVIEW"}
     assert reasons == ("strategy:UNKNOWN",)
     assert after == before
 
 
-def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
+def test_saved_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
     import datetime as dt
 
     from fip.services.data_service.classification.models import Evidence
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.models.raw import RawPayload
-    from tests.unit.test_classification_revision_v3 import MemorySession
+    from tests.unit.test_classification_revision import MemorySession
 
     frame = pd.DataFrame(
         [{"基金代码": "000001", "基金简称": "测试基金", "基金类型": "混合型-偏股"}]
@@ -308,15 +306,15 @@ def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
     session = MemorySession()
     cutoff = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
     monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
-    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: (later,))
+    monkeypatch.setattr(cli, "_saved_source_evidence", lambda *_args, **_kwargs: (later,))
     captured = {}
 
     def refresh(_self, _fund_id, _evidence, **kwargs):
         captured.update(kwargs)
         return SimpleNamespace(id=22)
 
-    monkeypatch.setattr(ClassificationService, "refresh_v3", refresh)
-    cli._classify_saved_v3(
+    monkeypatch.setattr(ClassificationService, "refresh", refresh)
+    cli._classify_saved(
         session, 1, "000001", payload, cutoff=cutoff, actor="operator", dry_run=False
     )
     assert captured["valid_from"] == dt.date(2026, 10, 31)
@@ -329,7 +327,7 @@ def test_replay_selects_latest_revision_visible_at_current_cutoff(monkeypatch):
 
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.models.fund import FundClassificationRevision
-    from tests.unit.test_classification_revision_v3 import MemorySession
+    from tests.unit.test_classification_revision import MemorySession
 
     cutoff = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
 
@@ -337,10 +335,8 @@ def test_replay_selects_latest_revision_visible_at_current_cutoff(monkeypatch):
         return FundClassificationRevision(
             id=row_id,
             fund_id=1,
-            scheme="FIP_CLASSIFICATION_V1",
+            scheme="FIP_CLASSIFICATION",
             version=version,
-            rule_version="3.0.0",
-            enum_version="3.0.0",
             content_hash="0" * 64,
             classified_at=available_at,
             available_at=available_at,
@@ -376,12 +372,12 @@ def test_non_dry_run_fails_safely_when_newer_revision_is_after_replay_cutoff(mon
 
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.models.raw import RawPayload
-    from tests.unit.test_classification_revision_v3 import MemorySession
+    from tests.unit.test_classification_revision import MemorySession
 
     cutoff = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
     future = SimpleNamespace(id=99, available_at=cutoff + dt.timedelta(days=1))
     monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
-    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(cli, "_saved_source_evidence", lambda *_args, **_kwargs: ())
 
     frame = pd.DataFrame(
         [{"基金代码": "000001", "基金简称": "测试基金", "基金类型": "混合型-偏股"}]
@@ -403,12 +399,12 @@ def test_non_dry_run_fails_safely_when_newer_revision_is_after_replay_cutoff(mon
     monkeypatch.setattr(ClassificationService, "latest", latest)
     monkeypatch.setattr(
         ClassificationService,
-        "refresh_v3",
+        "refresh",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unsafe write")),
     )
 
     with pytest.raises(RuntimeError, match="newer than its current-UTC cutoff"):
-        cli._classify_saved_v3(
+        cli._classify_saved(
             MemorySession(),
             1,
             "000001",

@@ -1,6 +1,6 @@
 from .legacy import LegacyProjection, project_legacy
 from .models import DIMENSIONS, ClassificationSnapshot, DimensionResult, Evidence, StrategyTagResult
-from .policy import POLICY_REGISTRY, ClassificationPolicy, load_policy
+from .policy import ClassificationPolicy, load_policy
 from .rules import CATALOG, classify, normalize_evidence
 
 __all__ = [
@@ -12,7 +12,6 @@ __all__ = [
     "DimensionResult",
     "Evidence",
     "StrategyTagResult",
-    "POLICY_REGISTRY",
     "ClassificationPolicy",
     "load_policy",
     "classify",

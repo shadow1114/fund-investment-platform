@@ -4,22 +4,13 @@ import json
 from collections.abc import Sequence
 from datetime import datetime
 
-from .models import DIMENSIONS, ClassificationSnapshot, DimensionResult, Evidence, Source, Status
-from .policy import ClassificationPolicy
+from .models import DIMENSIONS, CURRENT_CATALOG, ClassificationSnapshot, DimensionResult, Evidence, Source, Status
+from .policy import ClassificationPolicy, load_policy
 from .strategy import classify_strategy, classify_tags
 
-CATALOG = {
-    "asset_class": (
-        "EQUITY",
-        "BOND",
-        "MIXED",
-        "MONEY_MARKET",
-        "FOF",
-        "REIT",
-        "COMMODITY",
-        "OTHER",
-        "UNKNOWN",
-    ),
+CATALOG = dict(CURRENT_CATALOG)
+HISTORICAL_CATALOG = {
+    **CATALOG,
     "strategy": (
         "TARGET_DATE",
         "TARGET_RISK",
@@ -29,23 +20,8 @@ CATALOG = {
         "ACTIVE",
         "UNKNOWN",
     ),
-    "geography": ("DOMESTIC", "US", "HK", "JP", "EUROPE", "GLOBAL", "MULTI_REGION", "UNKNOWN"),
-    "product_structure": ("ETF", "ETF_LINKED", "LOF", "ORDINARY", "UNKNOWN"),
-    "market_attributes": ("DOMESTIC", "CROSS_BORDER", "QDII", "UNKNOWN"),
 }
-DEFAULT_POLICY = ClassificationPolicy(
-    catalog=CATALOG,
-    formal_types={
-        "股票型": "EQUITY",
-        "债券型": "BOND",
-        "混合型": "MIXED",
-        "货币型": "MONEY_MARKET",
-        "FOF": "FOF",
-        "REIT": "REIT",
-        "商品型": "COMMODITY",
-    },
-    strategy_priority=CATALOG["strategy"][:-1],
-)
+DEFAULT_POLICY = load_policy()
 FIELD_DIMENSION = {
     "formal_type": "asset_class",
     "基金类型": "asset_class",
@@ -172,9 +148,8 @@ def classify(
     dimensions: dict[str, DimensionResult] = {}
     review: set[str] = set()
     tag_results = None
-    if policy.rule_version == "3.0.0":
-        tag_results, tag_review = classify_tags(evidence, policy)
-        review.update(tag_review)
+    tag_results, tag_review = classify_tags(evidence, policy)
+    review.update(tag_review)
     for dimension in DIMENSIONS:
         if dimension not in policy.active_dimensions:
             dimensions[dimension] = DimensionResult(
@@ -185,7 +160,7 @@ def classify(
                 evaluation_state="NOT_EVALUATED",
             )
             continue
-        if dimension == "strategy" and policy.rule_version == "3.0.0":
+        if dimension == "strategy":
             dimensions[dimension], strategy_review = classify_strategy(evidence, policy)
             review.update(strategy_review)
             continue
@@ -200,8 +175,7 @@ def classify(
                     used.append(item)
                 continue
             if (
-                policy.rule_version == "3.0.0"
-                and (item.normalized_field or item.raw_field) == "tracking_target"
+                (item.normalized_field or item.raw_field) == "tracking_target"
             ):
                 if dimension != "asset_class":
                     continue
@@ -226,7 +200,7 @@ def classify(
                             "assertion_status": "CONFIRMED",
                             "required_observations": (item,),
                             "rationale": (
-                                f"index_asset_mapping_version={policy.index_asset_mapping_version};"
+                                f"index_asset_mapping_source={policy.index_asset_mapping_source};"
                                 f"provider={entry.provider};reference={entry.reference};"
                                 f"verification={entry.verification};asset_class={entry.asset_class}"
                             ),
@@ -302,11 +276,9 @@ def classify(
             value=final,
             candidates=tuple(sorted(candidates)),
             evidence=tuple(used),
-            evaluation_state="EVALUATED" if policy.rule_version == "3.0.0" else None,
+            evaluation_state="EVALUATED",
         )
     return ClassificationSnapshot(
-        rule_version=policy.rule_version,
-        enum_version=policy.enum_version,
         review_items=tuple(sorted(review)),
         asset_class=dimensions["asset_class"],
         strategy=dimensions["strategy"],

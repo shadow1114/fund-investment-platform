@@ -1,4 +1,4 @@
-"""Offline v3 replay and preview contracts."""
+"""Offline classification replay and preview contracts."""
 
 import datetime as dt
 import io
@@ -12,7 +12,7 @@ from fip.services.data_service.adapters.akshare.classification_sources import (
 )
 from fip.services.data_service.classification.models import Evidence
 from fip.services.data_service.classification.workflow import (
-    classify_v3_preview,
+    classify_preview,
     fund_refresh_requests,
     index_refresh_requests,
     merge_snapshot_observations,
@@ -29,7 +29,7 @@ def record(frame: pd.DataFrame, dataset: str, params: dict[str, str]) -> SourceR
     return SourceRecord(dataset, buffer.getvalue(), len(frame), NOW, params)
 
 
-def test_saved_fund_list_rows_become_stable_v3_observations_without_provider_calls():
+def test_saved_fund_list_rows_become_stable_observations_without_provider_calls():
     source = record(
         pd.DataFrame([{"基金代码": "000001", "基金简称": "测试混合A", "基金类型": "混合型-偏股"}]),
         "fund_list",
@@ -63,7 +63,7 @@ def test_overview_never_turns_benchmark_or_investment_scope_into_strategy():
     assert {item.normalized_field for item in parsed} == {"formal_type"}
 
 
-def test_v3_preview_uses_saved_observations_and_describes_review_without_persistence():
+def test_preview_uses_saved_observations_and_describes_review_without_persistence():
     items = (
         Evidence(
             source="AGGREGATOR",
@@ -79,9 +79,9 @@ def test_v3_preview_uses_saved_observations_and_describes_review_without_persist
             ),
         ),
     )
-    result = classify_v3_preview(items, available_at=NOW)
+    result = classify_preview(items, available_at=NOW)
     preview = preview_classification(result, baseline=None)
-    assert result.rule_version == "3.0.0"
+    assert result.scheme == "FIP_CLASSIFICATION"
     assert preview.action in {"WRITE_REVISION", "CREATE_REVIEW"}
     assert result.observations == items
     assert result.strategy.evaluation_state == "EVALUATED"
@@ -124,9 +124,9 @@ def test_refresh_dry_run_plans_central_sets_once_and_detail_conditionally():
 
 
 def test_resolved_index_strategy_still_fetches_details_when_tag_not_evaluated():
-    from tests.unit.test_classification_strategy_v3 import member, v3
+    from tests.unit.test_classification_strategy import member, classify_current
 
-    snapshot = v3([member("fund_index_passive")])
+    snapshot = classify_current([member("fund_index_passive")])
     assert snapshot.strategy.status == "CONFIRMED"
     assert snapshot.strategy_tag_results["QUANTITATIVE"].evaluation_state == "NOT_EVALUATED"
     assert should_fetch_snowball(snapshot, available_at=NOW)
@@ -146,15 +146,15 @@ def test_preview_ignores_retrieval_timestamp_churn_but_flags_reviewed_semantic_c
             '"provider_fund_code":"000001","raw_field":"基金类型","params":{}};row:0'
         ),
     )
-    baseline = classify_v3_preview([first], available_at=NOW)
+    baseline = classify_preview([first], available_at=NOW)
     reingested = first.model_copy(
         update={"classified_at": NOW + dt.timedelta(days=1), "payload_ref": "raw_payload:new"}
     )
-    same = classify_v3_preview([reingested], available_at=NOW + dt.timedelta(days=1))
+    same = classify_preview([reingested], available_at=NOW + dt.timedelta(days=1))
     assert preview_classification(same, baseline=baseline).action == "NO_CHANGE"
 
     changed = reingested.model_copy(update={"raw_value": "债券型-长债"})
-    changed_snapshot = classify_v3_preview(
+    changed_snapshot = classify_preview(
         [changed], available_at=NOW + dt.timedelta(days=1), baseline=baseline
     )
     assert (

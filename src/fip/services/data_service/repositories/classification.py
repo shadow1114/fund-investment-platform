@@ -43,7 +43,7 @@ class SqlClassificationPitRepository:
             select(FundClassificationRevision)
             .where(
                 FundClassificationRevision.fund_id == fund_id,
-                FundClassificationRevision.scheme == "FIP_CLASSIFICATION_V1",
+                FundClassificationRevision.scheme == "FIP_CLASSIFICATION",
                 FundClassificationRevision.available_at <= self._visible_until,
             )
             .order_by(FundClassificationRevision.version.desc())
@@ -97,7 +97,7 @@ class SqlClassificationPitRepository:
             select(FundClassificationRevision)
             .where(
                 FundClassificationRevision.fund_id == fund_id,
-                FundClassificationRevision.scheme == "FIP_CLASSIFICATION_V1",
+                FundClassificationRevision.scheme == "FIP_CLASSIFICATION",
                 FundClassificationRevision.available_at <= self._visible_until,
             )
             .order_by(FundClassificationRevision.version.desc())
@@ -106,8 +106,6 @@ class SqlClassificationPitRepository:
             {
                 "revision_id": r.id,
                 "version": r.version,
-                "rule_version": r.rule_version,
-                "enum_version": r.enum_version,
                 "available_at": _timestamp(r.available_at),
                 "classified_at": _timestamp(r.classified_at),
                 "published_at": _timestamp(r.published_at) if r.published_at else None,
@@ -167,7 +165,7 @@ class SqlClassificationPitRepository:
                 revision.availability_quality,
                 revision.id,
                 revision.version,
-                projection.mapping_version,
+                projection.mapping_id,
                 projection.reason,
             )
         row = (

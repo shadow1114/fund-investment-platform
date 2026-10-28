@@ -24,7 +24,7 @@ class ClassificationPreview:
     unrecognized_reasons: tuple[str, ...]
 
 
-def classify_v3_preview(
+def classify_preview(
     observations: tuple[Evidence, ...] | list[Evidence],
     *,
     available_at: dt.datetime,
@@ -32,10 +32,8 @@ def classify_v3_preview(
     baseline_revision_id: int | None = None,
     policy: ClassificationPolicy | None = None,
 ) -> ClassificationSnapshot:
-    """Run the same pure v3 rule path used by refresh, without persistence."""
-    selected_policy = policy or load_policy(rule_version="3.0.0")
-    if selected_policy.rule_version != "3.0.0":
-        raise ValueError("v3 preview requires rule_version=3.0.0")
+    """Run the single current pure rule path without persistence."""
+    selected_policy = policy or load_policy()
     if available_at.utcoffset() is None:
         raise ValueError("available_at must include timezone")
     current = classify(observations, classified_at=available_at, policy=selected_policy)

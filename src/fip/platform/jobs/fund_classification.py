@@ -147,7 +147,7 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
     from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.classification.workflow import (
-        classify_v3_preview,
+        classify_preview,
         merge_snapshot_observations,
         preview_classification,
         should_fetch_snowball,
@@ -233,7 +233,7 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
         baseline = baseline_interval[2] if baseline_interval else None
     evidence = merge_snapshot_observations(baseline, new_evidence)
     available_at = max((item.classified_at for item in evidence), default=context.now)
-    proposed = classify_v3_preview(
+    proposed = classify_preview(
         evidence,
         available_at=available_at,
         baseline=baseline,
@@ -275,7 +275,7 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
 
     merged = merge_snapshot_observations(baseline, new_evidence)
     available_at = max((item.classified_at for item in merged), default=context.now)
-    final_snapshot = classify_v3_preview(
+    final_snapshot = classify_preview(
         merged,
         available_at=available_at,
         baseline=baseline,
@@ -290,7 +290,7 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
     if preview.action != "NO_CHANGE":
         ingested_at = max((record.ingested_at for record in new_records), default=None)
         committed_available_at = max(context.now, ingested_at) if ingested_at else context.now
-        revision = service.refresh_v3(
+        revision = service.refresh(
             fund_id,
             new_evidence,
             available_at=max(available_at, committed_available_at),
@@ -307,8 +307,6 @@ def _refresh_fund(context: JobContext, payload: dict[str, Any]) -> JobOutcome:
         "symbol": symbol,
         "decision": preview.action,
         "revision_id": revision_id,
-        "rule_version": final_snapshot.rule_version,
-        "enum_version": final_snapshot.enum_version,
         "classification": final_snapshot.to_dict(),
         "unrecognized_reasons": list(preview.unrecognized_reasons),
         "source_freshness": source_freshness,

@@ -29,9 +29,7 @@ test("offline classification review preserves historical visibility", async ({
     ],
   };
   const classification = {
-    scheme: "FIP_CLASSIFICATION_V1",
-    rule_version: "1.0.0",
-    enum_version: "1.0.0",
+    scheme: "FIP_CLASSIFICATION",
     revision_id: 12,
     version: 1,
     source_summary: ["NAME"],

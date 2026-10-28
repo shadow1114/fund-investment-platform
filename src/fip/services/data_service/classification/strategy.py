@@ -1,4 +1,4 @@
-"""Conservative v3 joint strategy rules and independent quantitative tags.
+"""Conservative joint strategy rules and independent quantitative tags.
 
 Only saved Evidence is consumed here. Source adapters own membership validation,
 identity resolution and freshness; this engine never fetches or withdraws facts.
@@ -29,7 +29,9 @@ CONTEXT_FIELDS = DECLARATION_FIELDS | {
     "benchmark",
     "strategy_hint",
 }
-QUANT_METHOD = re.compile(r"量化(?:模型|方法|投资|策略)?|多因子|因子模型|数量化|模型驱动")
+QUANT_METHOD = re.compile(
+    r"(?<!数)量化(?:模型|方法|投资|策略)?|多因子|因子模型|数量化(?:模型|方法|投资|策略)|模型驱动"
+)
 ADOPTION = re.compile(r"采用|运用|使用|实施|坚持|通过|采取|进行")
 NEGATION = re.compile(
     r"(?:不|未|没有|拒绝)(?:再|会|予以)?(?:采用|运用|使用|实施|进行|采取)"
@@ -169,7 +171,7 @@ def _assertion(
             "rule_id": rule,
             "required_observations": observations,
             "assertion_status": status,
-            "rationale": f"rule_version=3.0.0;enum_version=3.0.0;{rationale}",
+            "rationale": f"current_classification_rules;{rationale}",
         }
     )
 
@@ -367,7 +369,7 @@ def classify_tags(
                             rule="TAG_QUANTITATIVE_NAME",
                             observations=(item,),
                             status="CANDIDATE",
-                            rationale="Name hint only;tag_catalog_version=3.0.0",
+                            rationale="Name hint only;current_tag_catalog",
                         )
                     )
                 continue
@@ -389,7 +391,7 @@ def classify_tags(
                     rule="TAG_QUANTITATIVE",
                     observations=(item,),
                     status="CONFIRMED" if context == "POSITIVE" else "UNKNOWN",
-                    rationale=f"tag_catalog_version=3.0.0;polarity={context};matched={sentence}",
+                    rationale=f"current_tag_catalog;polarity={context};matched={sentence}",
                 )
                 (positive if context == "POSITIVE" else negative).append(assertion)
         conflict = bool(positive and negative)

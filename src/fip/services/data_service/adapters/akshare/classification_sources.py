@@ -285,7 +285,7 @@ def parse_snowball_detail(record: SourceRecord, *, payload_ref: str) -> Snowball
 def parse_fund_list_observations(
     record: SourceRecord, *, payload_ref: str
 ) -> dict[str, tuple[Evidence, ...]]:
-    """Convert saved fund-name rows into source-identified v3 observations."""
+    """Convert saved fund-name rows into source-identified observations."""
     if record.dataset != "fund_list":
         raise ValueError("fund list dataset mismatch")
     frame = pd.read_parquet(io.BytesIO(record.payload))

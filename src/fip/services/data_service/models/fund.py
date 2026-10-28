@@ -417,8 +417,6 @@ class FundClassificationRevision(Base, TimeSourceMixin):
     fund_id: Mapped[int] = mapped_column(ForeignKey("fund.fund.id"), nullable=False)
     scheme: Mapped[str] = mapped_column(String(32), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    rule_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    enum_version: Mapped[str] = mapped_column(String(32), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     classified_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str] = mapped_column(String(1024), nullable=False)

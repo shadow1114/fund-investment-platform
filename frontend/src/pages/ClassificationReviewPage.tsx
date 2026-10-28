@@ -61,14 +61,9 @@ export const ClassificationReviewPage = () => {
     enabled: caseId > 0,
     queryFn: async () => unwrapResponse(await getClassificationReview(caseId)),
   });
-  const catalogVersion =
-    detail.data?.incoming?.enum_version ?? detail.data?.baseline?.enum_version;
   const catalog = useQuery({
-    queryKey: ["classification-catalog", catalogVersion],
-    queryFn: async () =>
-      unwrapResponse(
-        await getClassificationCatalog({ enum_version: catalogVersion }),
-      ),
+    queryKey: ["classification-catalog"],
+    queryFn: async () => unwrapResponse(await getClassificationCatalog()),
   });
   const [dimension, setDimension] = useState<string>(activeDimensions[0]);
   const [action, setAction] = useState<ReviewDecisionAction>("CONFIRM");
@@ -80,7 +75,6 @@ export const ClassificationReviewPage = () => {
   const [tagActions, setTagActions] = useState<
     Record<string, StrategyTagDecisionAction | "">
   >({});
-  const [acceptVersion, setAcceptVersion] = useState(false);
   const [notice, setNotice] = useState("");
   const mutation = useMutation({
     mutationFn: async (body: ReviewSubmission) =>
@@ -103,7 +97,6 @@ export const ClassificationReviewPage = () => {
         setValues([]);
         setActiveValues({});
         setTagActions({});
-        setAcceptVersion(false);
         setReason("");
         setRawValue("");
         await detail.refetch();
@@ -119,7 +112,6 @@ export const ClassificationReviewPage = () => {
     setValues([]);
     setActiveValues({});
     setTagActions({});
-    setAcceptVersion(false);
     setReason("");
     setRawValue("");
     mutation.reset();
@@ -138,12 +130,8 @@ export const ClassificationReviewPage = () => {
       locator: locator.trim(),
     };
     const incomingSnapshot = detail.data.incoming;
-    const isV3Review = incomingSnapshot?.rule_version === "3.0.0";
-    const isV3Upgrade =
-      isV3Review &&
-      detail.data.baseline?.rule_version !== incomingSnapshot.rule_version;
-    if (isV3Review) {
-      if (isV3Upgrade && !acceptVersion) return;
+    const isCurrentReview = incomingSnapshot?.scheme === "FIP_CLASSIFICATION";
+    if (isCurrentReview) {
       const scope = detail.data.active_scope.filter((name) =>
         activeDimensions.includes(name as (typeof activeDimensions)[number]),
       );
@@ -184,9 +172,6 @@ export const ClassificationReviewPage = () => {
         reason: reason.trim(),
         decisions,
         tag_decisions,
-        ...(isV3Upgrade
-          ? { accept_incoming_version: incomingSnapshot?.rule_version }
-          : {}),
       });
       return;
     }
@@ -204,15 +189,13 @@ export const ClassificationReviewPage = () => {
   };
   const incoming = detail.data?.incoming;
   const baseline = detail.data?.baseline;
-  const isV3Review = incoming?.rule_version === "3.0.0";
-  const isV3Upgrade =
-    isV3Review && baseline?.rule_version !== incoming.rule_version;
-  const reviewScope = isV3Review
+  const isCurrentReview = incoming?.scheme === "FIP_CLASSIFICATION";
+  const reviewScope = isCurrentReview
     ? (detail.data?.active_scope.filter((name) =>
         activeDimensions.includes(name as (typeof activeDimensions)[number]),
       ) ?? [])
     : [];
-  const requiredTags = isV3Review
+  const requiredTags = isCurrentReview
     ? changedStrategyTags(incoming, baseline)
     : [];
   const activeLegacyScope = (detail.data?.active_scope ?? []).filter((name) =>
@@ -222,15 +205,6 @@ export const ClassificationReviewPage = () => {
     detail.data?.evaluation_state === "PAUSED" ||
     ((detail.data?.historical_scope?.length ?? 0) > 0 &&
       activeLegacyScope.length === 0);
-  const rejectUpgrade = () => {
-    if (!detail.data || !reason.trim()) return;
-    mutation.mutate({
-      expected_revision: detail.data.expected_revision,
-      reason: reason.trim(),
-      decisions: {},
-      reject_upgrade: true,
-    });
-  };
   return (
     <section>
       <h1>分类待复核</h1>
@@ -282,23 +256,15 @@ export const ClassificationReviewPage = () => {
                 : ""}
             </p>
           )}
-          {isV3Upgrade && (
-            <p>
-              规则升级：{baseline?.rule_version} → {incoming?.rule_version}
-              。提交后将以新版两维分类和标签替换本次有效结果；暂停维度仅保留历史来源，不会被修改。
-            </p>
-          )}
           <h3>维度证据比较</h3>
           <h4>
-            当前基线（规则 {detail.data.baseline?.rule_version ?? "旧版本"} ·
-            枚举 {detail.data.baseline?.enum_version ?? "旧版本"}）
+            当前基线
           </h4>
           <ClassificationView classification={detail.data.baseline} evidence />
           {detail.data.incoming && (
             <>
               <h4>
-                新到资料（规则 {detail.data.incoming.rule_version ?? "旧版本"} ·
-                枚举 {detail.data.incoming.enum_version ?? "旧版本"}）
+                新到资料
               </h4>
               <ClassificationView
                 classification={detail.data.incoming}
@@ -312,13 +278,13 @@ export const ClassificationReviewPage = () => {
           </details>
           {session.data?.capabilities.can_review_classifications === true &&
           detail.data.status === "PENDING" ? (
-            isReadOnlyHistoricalCase && !isV3Review ? (
+            isReadOnlyHistoricalCase && !isCurrentReview ? (
               <p>
-                此案件只涉及暂停维度的历史分类，当前版本只读，不接受分类决定。
+                此案件只涉及暂停维度的历史分类，为保护历史记录，当前不接受分类决定。
               </p>
             ) : (
               <form aria-label="分类复核" onSubmit={submit}>
-                {isV3Review ? (
+                {isCurrentReview ? (
                   <>
                     <fieldset>
                       <legend>本次需要确认的活跃维度</legend>
@@ -385,28 +351,6 @@ export const ClassificationReviewPage = () => {
                           </label>
                         ))}
                       </fieldset>
-                    )}
-                    {isV3Upgrade && (
-                      <>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={acceptVersion}
-                            onChange={(event) =>
-                              setAcceptVersion(event.target.checked)
-                            }
-                          />
-                          接受规则与枚举版本 {incoming?.rule_version} /{" "}
-                          {incoming?.enum_version}
-                        </label>
-                        <button
-                          type="button"
-                          disabled={mutation.isPending || !reason.trim()}
-                          onClick={rejectUpgrade}
-                        >
-                          拒绝升级并保留当前版本
-                        </button>
-                      </>
                     )}
                   </>
                 ) : (
@@ -497,10 +441,9 @@ export const ClassificationReviewPage = () => {
                 <button
                   disabled={
                     mutation.isPending ||
-                    (isV3Review &&
+                    (isCurrentReview &&
                       (reviewScope.some((name) => !activeValues[name]) ||
-                        requiredTags.some((tag) => !tagActions[tag]))) ||
-                    (isV3Upgrade && !acceptVersion)
+                        requiredTags.some((tag) => !tagActions[tag])))
                   }
                 >
                   提交复核

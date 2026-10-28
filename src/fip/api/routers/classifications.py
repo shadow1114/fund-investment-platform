@@ -38,9 +38,6 @@ router = APIRouter()
 
 class CatalogPayload(BaseModel):
     scheme: str
-    rule_version: str
-    enum_version: str
-    mapping_version: str
     dimensions: dict[str, list[str]]
     statuses: list[str]
     confidence_grades: dict[str, str]
@@ -59,8 +56,6 @@ class ClassificationHistoryInterval(BaseModel):
 class ClassificationHistoryPayload(BaseModel):
     revision_id: int
     version: int
-    rule_version: str
-    enum_version: str
     available_at: str
     classified_at: str
     actor: str
@@ -79,8 +74,6 @@ class ReviewSubmission(BaseModel):
     decisions: dict[str, ReviewDecision]
     reason: str = Field(min_length=1, max_length=1024)
     tag_decisions: dict[str, StrategyTagDecision] = Field(default_factory=dict)
-    accept_incoming_version: str | None = None
-    reject_upgrade: bool = False
 
 
 class ReviewOutcome(BaseModel):
@@ -169,15 +162,14 @@ def _view(
     response_model=TypedEnvelope[CatalogPayload],
 )
 def catalog(
-    request: Request, rule_version: str | None = None, enum_version: str | None = None
+    request: Request,
 ) -> dict[str, Any]:
-    policy = get_classification_policy(rule_version, enum_version)
+    if {"rule_version", "enum_version"}.intersection(request.query_params):
+        raise InvalidQueryError("Classification catalogs use the single current ruleset")
+    policy = get_classification_policy()
     return success(
         CatalogPayload(
             scheme=policy.scheme,
-            rule_version=policy.rule_version,
-            enum_version=policy.enum_version,
-            mapping_version="FIP_CLASSIFICATION_TO_L2_V1",
             dimensions={k: list(v) for k, v in policy.catalog.items()},
             active_dimensions=list(policy.active_dimensions),
             paused_dimensions=list(policy.paused_dimensions),
@@ -302,8 +294,6 @@ def review(
             expected_revision=body.expected_revision,
             decisions=body.decisions,
             tag_decisions=body.tag_decisions,
-            accept_incoming_version=body.accept_incoming_version,
-            reject_upgrade=body.reject_upgrade,
             actor=principal.user_id,
             reason=body.reason,
             can_review=principal.can_review_classifications,

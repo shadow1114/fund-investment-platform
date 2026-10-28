@@ -123,14 +123,6 @@ paths:
             is not a tag.
           style: form
           explode: false
-        - name: enum_version
-          in: query
-          required: false
-          schema:
-            type: string
-          description:
-            Restricts classification filters to this registered catalog. Omit to use each snapshot
-            version exactly.
       responses:
         "200":
           $ref: "#/components/responses/FundListResponse"
@@ -496,19 +488,6 @@ paths:
                 $ref: "#/components/schemas/TypedEnvelope_CatalogPayload_"
         default:
           $ref: "#/components/responses/ErrorResponse"
-      parameters:
-        - name: rule_version
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Registered rule version; defaults to enum_version or 1.0.0.
-        - name: enum_version
-          in: query
-          required: false
-          schema:
-            type: string
-          description: Registered enum version; defaults to rule_version or 1.0.0.
   /api/v1/funds/{fund_id}/classification-history:
     get:
       summary: History
@@ -3705,18 +3684,6 @@ components:
             - type: "null"
           default: null
           title: Carried From Revision Id
-        source_rule_version:
-          anyOf:
-            - type: string
-            - type: "null"
-          default: null
-          title: Source Rule Version
-        source_enum_version:
-          anyOf:
-            - type: string
-            - type: "null"
-          default: null
-          title: Source Enum Version
       required:
         - status
       title: DimensionResult
@@ -3829,14 +3796,6 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/StrategyTagDecision"
-        accept_incoming_version:
-          anyOf:
-            - type: string
-            - type: "null"
-          default: null
-        reject_upgrade:
-          type: boolean
-          default: false
       additionalProperties: false
       type: object
       required:
@@ -3845,9 +3804,8 @@ components:
         - reason
       title: ReviewSubmission
       description:
-        V3 requires both active dimension decisions and every changed/tag-case tag decision. Paused
-        dimensions cannot be changed. Version upgrades require explicit acceptance, or reject_upgrade with
-        empty decisions. Legacy decisions remain supported. Expected revision is enforced by CAS.
+        Review decisions cover the current active dimensions and every changed/tag-case tag decision.
+        Paused dimensions cannot be changed. Expected revision is enforced by compare-and-swap.
     ReviewOutcome:
       properties:
         revision_id:
@@ -4032,17 +3990,8 @@ components:
     ClassificationPayloadModel:
       properties:
         scheme:
-          const: FIP_CLASSIFICATION_V1
-          default: FIP_CLASSIFICATION_V1
+          default: FIP_CLASSIFICATION
           title: Scheme
-          type: string
-        rule_version:
-          default: 1.0.0
-          title: Rule Version
-          type: string
-        enum_version:
-          default: 1.0.0
-          title: Enum Version
           type: string
         asset_class:
           $ref: "#/components/schemas/DimensionResult"
@@ -4160,15 +4109,6 @@ components:
         scheme:
           type: string
           title: Scheme
-        rule_version:
-          type: string
-          title: Rule Version
-        enum_version:
-          type: string
-          title: Enum Version
-        mapping_version:
-          type: string
-          title: Mapping Version
         dimensions:
           additionalProperties:
             items:
@@ -4201,9 +4141,6 @@ components:
       type: object
       required:
         - scheme
-        - rule_version
-        - enum_version
-        - mapping_version
         - dimensions
         - statuses
         - confidence_grades
@@ -4354,12 +4291,6 @@ components:
         version:
           type: integer
           title: Version
-        rule_version:
-          type: string
-          title: Rule Version
-        enum_version:
-          type: string
-          title: Enum Version
         available_at:
           type: string
           title: Available At
@@ -4404,8 +4335,6 @@ components:
       required:
         - revision_id
         - version
-        - rule_version
-        - enum_version
         - available_at
         - classified_at
         - actor
@@ -4417,17 +4346,8 @@ components:
       additionalProperties: false
       properties:
         scheme:
-          const: FIP_CLASSIFICATION_V1
-          default: FIP_CLASSIFICATION_V1
+          default: FIP_CLASSIFICATION
           title: Scheme
-          type: string
-        rule_version:
-          default: 1.0.0
-          title: Rule Version
-          type: string
-        enum_version:
-          default: 1.0.0
-          title: Enum Version
           type: string
         asset_class:
           $ref: "#/components/schemas/DimensionResult"
@@ -4530,18 +4450,6 @@ components:
             - type: "null"
           default: null
           title: Carried From Revision Id
-        source_rule_version:
-          anyOf:
-            - type: string
-            - type: "null"
-          default: null
-          title: Source Rule Version
-        source_enum_version:
-          anyOf:
-            - type: string
-            - type: "null"
-          default: null
-          title: Source Enum Version
         manual_action:
           anyOf:
             - enum:

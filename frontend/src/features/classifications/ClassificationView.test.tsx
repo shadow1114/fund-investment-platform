@@ -6,12 +6,11 @@ import { ClassificationView } from "./ClassificationView";
 const dimension = (status: string, value: string, evaluation_state?: string) =>
   ({ status, value, candidates: [], evidence: [], evaluation_state }) as never;
 
-it("keeps legacy tag absence distinct from a negative quantitative result", () => {
+it("keeps historical tag absence distinct from a negative quantitative result", () => {
   render(
     <ClassificationView
       classification={{
-        rule_version: "1.0.0",
-        enum_version: "1.0.0",
+        scheme: "FIP_CLASSIFICATION_V1",
         asset_class: dimension("CONFIRMED", "EQUITY"),
         strategy: dimension("CONFIRMED", "QUANTITATIVE"),
         geography: dimension("UNKNOWN", "UNKNOWN"),
@@ -29,16 +28,15 @@ it("keeps legacy tag absence distinct from a negative quantitative result", () =
     />,
   );
 
-  expect(screen.getByText(/旧版本未提供量化标签/)).toBeVisible();
+  expect(screen.getByText(/该历史记录未包含量化标签/)).toBeVisible();
   expect(screen.queryByText(/非量化/)).toBeNull();
 });
 
-it("renders active and paused v3 dimensions and tag evidence states separately", () => {
+it("renders current and paused dimensions and tag evidence states separately", () => {
   render(
     <ClassificationView
       classification={{
-        rule_version: "3.0.0",
-        enum_version: "3.0.0",
+        scheme: "FIP_CLASSIFICATION",
         asset_class: dimension("CONFIRMED", "EQUITY"),
         strategy: {
           status: "CONFLICT",

@@ -16,16 +16,16 @@ from sqlalchemy.orm import Session
 from fip.services.data_service.classification.legacy import project_legacy
 from fip.services.data_service.classification.models import (
     DIMENSIONS,
-    V3_ACTIVE_DIMENSIONS,
-    V3_CATALOG,
-    V3_PAUSED_DIMENSIONS,
-    V3_STRATEGY_TAGS,
+    CURRENT_ACTIVE_DIMENSIONS,
+    CURRENT_CATALOG,
+    CURRENT_PAUSED_DIMENSIONS,
+    CURRENT_STRATEGY_TAGS,
     ClassificationSnapshot,
     DimensionResult,
     Evidence,
     StrategyTagResult,
 )
-from fip.services.data_service.classification.rules import CATALOG
+from fip.services.data_service.classification.rules import CATALOG, HISTORICAL_CATALOG
 from fip.services.data_service.models.fund import (
     Fund,
     FundClassificationHistory,
@@ -34,7 +34,7 @@ from fip.services.data_service.models.fund import (
 )
 from fip.services.data_service.models.governance import AuditLog
 
-SCHEME = "FIP_CLASSIFICATION_V1"
+SCHEME = "FIP_CLASSIFICATION"
 Interval = tuple[dt.date, dt.date | None, ClassificationSnapshot]
 StoredInterval = tuple[dt.date, dt.date | None, ClassificationSnapshot, dict[str, object]]
 
@@ -127,12 +127,16 @@ def _observations(snapshot: ClassificationSnapshot) -> tuple[Evidence, ...]:
 
 
 def _active_dimensions(snapshot: ClassificationSnapshot) -> tuple[str, ...]:
-    return V3_ACTIVE_DIMENSIONS if snapshot.rule_version == "3.0.0" else DIMENSIONS
+    return tuple(
+        name
+        for name in DIMENSIONS
+        if getattr(snapshot, name).evaluation_state not in ("PAUSED", "NOT_EVALUATED")
+    )
 
 
 def _changed_tags(old: ClassificationSnapshot, new: ClassificationSnapshot) -> set[str]:
     changed = set()
-    for tag in V3_STRATEGY_TAGS:
+    for tag in CURRENT_STRATEGY_TAGS:
         prior = (old.strategy_tag_results or {}).get(tag)
         incoming = (new.strategy_tag_results or {}).get(tag)
         if _canonical(prior.model_dump(mode="json") if prior else None) != _canonical(
@@ -146,10 +150,10 @@ def _carry_paused(
     incoming: ClassificationSnapshot, baseline: ClassificationSnapshot, revision_id: int
 ) -> ClassificationSnapshot:
     updates = {}
-    for name in V3_PAUSED_DIMENSIONS:
+    for name in CURRENT_PAUSED_DIMENSIONS:
         old = getattr(baseline, name)
         if (
-            baseline.rule_version == "3.0.0"
+            baseline.scheme == SCHEME
             and old.evaluation_state == "NOT_EVALUATED"
             and old.carried_from_revision_id is None
         ):
@@ -159,12 +163,8 @@ def _carry_paused(
             updates[name] = old
             continue
         values = (old.value,) if isinstance(old.value, str) else old.value
-        compatible = set((*values, *old.candidates)) <= set(V3_CATALOG[name])
-        provenance = {
-            "carried_from_revision_id": revision_id,
-            "source_rule_version": baseline.rule_version,
-            "source_enum_version": baseline.enum_version,
-        }
+        compatible = set((*values, *old.candidates)) <= set(CURRENT_CATALOG[name])
+        provenance = {"carried_from_revision_id": revision_id}
         updates[name] = (
             old.model_copy(update={"evaluation_state": "PAUSED", **provenance})
             if compatible
@@ -172,8 +172,6 @@ def _carry_paused(
                 status="UNKNOWN",
                 evaluation_state="NOT_EVALUATED",
                 carried_from_revision_id=revision_id,
-                source_rule_version=baseline.rule_version,
-                source_enum_version=baseline.enum_version,
             )
         )
     return ClassificationSnapshot.model_validate({**incoming.model_dump(), **updates})
@@ -246,7 +244,11 @@ def _hash(intervals: Sequence[StoredInterval]) -> str:
 
 
 def _validate_snapshot(snapshot: ClassificationSnapshot) -> None:
-    catalog = V3_CATALOG if snapshot.rule_version == "3.0.0" else CATALOG
+    catalog = (
+        CURRENT_CATALOG
+        if snapshot.scheme == "FIP_CLASSIFICATION"
+        else HISTORICAL_CATALOG
+    )
     for name in DIMENSIONS:
         dim: DimensionResult = getattr(snapshot, name)
         values = (dim.value,) if isinstance(dim.value, str) else dim.value
@@ -328,8 +330,7 @@ def verified_tag_rejections(
             or not revision.reviewed
             or revision.fund_id != fund_id
             or revision.available_at > visible_until
-            or (revision.rule_version, revision.enum_version)
-            != (snapshot.rule_version, snapshot.enum_version)
+            or revision.scheme != snapshot.scheme
             or case is None
             or case.fund_id != fund_id
             or case.revision_id != detail.get("expected_revision")
@@ -424,11 +425,11 @@ class ClassificationService:
     def _mark_paused_cases(self, fund_id: int) -> None:
         for case in self.active_review_cases(fund_id):
             scope = case.details.get("source_dimensions") or [case.details.get("dimension")]
-            if any(name in V3_PAUSED_DIMENSIONS for name in scope):
+            if any(name in CURRENT_PAUSED_DIMENSIONS for name in scope):
                 active = [
                     name
                     for name in scope
-                    if name in V3_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
+                    if name in CURRENT_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
                 ]
                 case.details = {
                     **case.details,
@@ -437,7 +438,7 @@ class ClassificationService:
                     "evaluation_state": "EVALUATED" if active else "PAUSED",
                 }
 
-    def refresh_v3(
+    def refresh(
         self,
         fund_id: int,
         evidence: Sequence[Evidence],
@@ -470,7 +471,7 @@ class ClassificationService:
         ):
             raise ValueError("available_at cannot predate newly collected evidence")
         if any(_source_identity(item) is None for item in evidence):
-            raise ValueError("refresh_v3 requires stable provider/share observation identity")
+            raise ValueError("refresh requires stable provider/share observation identity")
         self.lock_product(fund_id)
         previous = self.latest(fund_id)
         target = valid_from or available_at.date()
@@ -511,10 +512,10 @@ class ClassificationService:
                         retained[_observation_key(item)] = item
         for item in evidence:
             if item.required_observations:
-                raise ValueError("refresh_v3 requires raw observations, not derived assertions")
+                raise ValueError("refresh requires raw observations, not derived assertions")
             retained[_observation_key(item)] = item
         raw = tuple(retained.values())
-        result = classify(raw, classified_at=available_at, policy=load_policy(rule_version="3.0.0"))
+        result = classify(raw, classified_at=available_at, policy=load_policy())
         result = result.model_copy(
             update={"observations": raw, "source_diagnostics": tuple(sorted(set(diagnostics)))}
         )
@@ -622,7 +623,7 @@ class ClassificationService:
             raise ValueError("revision must contain intervals")
         carried: list[StoredInterval] = []
         for start, end, value, trading in ordered:
-            if value.rule_version != "3.0.0" or previous is None:
+            if value.scheme != SCHEME or previous is None:
                 carried.append((start, end, value, trading))
                 continue
             boundaries = {start}
@@ -647,7 +648,7 @@ class ClassificationService:
         ordered = carried
         for i, (start, end, snapshot, _) in enumerate(ordered):
             _validate_snapshot(snapshot)
-            if snapshot.rule_version == "3.0.0":
+            if snapshot.scheme == SCHEME:
                 _assert_observations_visible(snapshot, available_at)
             if end is not None and end <= start:
                 raise ValueError("invalid interval")
@@ -678,7 +679,7 @@ class ClassificationService:
                 merged.append((start, end, value, trading))
         ordered = merged
         digest = _hash(ordered)
-        if any(value.rule_version == "3.0.0" for _, _, value, _ in ordered):
+        if any(value.scheme == SCHEME for _, _, value, _ in ordered):
             self._mark_paused_cases(fund_id)
         if previous is not None and previous.content_hash == digest and not reviewed:
             return previous
@@ -705,12 +706,6 @@ class ClassificationService:
                     differing.extend(
                         f"strategy_tags.{tag}" for tag in sorted(_changed_tags(old[2], value))
                     )
-                versions_changed = old is not None and (
-                    old[2].rule_version,
-                    old[2].enum_version,
-                ) != (value.rule_version, value.enum_version)
-                if versions_changed:
-                    differing = list(dict.fromkeys([*_active_dimensions(value), *differing]))
                 for name in differing or ["asset_class"]:
                     self._case(
                         previous,
@@ -723,7 +718,6 @@ class ClassificationService:
                             "changed_scope": differing,
                             "source_dimensions": differing,
                             "baseline": old[2].to_dict() if old else None,
-                            "incoming_version": value.rule_version,
                             "intervals": [
                                 [
                                     start.isoformat(),
@@ -740,8 +734,6 @@ class ClassificationService:
             fund_id=fund_id,
             scheme=SCHEME,
             version=previous.version + 1 if previous else 1,
-            rule_version=snapshot.rule_version,
-            enum_version=snapshot.enum_version,
             content_hash=digest,
             classified_at=available_at,
             available_at=available_at,
@@ -770,13 +762,13 @@ class ClassificationService:
                 )
             ):
                 scope = case.details.get("source_dimensions") or [case.details.get("dimension")]
-                if snapshot.rule_version == "3.0.0" and any(
-                    name in V3_PAUSED_DIMENSIONS for name in scope
+                if snapshot.scheme == SCHEME and any(
+                    name in CURRENT_PAUSED_DIMENSIONS for name in scope
                 ):
                     active = [
                         name
                         for name in scope
-                        if name in V3_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
+                        if name in CURRENT_ACTIVE_DIMENSIONS or str(name).startswith("strategy_tags.")
                     ]
                     case.details = {
                         **case.details,
@@ -934,8 +926,6 @@ class ClassificationService:
         can_review: bool,
         reviewed_at: dt.datetime | None = None,
         tag_decisions: Mapping[str, StrategyTagDecision] | None = None,
-        accept_incoming_version: str | None = None,
-        reject_upgrade: bool = False,
     ) -> FundClassificationRevision:
         if not can_review:
             raise PermissionError("classification review capability required")
@@ -992,24 +982,19 @@ class ClassificationService:
             if incoming_intervals
             else None
         )
-        if snapshot.rule_version == "3.0.0" or (incoming and incoming.rule_version == "3.0.0"):
-            return self._review_v3(
-                case,
-                latest,
-                snapshot,
-                incoming,
-                target=target,
-                end=end,
-                at=at,
-                decisions=decisions,
-                tag_decisions=tag_decisions or {},
-                accept_incoming_version=accept_incoming_version,
-                reject_upgrade=reject_upgrade,
-                actor=actor,
-                reason=reason,
-            )
-        if tag_decisions or reject_upgrade or accept_incoming_version:
-            raise ValueError("v3 review options require a v3 snapshot")
+        return self._review(
+            case,
+            latest,
+            snapshot,
+            incoming,
+            target=target,
+            end=end,
+            at=at,
+            decisions=decisions,
+            tag_decisions=tag_decisions or {},
+            actor=actor,
+            reason=reason,
+        )
         if not decisions or not set(decisions) <= set(DIMENSIONS):
             raise ValueError("dimension decisions are required")
         updates: dict[str, object] = {}
@@ -1094,7 +1079,7 @@ class ClassificationService:
         self.session.flush()
         return revision
 
-    def _review_v3(
+    def _review(
         self,
         case: FundClassificationReviewCase,
         latest: FundClassificationRevision,
@@ -1106,8 +1091,6 @@ class ClassificationService:
         at: dt.datetime,
         decisions: Mapping[str, ReviewDecision],
         tag_decisions: Mapping[str, StrategyTagDecision],
-        accept_incoming_version: str | None,
-        reject_upgrade: bool,
         actor: str,
         reason: str,
     ) -> FundClassificationRevision:
@@ -1116,127 +1099,109 @@ class ClassificationService:
         if at < max(latest.available_at, case.created_at):
             raise ValueError("reviewed_at cannot predate the baseline or proposal")
         proposed = incoming or baseline
-        if proposed.rule_version != "3.0.0":
-            raise ValueError("v3 review requires the incoming version to be 3.0.0")
-        upgrade = (baseline.rule_version, baseline.enum_version) != (
-            proposed.rule_version,
-            proposed.enum_version,
-        )
-        if reject_upgrade:
-            if not upgrade or decisions or tag_decisions:
-                raise ValueError("reject_upgrade requires an upgrade and no scope decisions")
-            result = latest
-        else:
-            if upgrade and accept_incoming_version != proposed.rule_version:
-                raise ValueError("explicit acceptance of incoming version is required")
-            if (
-                accept_incoming_version is not None
-                and accept_incoming_version != proposed.rule_version
-            ):
-                raise ValueError("incoming version does not match proposal")
-            if set(decisions) != set(V3_ACTIVE_DIMENSIONS) or not set(tag_decisions) <= set(
-                V3_STRATEGY_TAGS
-            ):
-                raise ValueError(
-                    "v3 review scope requires both active dimensions and no paused decisions"
-                )
-            required_tags = _changed_tags(baseline, proposed)
-            dimension = str(case.details.get("dimension", ""))
-            if dimension.startswith("strategy_tags."):
-                required_tags.add(dimension.split(".", 1)[1])
-            if not required_tags <= set(tag_decisions):
-                raise ValueError("v3 review scope requires decisions for changed strategy tags")
-            proposed = _carry_paused(proposed, baseline, latest.id)
-            updates: dict[str, object] = {}
-            for name, decision in decisions.items():
-                original = getattr(baseline, name)
-                new = getattr(proposed, name)
-                if not decision.evidence:
-                    raise ValueError("review decisions require evidence")
-                values = (decision.value,) if isinstance(decision.value, str) else decision.value
-                allowed = set((*original.candidates, *new.candidates))
-                for dim in (original, new):
-                    if dim.status == "CONFIRMED":
-                        allowed.update((dim.value,) if isinstance(dim.value, str) else dim.value)
-                if decision.action == "CONFIRM" and not set(values) <= allowed:
-                    raise ValueError("confirmation must select a baseline or incoming candidate")
-                updates[name] = DimensionResult(
-                    status="UNKNOWN" if decision.action == "REJECT" else "CONFIRMED",
-                    value="UNKNOWN" if decision.action == "REJECT" else decision.value,
-                    evidence=original.evidence + new.evidence + decision.evidence,
-                    evaluation_state="EVALUATED",
-                )
-            tags = dict(proposed.strategy_tag_results or {})
-            for tag, tag_decision in tag_decisions.items():
-                if not tag_decision.evidence:
-                    raise ValueError("tag decisions require evidence")
-                evidence = tuple(
-                    e
-                    for source in (baseline, proposed)
-                    for e in (
-                        (source.strategy_tag_results or {})[tag].evidence
-                        if tag in (source.strategy_tag_results or {})
-                        else ()
-                    )
-                )
-                tags[tag] = StrategyTagResult(
-                    status="CONFIRMED" if tag_decision.action == "CONFIRM" else "UNKNOWN",
-                    value=tag if tag_decision.action == "CONFIRM" else "UNKNOWN",
-                    evidence=evidence + tag_decision.evidence,
-                    evaluation_state="EVALUATED",
-                    manual_action=tag_decision.action,
-                )
-            reviewed = ClassificationSnapshot.model_validate(
-                {
-                    **proposed.model_dump(),
-                    **updates,
-                    "strategy_tag_results": tags,
-                    "strategy_tags": None,
-                    "observations": _observations(proposed),
-                    "review_items": tuple(
-                        sorted(
-                            [
-                                f"{name}:{dim.status}"
-                                for name, dim in updates.items()
-                                if isinstance(dim, DimensionResult) and dim.status != "CONFIRMED"
-                            ]
-                            + [
-                                f"strategy_tags:{tag}:{value.status}"
-                                for tag, value in tags.items()
-                                if value.status in {"CANDIDATE", "CONFLICT"}
-                            ]
-                        )
-                    ),
-                }
+        if proposed.scheme != SCHEME:
+            raise ValueError("Review requires a proposal from the current classification rules")
+        if set(decisions) != set(CURRENT_ACTIVE_DIMENSIONS) or not set(tag_decisions) <= set(
+            CURRENT_STRATEGY_TAGS
+        ):
+            raise ValueError("Review scope must cover the current active dimensions")
+        required_tags = _changed_tags(baseline, proposed)
+        dimension = str(case.details.get("dimension", ""))
+        if dimension.startswith("strategy_tags."):
+            required_tags.add(dimension.split(".", 1)[1])
+        if not required_tags <= set(tag_decisions):
+            raise ValueError("Review decisions must cover changed strategy tags")
+        proposed = _carry_paused(proposed, baseline, latest.id)
+        updates: dict[str, object] = {}
+        for name, decision in decisions.items():
+            original = getattr(baseline, name)
+            new = getattr(proposed, name)
+            if not decision.evidence:
+                raise ValueError("review decisions require evidence")
+            values = (decision.value,) if isinstance(decision.value, str) else decision.value
+            allowed = set((*original.candidates, *new.candidates))
+            for dim in (original, new):
+                if dim.status == "CONFIRMED":
+                    allowed.update((dim.value,) if isinstance(dim.value, str) else dim.value)
+            if decision.action == "CONFIRM" and not set(values) <= allowed:
+                raise ValueError("confirmation must select a baseline or incoming candidate")
+            updates[name] = DimensionResult(
+                status="UNKNOWN" if decision.action == "REJECT" else "CONFIRMED",
+                value="UNKNOWN" if decision.action == "REJECT" else decision.value,
+                evidence=original.evidence + new.evidence + decision.evidence,
+                evaluation_state="EVALUATED",
             )
-            _validate_snapshot(reviewed)
-            # Only this authorized/CAS-checked review path may admit newly rejected
-            # tags while its revision and matching audit are built atomically.
-            prior_scope = self._authorized_tag_rejections
-            self._authorized_tag_rejections = _TagReviewAuthorization(
-                fund_id=case.fund_id,
-                expected_revision=latest.id,
+        tags = dict(proposed.strategy_tag_results or {})
+        for tag, tag_decision in tag_decisions.items():
+            if not tag_decision.evidence:
+                raise ValueError("tag decisions require evidence")
+            evidence = tuple(
+                e
+                for source in (baseline, proposed)
+                for e in (
+                    (source.strategy_tag_results or {})[tag].evidence
+                    if tag in (source.strategy_tag_results or {})
+                    else ()
+                )
+            )
+            tags[tag] = StrategyTagResult(
+                status="CONFIRMED" if tag_decision.action == "CONFIRM" else "UNKNOWN",
+                value=tag if tag_decision.action == "CONFIRM" else "UNKNOWN",
+                evidence=evidence + tag_decision.evidence,
+                evaluation_state="EVALUATED",
+                manual_action=tag_decision.action,
+            )
+        reviewed = ClassificationSnapshot.model_validate(
+            {
+                **proposed.model_dump(),
+                **updates,
+                "strategy_tag_results": tags,
+                "strategy_tags": None,
+                "observations": _observations(proposed),
+                "review_items": tuple(
+                    sorted(
+                        [
+                            f"{name}:{dim.status}"
+                            for name, dim in updates.items()
+                            if isinstance(dim, DimensionResult) and dim.status != "CONFIRMED"
+                        ]
+                        + [
+                            f"strategy_tags:{tag}:{value.status}"
+                            for tag, value in tags.items()
+                            if value.status in {"CANDIDATE", "CONFLICT"}
+                        ]
+                    )
+                ),
+            }
+        )
+        _validate_snapshot(reviewed)
+        # Only this authorized/CAS-checked review path may admit newly rejected
+        # tags while its revision and matching audit are built atomically.
+        prior_scope = self._authorized_tag_rejections
+        self._authorized_tag_rejections = _TagReviewAuthorization(
+            fund_id=case.fund_id,
+            expected_revision=latest.id,
+            valid_from=target,
+            valid_to=end,
+            tags={
+                tag: tags[tag]
+                for tag, value in tag_decisions.items()
+                if value.action == "REJECT"
+            },
+        )
+        try:
+            result = self.write(
+                case.fund_id,
+                reviewed,
                 valid_from=target,
                 valid_to=end,
-                tags={
-                    tag: tags[tag]
-                    for tag, value in tag_decisions.items()
-                    if value.action == "REJECT"
-                },
+                available_at=at,
+                actor=actor,
+                reason=reason,
+                reviewed=True,
             )
-            try:
-                result = self.write(
-                    case.fund_id,
-                    reviewed,
-                    valid_from=target,
-                    valid_to=end,
-                    available_at=at,
-                    actor=actor,
-                    reason=reason,
-                    reviewed=True,
-                )
-            finally:
-                self._authorized_tag_rejections = prior_scope
+        finally:
+            self._authorized_tag_rejections = prior_scope
         decided_scope = set(decisions) | {f"strategy_tags.{tag}" for tag in tag_decisions}
         for rebased in self.active_review_cases(case.fund_id):
             if (
@@ -1251,7 +1216,7 @@ class ClassificationService:
         historical_scope = [
             name
             for name in case.details.get("source_dimensions", [])
-            if name in V3_PAUSED_DIMENSIONS
+            if name in CURRENT_PAUSED_DIMENSIONS
         ]
         if historical_scope:
             case.details = {
@@ -1278,16 +1243,9 @@ class ClassificationService:
                     "revision_id": result.id,
                     "baseline": baseline.to_dict(),
                     "incoming": incoming.to_dict() if incoming else None,
-                    "accepted_version": accept_incoming_version,
-                    "reject_upgrade": reject_upgrade,
                     "valid_from": target.isoformat(),
                     "valid_to": end.isoformat() if end else None,
                     "result_tag_results": {
-                        tag: value.model_dump(mode="json")
-                        for tag, value in (proposed.strategy_tag_results or {}).items()
-                    }
-                    if reject_upgrade
-                    else {
                         tag: value.model_dump(mode="json")
                         for tag, value in (reviewed.strategy_tag_results or {}).items()
                     },

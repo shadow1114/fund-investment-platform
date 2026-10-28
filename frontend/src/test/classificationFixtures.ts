@@ -1,9 +1,6 @@
 export const classificationCatalog = {
   data: {
     scheme: "FIP_CLASSIFICATION_V1",
-    rule_version: "1.0.0",
-    enum_version: "1.0.0",
-    mapping_version: "v1",
     dimensions: {
       asset_class: ["EQUITY", "BOND", "UNKNOWN"],
       strategy: ["ACTIVE", "PASSIVE_INDEX", "UNKNOWN"],
@@ -24,8 +21,7 @@ export const classificationHistoryEnvelope = {
     {
       revision_id: 12,
       version: 1,
-      rule_version: "1.0.0",
-      enum_version: "1.0.0",
+      scheme: "FIP_CLASSIFICATION_V1",
       available_at: "2026-01-01T00:00:00Z",
       classified_at: "2026-01-01T00:00:00Z",
       actor: "fixture-source",
@@ -38,8 +34,6 @@ export const classificationHistoryEnvelope = {
           trading_eligibility: null,
           classification: {
             scheme: "FIP_CLASSIFICATION_V1",
-            rule_version: "1.0.0",
-            enum_version: "1.0.0",
             asset_class: {
               status: "CONFIRMED",
               value: "EQUITY",

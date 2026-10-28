@@ -11,7 +11,7 @@ let allowed = true;
 let posts = 0;
 let reads = 0;
 let submitted: Record<string, unknown> | null = null;
-const v3Evidence = {
+const classificationEvidence = {
   source: "AGGREGATOR",
   confidence: "PUBLIC_AGGREGATOR",
   rule_id: "STR001",
@@ -32,22 +32,21 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: vi.fn(),
   })),
 });
-const v3Snapshot = {
-  rule_version: "3.0.0",
-  enum_version: "3.0.0",
+const currentSnapshot = {
+  scheme: "FIP_CLASSIFICATION",
   asset_class: {
     status: "CONFIRMED",
     value: "EQUITY",
     candidates: [],
-    evidence: [{ ...v3Evidence, raw_field: "asset_class" }],
+    evidence: [{ ...classificationEvidence, raw_field: "asset_class" }],
   },
   strategy: {
     status: "CONFLICT",
     value: "UNKNOWN",
     candidates: ["PASSIVE_INDEX", "ENHANCED_INDEX"],
     evidence: [
-      { ...v3Evidence, raw_value: "被动指数型", rule_id: "STR002" },
-      { ...v3Evidence, raw_value: "增强指数型", rule_id: "STR001" },
+      { ...classificationEvidence, raw_value: "被动指数型", rule_id: "STR002" },
+      { ...classificationEvidence, raw_value: "增强指数型", rule_id: "STR001" },
     ],
   },
   geography: {
@@ -74,7 +73,7 @@ const v3Snapshot = {
       status: "CONFIRMED",
       value: "QUANTITATIVE",
       evaluation_state: "EVALUATED",
-      evidence: [{ ...v3Evidence, raw_field: "strategy" }],
+      evidence: [{ ...classificationEvidence, raw_field: "strategy" }],
     },
   },
 };
@@ -108,8 +107,6 @@ const server = setupServer(
       ...classificationCatalog,
       data: {
         ...classificationCatalog.data,
-        rule_version: "3.0.0",
-        enum_version: "3.0.0",
         active_dimensions: ["asset_class", "strategy"],
         paused_dimensions: [
           "geography",
@@ -194,7 +191,7 @@ it("requires evidence and reloads a stale baseline without automatic resubmissio
   expect(screen.getByLabelText("复核理由")).toHaveValue("");
 });
 
-it("reviews v1 to v3 with both active decisions, changed tag, version acceptance, and no paused controls", async () => {
+it("reviews current classification with both active decisions, changed tag, and no paused controls", async () => {
   const user = userEvent.setup();
   reviewItem = {
     ...item,
@@ -202,9 +199,8 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
     historical_scope: ["geography", "product_structure", "market_attributes"],
     evaluation_state: "EVALUATED",
     baseline: {
-      ...v3Snapshot,
-      rule_version: "1.0.0",
-      enum_version: "1.0.0",
+      ...currentSnapshot,
+      scheme: "FIP_CLASSIFICATION_V1",
       strategy: {
         status: "CONFIRMED",
         value: "QUANTITATIVE",
@@ -214,7 +210,7 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
       strategy_tags: undefined,
       strategy_tag_results: undefined,
     },
-    incoming: v3Snapshot,
+    incoming: currentSnapshot,
   };
   server.use(
     http.post(
@@ -231,8 +227,8 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
     ),
   );
   show();
-  await screen.findByText("新到资料（规则 3.0.0 · 枚举 3.0.0）");
-  expect(screen.getByText("当前基线（规则 1.0.0 · 枚举 1.0.0）")).toBeVisible();
+  await screen.findByText("新到资料");
+  expect(screen.getByText("当前基线")).toBeVisible();
   expect(screen.getByText("被动指数型")).toBeVisible();
   expect(screen.getAllByText("增强指数型").length).toBeGreaterThan(0);
   expect(screen.queryByLabelText("投资地域决定值")).toBeNull();
@@ -246,10 +242,9 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
     screen.getByLabelText("QUANTITATIVE 标签决定"),
     "CONFIRM",
   );
-  await user.click(screen.getByLabelText(/接受规则与枚举版本/));
   await user.type(
     screen.getByLabelText("复核理由"),
-    "接受规则升级并确认两个活跃维度",
+    "复核两个活跃维度和量化标签",
   );
   await user.type(
     screen.getByLabelText("证据原文"),
@@ -260,7 +255,6 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
 
   await screen.findByText("复核已保存，请选择下一条待复核记录。");
   expect(submitted).toMatchObject({
-    accept_incoming_version: "3.0.0",
     decisions: {
       asset_class: { value: "EQUITY" },
       strategy: { value: "ENHANCED_INDEX" },
@@ -269,15 +263,15 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
   });
 });
 
-it("does not require a decision for an unchanged tag in a same-version v3 review", async () => {
+it("does not require a decision for an unchanged tag in the current ruleset", async () => {
   const user = userEvent.setup();
   reviewItem = {
     ...item,
     active_scope: ["asset_class", "strategy"],
     historical_scope: ["geography", "product_structure", "market_attributes"],
     evaluation_state: "EVALUATED",
-    baseline: v3Snapshot,
-    incoming: v3Snapshot,
+    baseline: currentSnapshot,
+    incoming: currentSnapshot,
   };
   server.use(
     http.post(
@@ -294,7 +288,7 @@ it("does not require a decision for an unchanged tag in a same-version v3 review
     ),
   );
   show();
-  await screen.findByText("新到资料（规则 3.0.0 · 枚举 3.0.0）");
+  await screen.findByText("新到资料");
   expect(screen.queryByLabelText("QUANTITATIVE 标签决定")).toBeNull();
   expect(screen.queryByLabelText(/接受规则与枚举版本/)).toBeNull();
 
@@ -334,7 +328,7 @@ it("keeps a historical paused-dimension case read-only", async () => {
   );
   expect(
     screen.getByText(
-      "此案件只涉及暂停维度的历史分类，当前版本只读，不接受分类决定。",
+      "此案件只涉及暂停维度的历史分类，为保护历史记录，当前不接受分类决定。",
     ),
   ).toBeVisible();
   expect(screen.queryByRole("form", { name: "分类复核" })).toBeNull();

@@ -29,7 +29,6 @@ import type {
   FundResponseResponse,
   FundScoreResponseResponse,
   GetBacktestPerformanceParams,
-  GetClassificationCatalogParams,
   GetClassificationHistoryParams,
   GetClassificationReviewParams,
   GetFundBasicInfoHistoryParams,
@@ -1254,30 +1253,15 @@ export type getClassificationCatalogResponse =
   | getClassificationCatalogResponseSuccess
   | getClassificationCatalogResponseError;
 
-export const getGetClassificationCatalogUrl = (
-  params?: GetClassificationCatalogParams,
-) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/fund-classifications/catalog?${stringifiedParams}`
-    : `/api/v1/fund-classifications/catalog`;
+export const getGetClassificationCatalogUrl = () => {
+  return `/api/v1/fund-classifications/catalog`;
 };
 
 export const getClassificationCatalog = async (
-  params?: GetClassificationCatalogParams,
   options?: RequestInit,
 ): Promise<getClassificationCatalogResponse> => {
   return apiFetch<getClassificationCatalogResponse>(
-    getGetClassificationCatalogUrl(params),
+    getGetClassificationCatalogUrl(),
     {
       ...options,
       method: "GET",

@@ -1729,10 +1729,6 @@ export type DimensionResultEvaluationState =
 
 export type DimensionResultCarriedFromRevisionId = number | null;
 
-export type DimensionResultSourceRuleVersion = string | null;
-
-export type DimensionResultSourceEnumVersion = string | null;
-
 export interface DimensionResult {
   status: DimensionResultStatus;
   value?: DimensionResultValue;
@@ -1740,8 +1736,6 @@ export interface DimensionResult {
   evidence?: Evidence[];
   evaluation_state?: DimensionResultEvaluationState;
   carried_from_revision_id?: DimensionResultCarriedFromRevisionId;
-  source_rule_version?: DimensionResultSourceRuleVersion;
-  source_enum_version?: DimensionResultSourceEnumVersion;
 }
 
 export type EvidenceSource =
@@ -1801,10 +1795,8 @@ export type ReviewSubmissionTagDecisions = {
   [key: string]: StrategyTagDecision;
 };
 
-export type ReviewSubmissionAcceptIncomingVersion = string | null;
-
 /**
- * V3 requires both active dimension decisions and every changed/tag-case tag decision. Paused dimensions cannot be changed. Version upgrades require explicit acceptance, or reject_upgrade with empty decisions. Legacy decisions remain supported. Expected revision is enforced by CAS.
+ * Review decisions cover the current active dimensions and every changed/tag-case tag decision. Paused dimensions cannot be changed. Expected revision is enforced by compare-and-swap.
  */
 export interface ReviewSubmission {
   /** */
@@ -1816,8 +1808,6 @@ export interface ReviewSubmission {
    */
   reason: string;
   tag_decisions?: ReviewSubmissionTagDecisions;
-  accept_incoming_version?: ReviewSubmissionAcceptIncomingVersion;
-  reject_upgrade?: boolean;
 }
 
 export interface ReviewOutcome {
@@ -1917,9 +1907,7 @@ export type ClassificationPayloadModelProviderAvailableAt = string | null;
 export type ClassificationPayloadModelIngestedAt = string | null;
 
 export interface ClassificationPayloadModel {
-  scheme?: "FIP_CLASSIFICATION_V1";
-  rule_version?: string;
-  enum_version?: string;
+  scheme?: string;
   asset_class: DimensionResult;
   strategy: DimensionResult;
   geography: DimensionResult;
@@ -1950,9 +1938,6 @@ export type CatalogPayloadConfidenceGrades = { [key: string]: string };
 
 export interface CatalogPayload {
   scheme: string;
-  rule_version: string;
-  enum_version: string;
-  mapping_version: string;
   dimensions: CatalogPayloadDimensions;
   statuses: string[];
   confidence_grades: CatalogPayloadConfidenceGrades;
@@ -2033,8 +2018,6 @@ export type ClassificationHistoryPayloadAvailabilityQuality = string | null;
 export interface ClassificationHistoryPayload {
   revision_id: number;
   version: number;
-  rule_version: string;
-  enum_version: string;
   available_at: string;
   classified_at: string;
   actor: string;
@@ -2061,9 +2044,7 @@ export type ClassificationSnapshotObservations = Evidence[] | null;
 export type ClassificationSnapshotSourceDiagnostics = string[] | null;
 
 export interface ClassificationSnapshot {
-  scheme?: "FIP_CLASSIFICATION_V1";
-  rule_version?: string;
-  enum_version?: string;
+  scheme?: string;
   asset_class: DimensionResult;
   strategy: DimensionResult;
   geography: DimensionResult;
@@ -2100,10 +2081,6 @@ export const StrategyTagResultEvaluationState = {
 
 export type StrategyTagResultCarriedFromRevisionId = number | null;
 
-export type StrategyTagResultSourceRuleVersion = string | null;
-
-export type StrategyTagResultSourceEnumVersion = string | null;
-
 export type StrategyTagResultManualAction = "CONFIRM" | "REJECT" | null;
 
 /**
@@ -2116,8 +2093,6 @@ export interface StrategyTagResult {
   evidence?: Evidence[];
   evaluation_state?: StrategyTagResultEvaluationState;
   carried_from_revision_id?: StrategyTagResultCarriedFromRevisionId;
-  source_rule_version?: StrategyTagResultSourceRuleVersion;
-  source_enum_version?: StrategyTagResultSourceEnumVersion;
   manual_action?: StrategyTagResultManualAction;
 }
 
@@ -2342,10 +2317,6 @@ export type ListFundsParams = {
    * Matches only evidence-backed CONFIRMED independent tags; legacy QUANTITATIVE strategy is not a tag.
    */
   strategy_tags?: string[];
-  /**
-   * Restricts classification filters to this registered catalog. Omit to use each snapshot version exactly.
-   */
-  enum_version?: string;
 };
 
 export type GetFundParams = {
@@ -2443,17 +2414,6 @@ export const GetBacktestPerformanceSegment = {
   IN_SAMPLE: "IN_SAMPLE",
   OUT_OF_SAMPLE: "OUT_OF_SAMPLE",
 } as const;
-
-export type GetClassificationCatalogParams = {
-  /**
-   * Registered rule version; defaults to enum_version or 1.0.0.
-   */
-  rule_version?: string;
-  /**
-   * Registered enum version; defaults to rule_version or 1.0.0.
-   */
-  enum_version?: string;
-};
 
 export type GetClassificationHistoryParams = {
   decision_at?: string | null;

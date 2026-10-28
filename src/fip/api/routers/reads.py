@@ -19,7 +19,6 @@ from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, Port
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries
-from fip.services.data_service.classification.policy import POLICY_REGISTRY
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -105,7 +104,6 @@ def list_funds(
     asset_class: list[str] | None = Query(None),
     strategy: list[str] | None = Query(None),
     strategy_tags: list[str] | None = Query(None),
-    enum_version: str | None = None,
     geography: list[str] | None = Query(None),
     product_structure: list[str] | None = Query(None),
     market_attributes: list[str] | None = Query(None),
@@ -118,6 +116,8 @@ def list_funds(
     aum_max: float | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:
+    if "enum_version" in request.query_params:
+        raise InvalidQueryError("Fund classification filters use the single current ruleset")
     if (
         inception_date_from is not None
         and inception_date_to is not None
@@ -126,11 +126,7 @@ def list_funds(
         raise InvalidQueryError("inception_date_from must not be after inception_date_to")
     if aum_min is not None and aum_max is not None and aum_min > aum_max:
         raise InvalidQueryError("aum_min must not be greater than aum_max")
-    policies = (
-        [get_classification_policy(enum_version=enum_version)]
-        if enum_version is not None
-        else [get_classification_policy(rule, enum) for _, rule, enum in POLICY_REGISTRY]
-    )
+    policies = [get_classification_policy()]
     allowed = {
         name: {value for policy in policies for value in policy.catalog[name]}
         for name in policies[0].catalog
@@ -141,7 +137,6 @@ def list_funds(
             name="strategy_tags",
             allowed={tag for policy in policies for tag in policy.strategy_tag_catalog},
         ),
-        enum_version=enum_version,
         asset_class=_multi_values(asset_class, name="asset_class", allowed=allowed["asset_class"]),
         strategy=_multi_values(strategy, name="strategy", allowed=allowed["strategy"]),
         geography=_multi_values(geography, name="geography", allowed=allowed["geography"]),

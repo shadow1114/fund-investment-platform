@@ -268,7 +268,7 @@ def _classification_replay_cutoff() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
-def _saved_v3_source_evidence(
+def _saved_source_evidence(
     session: Session, symbol: str, *, cutoff: dt.datetime
 ) -> tuple[Evidence, ...]:
     """Replay saved source payloads only; this helper never constructs an adapter."""
@@ -337,7 +337,7 @@ def _saved_v3_source_evidence(
     return tuple(item for item in evidence if item.classified_at <= cutoff)
 
 
-def _classify_saved_v3(
+def _classify_saved(
     session: Session,
     fund_id: int,
     symbol: str,
@@ -353,7 +353,7 @@ def _classify_saved_v3(
     )
     from fip.services.data_service.classification.service import ClassificationService
     from fip.services.data_service.classification.workflow import (
-        classify_v3_preview,
+        classify_preview,
         evidence_effective_date,
         merge_snapshot_observations,
         preview_classification,
@@ -365,7 +365,7 @@ def _classify_saved_v3(
     )
     evidence = (
         *(item for item in listed.get(symbol, ()) if item.classified_at <= cutoff),
-        *_saved_v3_source_evidence(session, symbol, cutoff=cutoff),
+        *_saved_source_evidence(session, symbol, cutoff=cutoff),
     )
     service = ClassificationService(session)
     target = max(cutoff.date(), evidence_effective_date(cutoff.date(), evidence))
@@ -374,7 +374,7 @@ def _classify_saved_v3(
     revision_id = previous.id if previous else None
     merged = merge_snapshot_observations(baseline, evidence)
     available_at = max(cutoff, *(item.classified_at for item in merged))
-    proposed = classify_v3_preview(
+    proposed = classify_preview(
         merged,
         available_at=available_at,
         baseline=baseline,
@@ -391,7 +391,7 @@ def _classify_saved_v3(
                 "classification replay cannot write while a revision newer than its "
                 "current-UTC cutoff exists"
             )
-        service.refresh_v3(
+        service.refresh(
             fund_id,
             evidence,
             available_at=available_at,
@@ -463,7 +463,6 @@ def cmd_classification(args: argparse.Namespace) -> None:
                         {
                             "fund_id": share.fund_id,
                             "symbol": args.symbol,
-                            "rule_version": "3.0.0",
                             "requests": fund_refresh_requests(args.symbol),
                             "network_calls": 0,
                             "write": False,
@@ -511,10 +510,8 @@ def cmd_classification(args: argparse.Namespace) -> None:
             session.commit()
             print(json.dumps({"execution_id": job.execution_id, "status": job.status}))
             return
-        # Classification replay consumes saved payloads only. It must not
-        # instantiate or invoke a source adapter until an explicitly requested
-        # non-v3 legacy replay reaches the parsing branch below.
-        replay_cutoff = _classification_replay_cutoff() if args.rule_version == "3.0.0" else None
+        # Classification replay uses the same current rules as live refresh.
+        replay_cutoff = _classification_replay_cutoff()
         payload_query = (
             select(RawPayload)
             .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
@@ -533,9 +530,7 @@ def cmd_classification(args: argparse.Namespace) -> None:
         from fip.services.data_service.classification import DIMENSIONS
         from fip.services.data_service.models.fund import Fund
 
-        report_dimensions = (
-            ("asset_class", "strategy") if args.rule_version == "3.0.0" else DIMENSIONS
-        )
+        report_dimensions = ("asset_class", "strategy")
         unknown = dict.fromkeys(report_dimensions, 0)
         conflicts = dict.fromkeys(report_dimensions, 0)
         tag_states: dict[str, int] = {}
@@ -553,41 +548,15 @@ def cmd_classification(args: argparse.Namespace) -> None:
                 share = _resolve(session, symbol)
                 if args.fund_id and args.fund_id != share.fund_id:
                     continue
-                if args.rule_version == "3.0.0":
-                    assert replay_cutoff is not None
-                    snapshot, action, reasons = _classify_saved_v3(
-                        session,
-                        share.fund_id,
-                        symbol,
-                        payload,
-                        cutoff=replay_cutoff,
-                        actor=args.actor,
-                        dry_run=args.dry_run,
-                    )
-                else:
-                    ingest = _service(session)
-                    previous, interval = _latest_classification_interval(
-                        service, share.fund_id, payload.ingested_at.date()
-                    )
-                    baseline = interval[2] if interval else None
-                    snapshot = ingest.classify_fields(
-                        share.fund_id,
-                        {"基金类型": str(row["基金类型"]), "基金简称": str(row["基金简称"])},
-                        payload,
-                        actor=args.actor,
-                        dry_run=args.dry_run,
-                    )
-                    from fip.services.data_service.classification.workflow import (
-                        preview_classification,
-                    )
-
-                    preview = preview_classification(
-                        snapshot,
-                        baseline=baseline,
-                        baseline_reviewed=bool(previous and previous.reviewed),
-                    )
-                    action = preview.action
-                    reasons = preview.unrecognized_reasons
+                snapshot, action, reasons = _classify_saved(
+                    session,
+                    share.fund_id,
+                    symbol,
+                    payload,
+                    cutoff=replay_cutoff,
+                    actor=args.actor,
+                    dry_run=args.dry_run,
+                )
                 unrecognized_reasons.update(reasons)
                 print(
                     json.dumps(
@@ -693,9 +662,6 @@ def main(argv: list[str] | None = None) -> int:
                 command_parser.add_argument("--fund-id", type=int)
                 command_parser.add_argument("--limit", type=int, default=100)
                 command_parser.add_argument("--batch-size", type=int, default=50)
-                command_parser.add_argument(
-                    "--rule-version", choices=("1.0.0", "3.0.0"), default="1.0.0"
-                )
 
     args = parser.parse_args(argv)
     if getattr(args, "limit", 1) is not None and getattr(args, "limit", 1) <= 0:

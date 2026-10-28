@@ -19,9 +19,9 @@ DIMENSIONS = ("asset_class", "strategy", "geography", "product_structure", "mark
 Status = Literal["CONFIRMED", "CANDIDATE", "CONFLICT", "UNKNOWN"]
 Source = Literal["OFFICIAL", "AGGREGATOR", "NAME"]
 EvaluationState = Literal["NOT_EVALUATED", "EVALUATED", "PAUSED"]
-V3_ACTIVE_DIMENSIONS = ("asset_class", "strategy")
-V3_PAUSED_DIMENSIONS = ("geography", "product_structure", "market_attributes")
-V3_STRATEGIES = (
+CURRENT_ACTIVE_DIMENSIONS = ("asset_class", "strategy")
+CURRENT_PAUSED_DIMENSIONS = ("geography", "product_structure", "market_attributes")
+CURRENT_STRATEGIES = (
     "ACTIVE",
     "PASSIVE_INDEX",
     "ENHANCED_INDEX",
@@ -29,8 +29,8 @@ V3_STRATEGIES = (
     "TARGET_RISK",
     "UNKNOWN",
 )
-V3_STRATEGY_TAGS = ("QUANTITATIVE",)
-V3_CATALOG = MappingProxyType(
+CURRENT_STRATEGY_TAGS = ("QUANTITATIVE",)
+CURRENT_CATALOG = MappingProxyType(
     {
         "asset_class": (
             "EQUITY",
@@ -43,7 +43,7 @@ V3_CATALOG = MappingProxyType(
             "OTHER",
             "UNKNOWN",
         ),
-        "strategy": V3_STRATEGIES,
+        "strategy": CURRENT_STRATEGIES,
         "geography": ("DOMESTIC", "US", "HK", "JP", "EUROPE", "GLOBAL", "MULTI_REGION", "UNKNOWN"),
         "product_structure": ("ETF", "ETF_LINKED", "LOF", "ORDINARY", "UNKNOWN"),
         "market_attributes": ("DOMESTIC", "CROSS_BORDER", "QDII", "UNKNOWN"),
@@ -79,7 +79,7 @@ class Evidence(_AdditiveContract):
     locator: str | None = None
     conflict_reason: str | None = None
     # Joint assertions retain the immutable raw Evidence inputs and all locators.
-    # There is no separate observation identity/fact store in the v1 baseline.
+    # Observations retain source identity alongside the derived assertion.
     required_observations: tuple["Evidence", ...] | None = None
     assertion_status: Status | None = None
     rationale: str | None = None
@@ -89,8 +89,6 @@ class DimensionResult(_AdditiveContract):
     _optional_metadata: ClassVar[tuple[str, ...]] = (
         "evaluation_state",
         "carried_from_revision_id",
-        "source_rule_version",
-        "source_enum_version",
     )
     status: Status
     value: str | tuple[str, ...] = "UNKNOWN"
@@ -98,8 +96,6 @@ class DimensionResult(_AdditiveContract):
     evidence: tuple[Evidence, ...] = ()
     evaluation_state: EvaluationState | None = None
     carried_from_revision_id: int | None = None
-    source_rule_version: str | None = None
-    source_enum_version: str | None = None
 
     @model_validator(mode="after")
     def unevaluated_placeholder(self) -> "DimensionResult":
@@ -112,17 +108,13 @@ class DimensionResult(_AdditiveContract):
             raise ValueError("NOT_EVALUATED results must be empty UNKNOWN placeholders")
         provenance = (
             self.carried_from_revision_id,
-            self.source_rule_version,
-            self.source_enum_version,
         )
         if self.evaluation_state == "PAUSED" or any(item is not None for item in provenance):
             if (
                 self.carried_from_revision_id is None
                 or self.carried_from_revision_id <= 0
-                or not self.source_rule_version
-                or not self.source_enum_version
             ):
-                raise ValueError("Historical carry requires a revision and both source versions")
+                raise ValueError("Historical carry requires a source revision")
         return self
 
     @property
@@ -149,15 +141,22 @@ class StrategyTagResult(DimensionResult):
 
 
 class ClassificationSnapshot(_AdditiveContract):
+    @model_validator(mode="before")
+    @classmethod
+    def discard_historical_rule_labels(cls, value: object) -> object:
+        if isinstance(value, dict):
+            value = dict(value)
+            value.pop("rule_version", None)
+            value.pop("enum_version", None)
+        return value
+
     _optional_metadata = (
         "strategy_tag_results",
         "strategy_tags",
         "observations",
         "source_diagnostics",
     )
-    scheme: Literal["FIP_CLASSIFICATION_V1"] = "FIP_CLASSIFICATION_V1"
-    rule_version: str = "1.0.0"
-    enum_version: str = "1.0.0"
+    scheme: str = "FIP_CLASSIFICATION"
     asset_class: DimensionResult
     strategy: DimensionResult
     geography: DimensionResult
@@ -185,27 +184,26 @@ class ClassificationSnapshot(_AdditiveContract):
         return dict(value) if value is not None else None
 
     @model_validator(mode="after")
-    def versioned_extensions(self) -> "ClassificationSnapshot":
-        if "3.0.0" in (self.rule_version, self.enum_version):
-            if (self.rule_version, self.enum_version) != ("3.0.0", "3.0.0"):
-                raise ValueError("V3 snapshots require the registered 3.0.0 rule/enum version pair")
-            for name, catalog in V3_CATALOG.items():
+    def extension_contract(self) -> "ClassificationSnapshot":
+        historical_snapshot = self.scheme == "FIP_CLASSIFICATION_V1"
+        if not historical_snapshot and self.scheme != "FIP_CLASSIFICATION":
+            raise ValueError("Unsupported classification scheme")
+        if not historical_snapshot:
+            for name, catalog in CURRENT_CATALOG.items():
                 result = getattr(self, name)
                 values = (result.value,) if isinstance(result.value, str) else result.value
                 if not set((*values, *result.candidates)) <= set(catalog):
-                    raise ValueError(f"Invalid v3 {name} enum values")
-            for name in V3_ACTIVE_DIMENSIONS:
+                    raise ValueError(f"Invalid classification {name} enum values")
+            for name in CURRENT_ACTIVE_DIMENSIONS:
                 if getattr(self, name).evaluation_state == "PAUSED":
                     raise ValueError("Active dimensions cannot be PAUSED")
-            for name in V3_PAUSED_DIMENSIONS:
+            for name in CURRENT_PAUSED_DIMENSIONS:
                 if getattr(self, name).evaluation_state not in ("PAUSED", "NOT_EVALUATED"):
-                    raise ValueError(
-                        "V3 paused dimensions require PAUSED or NOT_EVALUATED metadata"
-                    )
+                    raise ValueError("Inactive dimensions require PAUSED or NOT_EVALUATED metadata")
             if self.strategy_tag_results is not None and not set(self.strategy_tag_results) <= set(
-                V3_STRATEGY_TAGS
+                CURRENT_STRATEGY_TAGS
             ):
-                raise ValueError("Invalid v3 strategy tag catalog")
+                raise ValueError("Invalid classification strategy tag catalog")
         if self.strategy_tag_results is None:
             if self.strategy_tags is not None:
                 raise ValueError("Strategy tags require evidence-bearing tag results")

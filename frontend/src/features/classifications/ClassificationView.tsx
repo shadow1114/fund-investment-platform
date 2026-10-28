@@ -25,7 +25,7 @@ export const dimensionLabels: Record<string, string> = {
 };
 
 const evaluationLabel: Record<string, string> = {
-  NOT_EVALUATED: "本版本未评估",
+  NOT_EVALUATED: "当前未评估",
   EVALUATED: "已评估",
   PAUSED: "暂停更新（历史保留）",
 };
@@ -87,11 +87,7 @@ export const ClassificationView = ({
 }) =>
   classification ? (
     <section aria-label="基金分类">
-      <p>
-        规则 {classification.rule_version ?? "旧版本"} · 枚举{" "}
-        {classification.enum_version ?? "旧版本"} · 修订{" "}
-        {classification.revision_id ?? "—"} / v{classification.version ?? "—"}
-      </p>
+      <p>修订 {classification.revision_id ?? "—"} / {classification.version ?? "—"}</p>
       {classification.source_summary && (
         <p>
           来源：{classification.source_summary.join("、")} · 可用时间{" "}
@@ -110,7 +106,7 @@ export const ClassificationView = ({
         <h4>独立策略标签</h4>
         {classification.strategy_tags === undefined ||
         classification.strategy_tags === null ? (
-          <p>旧版本未提供量化标签；无法据此判断是否为量化策略。</p>
+          <p>该历史记录未包含量化标签，无法据此判断是否为量化策略。</p>
         ) : (
           <p>
             已确认策略标签：
@@ -148,14 +144,13 @@ export const ClassificationView = ({
               </div>
             ),
           )
-        ) : classification.enum_version &&
-          classification.enum_version.startsWith("3.") ? (
+        ) : classification.scheme === "FIP_CLASSIFICATION" ? (
           <p>标签结果尚未提供。</p>
         ) : null}
       </section>
       <details>
         <summary>历史维度（只读）</summary>
-        <p>地域、产品结构和市场属性按历史版本展示，不作为本轮已评估结果。</p>
+        <p>地域、产品结构和市场属性保留为历史信息，当前不参与分类结果。</p>
         {historicalDimensions.map((name) => (
           <Result
             key={name}
