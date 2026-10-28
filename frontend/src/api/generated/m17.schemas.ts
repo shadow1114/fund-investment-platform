@@ -1724,11 +1724,24 @@ export const DimensionResultStatus = {
 
 export type DimensionResultValue = string | string[];
 
+export type DimensionResultEvaluationState =
+  "NOT_EVALUATED" | "EVALUATED" | "PAUSED" | null;
+
+export type DimensionResultCarriedFromRevisionId = number | null;
+
+export type DimensionResultSourceRuleVersion = string | null;
+
+export type DimensionResultSourceEnumVersion = string | null;
+
 export interface DimensionResult {
   status: DimensionResultStatus;
   value?: DimensionResultValue;
   candidates?: string[];
   evidence?: Evidence[];
+  evaluation_state?: DimensionResultEvaluationState;
+  carried_from_revision_id?: DimensionResultCarriedFromRevisionId;
+  source_rule_version?: DimensionResultSourceRuleVersion;
+  source_enum_version?: DimensionResultSourceEnumVersion;
 }
 
 export type EvidenceSource =
@@ -1759,6 +1772,13 @@ export type EvidenceLocator = string | null;
 
 export type EvidenceConflictReason = string | null;
 
+export type EvidenceRequiredObservations = Evidence[] | null;
+
+export type EvidenceAssertionStatus =
+  "CONFIRMED" | "CANDIDATE" | "CONFLICT" | "UNKNOWN" | null;
+
+export type EvidenceRationale = string | null;
+
 export interface Evidence {
   source: EvidenceSource;
   rule_id: string;
@@ -1770,10 +1790,22 @@ export interface Evidence {
   payload_ref?: EvidencePayloadRef;
   locator?: EvidenceLocator;
   conflict_reason?: EvidenceConflictReason;
+  required_observations?: EvidenceRequiredObservations;
+  assertion_status?: EvidenceAssertionStatus;
+  rationale?: EvidenceRationale;
 }
 
 export type ReviewSubmissionDecisions = { [key: string]: ReviewDecision };
 
+export type ReviewSubmissionTagDecisions = {
+  [key: string]: StrategyTagDecision;
+};
+
+export type ReviewSubmissionAcceptIncomingVersion = string | null;
+
+/**
+ * V3 requires both active dimension decisions and every changed/tag-case tag decision. Paused dimensions cannot be changed. Version upgrades require explicit acceptance, or reject_upgrade with empty decisions. Legacy decisions remain supported. Expected revision is enforced by CAS.
+ */
 export interface ReviewSubmission {
   /** */
   expected_revision: number;
@@ -1783,6 +1815,9 @@ export interface ReviewSubmission {
    * @maxLength 1024
    */
   reason: string;
+  tag_decisions?: ReviewSubmissionTagDecisions;
+  accept_incoming_version?: ReviewSubmissionAcceptIncomingVersion;
+  reject_upgrade?: boolean;
 }
 
 export interface ReviewOutcome {
@@ -1801,6 +1836,9 @@ export type ReviewCasePayloadBaseline = ClassificationSnapshot | null;
 
 export type ReviewCasePayloadIncoming = ClassificationSnapshot | null;
 
+export type ReviewCasePayloadEvaluationState =
+  "NOT_EVALUATED" | "EVALUATED" | "PAUSED" | null;
+
 export interface ReviewCasePayload {
   case_id: number;
   fund_id: number;
@@ -1813,6 +1851,9 @@ export interface ReviewCasePayload {
   result_revision_id: ReviewCasePayloadResultRevisionId;
   baseline?: ReviewCasePayloadBaseline;
   incoming?: ReviewCasePayloadIncoming;
+  active_scope: string[];
+  historical_scope: string[];
+  evaluation_state?: ReviewCasePayloadEvaluationState;
 }
 
 export type ValidationErrorLocItem = string | number;
@@ -1856,6 +1897,25 @@ export type ClassificationPayloadModelTradingEligibility = {
   [key: string]: unknown;
 };
 
+export type ClassificationPayloadModelStrategyTagResultsAnyOf = {
+  [key: string]: StrategyTagResult;
+};
+
+export type ClassificationPayloadModelStrategyTagResults =
+  ClassificationPayloadModelStrategyTagResultsAnyOf | null;
+
+export type ClassificationPayloadModelStrategyTags = string[] | null;
+
+export type ClassificationPayloadModelObservations = Evidence[] | null;
+
+export type ClassificationPayloadModelSourceDiagnostics = string[] | null;
+
+export type ClassificationPayloadModelPublishedAt = string | null;
+
+export type ClassificationPayloadModelProviderAvailableAt = string | null;
+
+export type ClassificationPayloadModelIngestedAt = string | null;
+
 export interface ClassificationPayloadModel {
   scheme?: "FIP_CLASSIFICATION_V1";
   rule_version?: string;
@@ -1875,6 +1935,13 @@ export interface ClassificationPayloadModel {
   availability_quality: string;
   source_summary: string[];
   trading_eligibility: ClassificationPayloadModelTradingEligibility;
+  strategy_tag_results?: ClassificationPayloadModelStrategyTagResults;
+  strategy_tags?: ClassificationPayloadModelStrategyTags;
+  observations?: ClassificationPayloadModelObservations;
+  source_diagnostics?: ClassificationPayloadModelSourceDiagnostics;
+  published_at?: ClassificationPayloadModelPublishedAt;
+  provider_available_at?: ClassificationPayloadModelProviderAvailableAt;
+  ingested_at?: ClassificationPayloadModelIngestedAt;
 }
 
 export type CatalogPayloadDimensions = { [key: string]: string[] };
@@ -1889,6 +1956,9 @@ export interface CatalogPayload {
   dimensions: CatalogPayloadDimensions;
   statuses: string[];
   confidence_grades: CatalogPayloadConfidenceGrades;
+  active_dimensions: string[];
+  paused_dimensions: string[];
+  strategy_tags: string[];
 }
 
 export interface TypedEnvelopeCatalogPayload {
@@ -1952,6 +2022,14 @@ export interface TypedEnvelopeListClassificationHistoryPayload {
   error: null;
 }
 
+export type ClassificationHistoryPayloadPublishedAt = string | null;
+
+export type ClassificationHistoryPayloadProviderAvailableAt = string | null;
+
+export type ClassificationHistoryPayloadIngestedAt = string | null;
+
+export type ClassificationHistoryPayloadAvailabilityQuality = string | null;
+
 export interface ClassificationHistoryPayload {
   revision_id: number;
   version: number;
@@ -1963,7 +2041,24 @@ export interface ClassificationHistoryPayload {
   reason: string;
   reviewed: boolean;
   intervals: ClassificationHistoryInterval[];
+  published_at?: ClassificationHistoryPayloadPublishedAt;
+  provider_available_at?: ClassificationHistoryPayloadProviderAvailableAt;
+  ingested_at?: ClassificationHistoryPayloadIngestedAt;
+  availability_quality?: ClassificationHistoryPayloadAvailabilityQuality;
 }
+
+export type ClassificationSnapshotStrategyTagResultsAnyOf = {
+  [key: string]: StrategyTagResult;
+};
+
+export type ClassificationSnapshotStrategyTagResults =
+  ClassificationSnapshotStrategyTagResultsAnyOf | null;
+
+export type ClassificationSnapshotStrategyTags = string[] | null;
+
+export type ClassificationSnapshotObservations = Evidence[] | null;
+
+export type ClassificationSnapshotSourceDiagnostics = string[] | null;
 
 export interface ClassificationSnapshot {
   scheme?: "FIP_CLASSIFICATION_V1";
@@ -1975,6 +2070,69 @@ export interface ClassificationSnapshot {
   product_structure: DimensionResult;
   market_attributes: DimensionResult;
   review_items?: string[];
+  strategy_tag_results?: ClassificationSnapshotStrategyTagResults;
+  strategy_tags?: ClassificationSnapshotStrategyTags;
+  observations?: ClassificationSnapshotObservations;
+  source_diagnostics?: ClassificationSnapshotSourceDiagnostics;
+}
+
+export type StrategyTagResultStatus =
+  (typeof StrategyTagResultStatus)[keyof typeof StrategyTagResultStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const StrategyTagResultStatus = {
+  CONFIRMED: "CONFIRMED",
+  CANDIDATE: "CANDIDATE",
+  CONFLICT: "CONFLICT",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
+export type StrategyTagResultValue = string | string[];
+
+export type StrategyTagResultEvaluationState =
+  (typeof StrategyTagResultEvaluationState)[keyof typeof StrategyTagResultEvaluationState];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const StrategyTagResultEvaluationState = {
+  NOT_EVALUATED: "NOT_EVALUATED",
+  EVALUATED: "EVALUATED",
+} as const;
+
+export type StrategyTagResultCarriedFromRevisionId = number | null;
+
+export type StrategyTagResultSourceRuleVersion = string | null;
+
+export type StrategyTagResultSourceEnumVersion = string | null;
+
+export type StrategyTagResultManualAction = "CONFIRM" | "REJECT" | null;
+
+/**
+ * Independent tag assertion; a missing legacy result is represented by None.
+ */
+export interface StrategyTagResult {
+  status: StrategyTagResultStatus;
+  value?: StrategyTagResultValue;
+  candidates?: string[];
+  evidence?: Evidence[];
+  evaluation_state?: StrategyTagResultEvaluationState;
+  carried_from_revision_id?: StrategyTagResultCarriedFromRevisionId;
+  source_rule_version?: StrategyTagResultSourceRuleVersion;
+  source_enum_version?: StrategyTagResultSourceEnumVersion;
+  manual_action?: StrategyTagResultManualAction;
+}
+
+export type StrategyTagDecisionAction =
+  (typeof StrategyTagDecisionAction)[keyof typeof StrategyTagDecisionAction];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const StrategyTagDecisionAction = {
+  CONFIRM: "CONFIRM",
+  REJECT: "REJECT",
+} as const;
+
+export interface StrategyTagDecision {
+  action: StrategyTagDecisionAction;
+  evidence: Evidence[];
 }
 
 /**
@@ -2180,6 +2338,14 @@ export type ListFundsParams = {
   product_structure?: string;
   market_attributes?: string;
   classification_status?: string;
+  /**
+   * Matches only evidence-backed CONFIRMED independent tags; legacy QUANTITATIVE strategy is not a tag.
+   */
+  strategy_tags?: string[];
+  /**
+   * Restricts classification filters to this registered catalog. Omit to use each snapshot version exactly.
+   */
+  enum_version?: string;
 };
 
 export type GetFundParams = {
@@ -2278,6 +2444,17 @@ export const GetBacktestPerformanceSegment = {
   OUT_OF_SAMPLE: "OUT_OF_SAMPLE",
 } as const;
 
+export type GetClassificationCatalogParams = {
+  /**
+   * Registered rule version; defaults to enum_version or 1.0.0.
+   */
+  rule_version?: string;
+  /**
+   * Registered enum version; defaults to rule_version or 1.0.0.
+   */
+  enum_version?: string;
+};
+
 export type GetClassificationHistoryParams = {
   decision_at?: string | null;
 };
@@ -2294,7 +2471,20 @@ export type ListClassificationReviewsParams = {
   page_size?: number;
   status?: string | null;
   decision_at?: string | null;
+  /**
+   * ACTIVE omits paused historical cases; HISTORY includes them. Status and PIT filters apply in both scopes.
+   */
+  scope?: ListClassificationReviewsScope;
 };
+
+export type ListClassificationReviewsScope =
+  (typeof ListClassificationReviewsScope)[keyof typeof ListClassificationReviewsScope];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListClassificationReviewsScope = {
+  ACTIVE: "ACTIVE",
+  HISTORY: "HISTORY",
+} as const;
 
 export type GetClassificationReviewParams = {
   decision_at?: string | null;

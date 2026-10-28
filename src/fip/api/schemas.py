@@ -18,6 +18,9 @@ class ClassificationPayloadModel(ClassificationSnapshot):
     availability_quality: str
     source_summary: list[str]
     trading_eligibility: dict[str, Any]
+    published_at: str | None = None
+    provider_available_at: str | None = None
+    ingested_at: str | None = None
 
 
 class StrictModel(BaseModel):
