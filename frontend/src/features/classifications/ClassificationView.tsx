@@ -87,7 +87,10 @@ export const ClassificationView = ({
 }) =>
   classification ? (
     <section aria-label="基金分类">
-      <p>修订 {classification.revision_id ?? "—"} / {classification.version ?? "—"}</p>
+      <p>
+        修订 {classification.revision_id ?? "—"} /{" "}
+        {classification.version ?? "—"}
+      </p>
       {classification.source_summary && (
         <p>
           来源：{classification.source_summary.join("、")} · 可用时间{" "}

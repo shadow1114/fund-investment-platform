@@ -220,7 +220,7 @@ if [[ "$START_FRONTEND" == true ]]; then
   frontend/node_modules/.bin/vite --host 127.0.0.1 --port 5173 &
   FRONTEND_PID=$!
   wait_for_http \
-    "http://127.0.0.1:5173/funds" \
+    "http://127.0.0.1:5173/home" \
     '<div id="root">' \
     '前端 Vite' "$FRONTEND_PID"
 fi
@@ -229,7 +229,8 @@ printf '\n%b%b==================================================================
 printf '%b%b🎉 已启动所选服务%b\n' "$GREEN" "$BOLD" "$RESET"
 printf '%b%b==================================================================%b\n' "$GREEN" "$BOLD" "$RESET"
 if [[ "$START_FRONTEND" == true ]]; then
-  printf '  前端界面:   %bhttp://127.0.0.1:5173/funds%b\n' "$CYAN" "$RESET"
+  printf '  前端工作台: %bhttp://127.0.0.1:5173/home%b\n' "$CYAN" "$RESET"
+  printf '  数据抓取:   %bhttp://127.0.0.1:5173/data-ingestion%b\n' "$CYAN" "$RESET"
 fi
 if [[ "$START_BACKEND" == true ]]; then
   printf '  后端 API:   %bhttp://127.0.0.1:8000%b\n' "$CYAN" "$RESET"

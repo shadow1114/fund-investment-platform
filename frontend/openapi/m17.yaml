@@ -209,29 +209,39 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - name: status
           in: query
-          schema: {type: string, enum: [RUNNING, COMPLETED, BLOCKED, FAILED, CANCELLED]}
+          schema:
+            {
+              type: string,
+              enum: [RUNNING, COMPLETED, BLOCKED, FAILED, CANCELLED],
+            }
         - name: dataset
           in: query
-          schema: {type: string, enum: [BASIC_INFO, NAV]}
+          schema: { type: string, enum: [BASIC_INFO, NAV] }
         - name: scope_type
           in: query
-          schema: {type: string, enum: [SINGLE, SELECTED, ALL]}
+          schema: { type: string, enum: [SINGLE, SELECTED, ALL] }
         - name: created_from
           in: query
-          schema: {type: string, format: date-time}
+          schema: { type: string, format: date-time }
         - name: created_to
           in: query
-          schema: {type: string, format: date-time}
+          schema: { type: string, format: date-time }
         - name: sort
           in: query
           description: Descending order; finished_at puts unfinished operations last.
-          schema: {type: string, enum: [created_at, finished_at], default: created_at}
+          schema:
+            {
+              type: string,
+              enum: [created_at, finished_at],
+              default: created_at,
+            }
       responses:
         "200":
           description: Paginated ingestion history
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/FundIngestionHistoryEnvelope"}
+              schema:
+                { $ref: "#/components/schemas/FundIngestionHistoryEnvelope" }
         default:
           $ref: "#/components/responses/ErrorResponse"
     post:
@@ -1238,43 +1248,50 @@ components:
       type: object
       additionalProperties: false
       properties:
-        fund_name: {type: string}
-        fund_type: {type: array, items: {type: string}}
-        lifecycle_status: {type: array, items: {type: string}}
-        investment_eligibility: {type: array, items: {type: string}}
-        asset_class: {type: string}
-        strategy: {type: string}
-        geography: {type: string}
-        product_structure: {type: string}
-        market_attributes: {type: string}
-        classification_status: {type: string}
+        fund_name: { type: string }
+        fund_type: { type: array, items: { type: string } }
+        lifecycle_status: { type: array, items: { type: string } }
+        investment_eligibility: { type: array, items: { type: string } }
+        asset_class: { type: string }
+        strategy: { type: string }
+        geography: { type: string }
+        product_structure: { type: string }
+        market_attributes: { type: string }
+        classification_status: { type: string }
     SingleFundScope:
       type: object
       additionalProperties: false
       required: [type, fund_id]
       properties:
-        type: {type: string, enum: [SINGLE]}
-        fund_id: {type: string, minLength: 1}
+        type: { type: string, enum: [SINGLE] }
+        fund_id: { type: string, minLength: 1 }
     SelectedFundsScope:
       type: object
       additionalProperties: false
       required: [type, fund_ids]
       properties:
-        type: {type: string, enum: [SELECTED]}
-        fund_ids: {type: array, minItems: 2, maxItems: 100, uniqueItems: true, items: {type: string, minLength: 1}}
+        type: { type: string, enum: [SELECTED] }
+        fund_ids:
+          {
+            type: array,
+            minItems: 2,
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: string, minLength: 1 },
+          }
     AllFundsScope:
       type: object
       additionalProperties: false
       required: [type]
       properties:
-        type: {type: string, enum: [ALL]}
-        filters: {$ref: "#/components/schemas/FundIngestionFilters"}
+        type: { type: string, enum: [ALL] }
+        filters: { $ref: "#/components/schemas/FundIngestionFilters" }
     FundIngestionPreviewRequest:
       type: object
       additionalProperties: false
       required: [dataset, scope]
       properties:
-        dataset: {type: string, enum: [BASIC_INFO, NAV]}
+        dataset: { type: string, enum: [BASIC_INFO, NAV] }
         scope:
           oneOf:
             - $ref: "#/components/schemas/SingleFundScope"
@@ -1287,76 +1304,91 @@ components:
       additionalProperties: false
       required: [preview_id]
       properties:
-        preview_id: {type: string}
+        preview_id: { type: string }
     FundIngestionPreview:
       type: object
-      required: [preview_id, dataset, scope_type, fund_count, supported_fund_count, unavailable_mapping_count, subject_count, source, expires_at]
+      required:
+        [
+          preview_id,
+          dataset,
+          scope_type,
+          fund_count,
+          supported_fund_count,
+          unavailable_mapping_count,
+          subject_count,
+          source,
+          expires_at,
+        ]
       properties:
-        preview_id: {type: string}
-        dataset: {type: string, enum: [BASIC_INFO, NAV]}
-        scope_type: {type: string, enum: [SINGLE, SELECTED, ALL]}
-        fund_count: {type: integer}
-        supported_fund_count: {type: integer}
-        unavailable_mapping_count: {type: integer}
-        subject_count: {type: integer}
-        source: {type: string}
-        expires_at: {type: string, format: date-time}
+        preview_id: { type: string }
+        dataset: { type: string, enum: [BASIC_INFO, NAV] }
+        scope_type: { type: string, enum: [SINGLE, SELECTED, ALL] }
+        fund_count: { type: integer }
+        supported_fund_count: { type: integer }
+        unavailable_mapping_count: { type: integer }
+        subject_count: { type: integer }
+        source: { type: string }
+        expires_at: { type: string, format: date-time }
     FundIngestionPreviewEnvelope:
       type: object
       required: [data, meta, error]
       properties:
-        data: {$ref: "#/components/schemas/FundIngestionPreview"}
-        meta: {$ref: "#/components/schemas/ResponseMeta"}
-        error: {type: "null"}
+        data: { $ref: "#/components/schemas/FundIngestionPreview" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        error: { type: "null" }
     FundIngestionRunItem:
       type: object
       additionalProperties: false
       required: [id, fund_id, status, attempts]
       properties:
-        id: {type: integer}
-        fund_id: {type: string}
-        share_class_id: {type: [integer, "null"]}
-        symbol: {type: [string, "null"]}
-        status: {type: string, enum: [PENDING, RUNNING, SUCCESS, FAILED, SKIPPED, CANCELLED]}
-        attempts: {type: integer}
-        result: {type: [object, "null"], additionalProperties: true}
-        error: {type: [string, "null"]}
-        started_at: {type: [string, "null"], format: date-time}
-        finished_at: {type: [string, "null"], format: date-time}
+        id: { type: integer }
+        fund_id: { type: string }
+        share_class_id: { type: [integer, "null"] }
+        symbol: { type: [string, "null"] }
+        status:
+          {
+            type: string,
+            enum: [PENDING, RUNNING, SUCCESS, FAILED, SKIPPED, CANCELLED],
+          }
+        attempts: { type: integer }
+        result: { type: [object, "null"], additionalProperties: true }
+        error: { type: [string, "null"] }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
     FundIngestionItemsPage:
       type: object
       required: [items, page, page_size, total]
       properties:
         items:
           type: array
-          items: {$ref: "#/components/schemas/FundIngestionRunItem"}
-        page: {type: integer}
-        page_size: {type: integer}
-        total: {type: integer}
+          items: { $ref: "#/components/schemas/FundIngestionRunItem" }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
     FundIngestionItemsEnvelope:
       type: object
       required: [data, meta, error]
       properties:
-        data: {$ref: "#/components/schemas/FundIngestionItemsPage"}
-        meta: {$ref: "#/components/schemas/ResponseMeta"}
-        error: {type: "null"}
+        data: { $ref: "#/components/schemas/FundIngestionItemsPage" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        error: { type: "null" }
     FundIngestionHistoryPage:
       type: object
       required: [items, page, page_size, total]
       properties:
         items:
           type: array
-          items: {$ref: "#/components/schemas/FundIngestionTask"}
-        page: {type: integer}
-        page_size: {type: integer}
-        total: {type: integer}
+          items: { $ref: "#/components/schemas/FundIngestionTask" }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
     FundIngestionHistoryEnvelope:
       type: object
       required: [data, meta, error]
       properties:
-        data: {$ref: "#/components/schemas/FundIngestionHistoryPage"}
-        meta: {$ref: "#/components/schemas/ResponseMeta"}
-        error: {type: "null"}
+        data: { $ref: "#/components/schemas/FundIngestionHistoryPage" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        error: { type: "null" }
     FundIngestionRequest:
       type: object
       additionalProperties: false

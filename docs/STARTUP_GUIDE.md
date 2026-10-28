@@ -108,7 +108,7 @@ pip install -r requirements.lock
 # 执行 Alembic 数据库版本迁移到最新状态
 make migrate
 ```
-基金抓取依赖当前 Alembic head（含 0035–0037 的任务请求/结果、基金基本信息历史和 Worker 起止时间字段）。`start.sh` 不会自动迁移，也不会清理数据库。
+基金数据抓取依赖当前 Alembic head（含 `0035–0039` 的任务请求/结果、基本信息历史、Worker 起止时间字段，以及范围预览和项级抓取结果）。先确认 `FIP_DATABASE_URL` 指向隔离的开发/验收库，再运行 `make migrate`。`start.sh` 不会自动迁移，也不会清理数据库。
 数据库不可用时，后端进程仍可能启动并通过存活探针，但读取/写入业务接口不会因此变为可用。
 
 ### 步骤 3：启动后端 FastAPI 服务
@@ -129,6 +129,8 @@ make api-dev
 make worker-dev
 # 或: PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker
 ```
+
+数据抓取中心的单只和多只抓取要求当前 session 有 `can_manage_data_ingestion`；“基金库全量/筛选全量”、以及相应的取消和失败重试还要求 `can_manage_full_universe_ingestion`。该能力默认拒绝，必须由受信任的身份/权限配置显式授予；不要通过浏览器可编辑身份头或前端状态赋权。API 会继续校验 operation 归属和 actor。Worker 使用已配置的真实数据源映射；无映射项会记录为不可抓取/失败明细，不会被当作成功或零值。AKShare NAV 不支持日期范围参数，页面不会提供虚假的日期筛选。
 
 ### 步骤 5：启动前端开发服务器
 新开一个终端窗口，进入 `frontend` 目录：
@@ -152,8 +154,10 @@ npm run dev
 ### 1. Web 交互看板 (`http://localhost:5173`)
 | 功能模块 | 访问路径 | 核心业务能力说明 |
 | :--- | :--- | :--- |
-| **基金筛选与研究** | [`/funds`](http://localhost:5173/funds) | 服务端筛选、分页、排序、分类证据，以及单只/批量基本信息抓取；抓取任务需要 Worker 和已迁移数据库 |
-| **基金详情** | [`/funds/000001`](http://localhost:5173/funds/000001) | 净值图表、评估/评分归因、分类历史，以及 NAV 和分红拆分抓取 |
+| **客户工作台** | [`/home`](http://localhost:5173/home) | 基于当前身份可访问范围展示真实基金库和组合数量，并提供研究入口 |
+| **基金研究** | [`/funds`](http://localhost:5173/funds) | 服务端筛选、分页、排序、分类证据；基金抓取操作统一进入数据抓取中心 |
+| **数据抓取中心** | [`/data-ingestion`](http://localhost:5173/data-ingestion) | 独立执行基本信息或 NAV 的单只、多只及有权限的基金库快照抓取；需要抓取权限、Worker、数据库迁移和数据源网络 |
+| **基金详情** | [`/funds/000001`](http://localhost:5173/funds/000001) | 净值图表、评估/评分归因、分类历史；可跳转到数据抓取中心并预选基金及数据集 |
 | **候选池管理与快照** | [`/universes`](http://localhost:5173/universes) | 候选池快照查询、入选/排除结果和 API 实际提供的条件证据 |
 | **分类复核** | [`/classification-reviews`](http://localhost:5173/classification-reviews) | 查看待复核分类并按当前用户权限提交复核 |
 | **组合决策详情页** | [`/portfolios/P001`](http://localhost:5173/portfolios/P001) | 组合读取、优化提交/结果和决策复核。实盘与再平衡视图会标记后端数据源不可用；当前后端样例数据不代表真实持仓或成交。 |

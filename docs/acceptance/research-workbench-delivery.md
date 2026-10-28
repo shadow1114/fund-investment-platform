@@ -57,3 +57,35 @@
 - `src/fip/api/routers/rebalance.py` 使用进程内 `_LIVE_PORTFOLIOS` / `_HISTORICAL_REBALANCES` / `_REBALANCE_TRADES`，并在首次读取时以固定基金代码、50/50权重、固定日期创建组合状态；不能作为真实可交付实盘持仓。按计划不把目标持仓说成实际持仓，也不伪造持久化。
 - 文档声明依赖 `docs/superpowers/plans/2026-10-20-core-workflow-delivery.md`，该文件在当前工作区不存在；核心 API/Worker 的对应执行证据无法从该引用验证。
 - 生产认证提供方/资源授权、本地隔离数据库、AKShare Worker 连通性和 Playwright 服务身份均未验证；需要隔离环境和可复现数据后才能进行真实联调。
+
+## 客户工作台与数据抓取中心验收更新（2026-10-29）
+
+### 已实现并有代码/测试证据的范围
+
+- 客户门户壳层已将 `/` 导向 `/home`，提供权限导航和 `/data-ingestion` 独立数据抓取页。`start.sh` 的健康探测和成功提示入口已更新为 `/home`，并提示数据抓取中心路径；占用端口仍会拒绝启动，不会复用未知服务。
+- 抓取预览、全量 capability 默认拒绝、资源归属、冻结成员、项级分页、worker 分块恢复、取消、失败重试和幂等由服务端实现。迁移 head 已推进至 `0039`（此前 `0038` 被分类迁移占用）。
+- 客户数据中心支持 BASIC_INFO/NAV 和 SINGLE/SELECTED/ALL 范围。全量成员不下发浏览器，preview 过期/范围变化需重新确认。NAV 无伪造日期范围。
+- Task 1–3 已有单元/API/数据库验收报告：`.superpowers/sdd/2026-10-27-client-investment-platform-redesign-and-data-ingestion/task-1-report.md`、`task-2-report.md`、`task-3-report.md`。Task 4/5 的最终检查结果应在本节下方补记，不以历史基线中的“未执行”代替当前证据。
+
+### 当前部署与客户发布结论
+
+**仍不标记客户发布可交付。** 代码具备隔离 fixture 验收路径，但当前没有证据证明生产身份提供方、租户/资源授权、隔离运行中的 API + Worker + PostgreSQL、真实数据源网络及完整 live 抓取场景已配置并通过。`can_manage_full_universe_ingestion` 必须由可信服务端身份配置显式授予。禁止将本地 fixture 或开发数据库结果描述成生产验收。
+
+### 发布前必须补齐的隔离环境证据
+
+- 运行 PostgreSQL migration 到 `alembic_version` 当前 head，确认连接串只指向一次性验收库，并留存 revision 与操作 actor。
+- 使用非生产测试身份验证 401/403/409/422/429/500、过期 preview、跨用户读写拒绝、无映射计数、取消和 worker 中断恢复。
+- 在隔离环境执行 BASIC_INFO 单只、NAV 单只、多只 selected、ALL preview/提交/分页和失败重试；核对 fund/NAV revision、audit actor、operation/item 计数与最终状态。
+- 运行 `frontend/e2e/client-workspace.spec.ts`、fixture Vitest/API suites，并在 1440×900、1024×768、390×844、键盘、200% 缩放及 reduced-motion 下保留截图与浏览器记录。
+- 只有上列证据完整且身份/授权、数据源、Worker 和数据库可用后，才更新本记录为客户发布可交付；当前结论维持未验收。
+
+### 2026-10-29 隔离开发环境复验记录
+
+- 环境：Node `v24.4.1` / npm `11.4.2`；隔离 PostgreSQL 数据库 `localhost:5432/fip_test`，`alembic_version=0039`。该证据仅代表开发验收库，不代表生产数据库或生产身份配置。
+- 抓取 API/Worker/日期范围后端回归：`tests/api/test_fund_ingestion_scope_contract.py`、两个 unit suites 和两个 integration suites，**27 passed**；覆盖 capability 拒绝、跨用户授权、预览过期/范围变化、Worker 分块恢复、取消竞争、失败重试、无映射项与历史时间边界。
+- 前端定向 Vitest：工作区、抓取表单、基金保存视图、候选池空值说明和回测图例共 **42 passed**。
+- Playwright `frontend/e2e/client-workspace.spec.ts`：**5 passed**。覆盖 `/` 工作台、抓取任务 URL 刷新不重复 POST、session 500 时隐藏写操作、200% 等价缩放、移动端键盘打开/关闭抽屉与焦点返回和 reduced-motion。
+- Task 4 的 route fixture 验收在 1440×900、1024×768、390×844 通过，并覆盖基金详情 evaluation/score tabs、候选池详情、来源/日期/状态/操作、空结果、503 重试和 partial score failure；截图存放 `/tmp/fip-task4-review-archive/`（临时文件）。候选池徽标实测 8.38:1 / 8.13:1 / 9.34:1。
+- `npm run format:check`、`npm run lint`、`npm run build` 通过；lint 有 69 条 Orval 生成文件中的 unused-disable warnings，无 lint error。`bash -n start.sh` 与 `git diff --check` 通过。启动脚本端口冲突验收通过：占用 5173 时明确退出且不复用服务。
+- `frontend/e2e/data-ingestion-live.spec.ts` 已加入显式隔离写入闸门，但**本次未运行**：没有确认真实身份提供方、数据源凭证和可写隔离验收源。该文件会检查 `FIP_INGESTION_LIVE_TESTS=true`、`fip_test` URL、隔离基金 ID 和 `FIP_LIVE_FAILED_OPERATION_ID`（当前 actor 在验收库中拥有的失败操作）和 `FIP_LIVE_CONFIRM_WRITES=true`；仅设置这些值才会向抓取 API 写入。不能以 fixture 结果替代 live 源验收。
+- 客户发布结论仍为**未验收**。生产身份/租户授权与真实数据源链路需在独立客户验收环境实测后再关闭剩余项。

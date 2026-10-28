@@ -257,15 +257,11 @@ export const ClassificationReviewPage = () => {
             </p>
           )}
           <h3>维度证据比较</h3>
-          <h4>
-            当前基线
-          </h4>
+          <h4>当前基线</h4>
           <ClassificationView classification={detail.data.baseline} evidence />
           {detail.data.incoming && (
             <>
-              <h4>
-                新到资料
-              </h4>
+              <h4>新到资料</h4>
               <ClassificationView
                 classification={detail.data.incoming}
                 evidence
