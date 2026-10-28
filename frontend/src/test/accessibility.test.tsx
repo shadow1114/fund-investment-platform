@@ -1,5 +1,12 @@
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -21,11 +28,13 @@ const RouteHarness = () => useRoutes(routes);
 const renderRoute = (initialEntry: string) => {
   const client = newClient();
   const view = render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <RouteHarness />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <RouteHarness />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
   );
   return { ...view, client };
 };
@@ -42,20 +51,41 @@ afterAll(() => server.close());
 
 describe("M1.7 accessibility and contract verification", () => {
   it("reaches every named primary navigation link with the keyboard", async () => {
-    window.history.replaceState({}, "", "/funds");
+    window.history.replaceState({}, "", "/home");
     const user = userEvent.setup();
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "基金研究" }),
+      await screen.findByRole("heading", { name: "工作台" }),
     ).toBeVisible();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeVisible();
-    expect(screen.getByRole("form", { name: "基金筛选" })).toBeVisible();
+    expect(screen.getByRole("form", { name: "基金快速定位" })).toBeVisible();
 
-    for (const name of ["基金研究", "分类复核", "候选池", "组合决策", "回测"]) {
-      await user.tab();
-      expect(screen.getByRole("link", { name })).toHaveFocus();
+    for (const name of [
+      "工作台",
+      "基金研究",
+      "候选池",
+      "组合管理",
+      "策略回测",
+    ]) {
+      const link = within(
+        screen.getByRole("navigation", { name: "主导航" }),
+      ).getByRole("link", { name });
+      for (
+        let step = 0;
+        step < 12 && document.activeElement !== link;
+        step += 1
+      ) {
+        await user.tab();
+      }
+      expect(link).toHaveFocus();
     }
+    expect(
+      screen.queryByRole("link", { name: "分类复核" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "数据抓取" }),
+    ).not.toBeInTheDocument();
   });
 
   const statuses = [

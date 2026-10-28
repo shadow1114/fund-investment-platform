@@ -1,12 +1,15 @@
 :root {
+  --workspace-background: #f3f6fb;
+  --workspace-sidebar: #101827;
+  --workspace-text: #17243a;
+  --workspace-border: #dfe6ef;
   color-scheme: light;
   font-family:
-    "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei",
-    sans-serif;
+    Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   font-variant-numeric: tabular-nums;
-  color: #20262d;
-  background: #f4f6f8;
+  color: #17243a;
+  background: #f3f6fb;
 }
 
 html,

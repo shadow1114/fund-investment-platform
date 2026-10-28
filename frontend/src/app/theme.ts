@@ -14,11 +14,14 @@ const teal: MantineColorsTuple = [
 ];
 
 export const workbenchColors = {
-  background: "#F4F6F8",
+  background: "#F3F6FB",
+  sidebar: "#101827",
+  highlight: "#14B8A6",
+  secondary: "#3B82F6",
   surface: "#FFFFFF",
-  text: "#20262D",
+  text: "#17243A",
   mutedText: "#596572",
-  border: "#DCE2E7",
+  border: "#DFE6EF",
   accent: "#087F8C",
   accentHover: "#076B77",
   success: "#237A50",
@@ -38,10 +41,10 @@ export const theme = createTheme({
   primaryShade: 6,
   colors: { workbenchTeal: teal },
   fontFamily:
-    '"Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    'Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
   headings: {
     fontFamily:
-      '"Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+      'Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
     fontWeight: "600",
     sizes: { h1: { fontSize: "1.375rem", lineHeight: "1.4" } },
   },

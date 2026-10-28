@@ -3,6 +3,8 @@ import { Button, Stack, Text } from "@mantine/core";
 import { Navigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 
+import { WorkspaceHomePage } from "../pages/WorkspaceHomePage";
+
 import { PageHeader } from "../components/PageHeader";
 const FundDetailPage = lazy(() =>
   import("../pages/FundDetailPage").then((module) => ({
@@ -50,15 +52,16 @@ const withLoading = (element: ReactNode) => (
 const NotFoundPage = () => (
   <Stack>
     <PageHeader title="页面不存在" breadcrumbs={[{ label: "页面不存在" }]} />
-    <Text c="dimmed">请检查地址，或返回基金研究继续浏览。</Text>
-    <Button component={Link} to="/funds" w="fit-content">
-      返回基金研究
+    <Text c="dimmed">请检查地址，或返回工作台继续浏览。</Text>
+    <Button component={Link} to="/home" w="fit-content">
+      返回工作台
     </Button>
   </Stack>
 );
 
 export const routes: { path: string; element: ReactNode }[] = [
-  { path: "/", element: <Navigate replace to="/funds" /> },
+  { path: "/home", element: <WorkspaceHomePage /> },
+  { path: "/", element: <Navigate replace to="/home" /> },
   {
     path: "/classification-reviews",
     element: withLoading(<ClassificationReviewPage />),
