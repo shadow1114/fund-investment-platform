@@ -29,12 +29,10 @@ const asList = (value: string[]) => (value.length > 0 ? value : undefined);
 const asCsv = (value: string[]) =>
   value.length > 0 ? value.join(",") : undefined;
 
-const parseParams = (search: URLSearchParams): ListFundsParams => ({
+export const parseParams = (search: URLSearchParams): ListFundsParams => ({
   asset_class: asCsv(split(search.get("asset_class"))),
   strategy: asCsv(split(search.get("strategy"))),
-  geography: asCsv(split(search.get("geography"))),
-  product_structure: asCsv(split(search.get("product_structure"))),
-  market_attributes: asCsv(split(search.get("market_attributes"))),
+  strategy_tags: asList(split(search.get("strategy_tags"))),
   classification_status: asCsv(split(search.get("classification_status"))),
   fund_name: search.get("fund_name") || undefined,
   fund_type: asList(split(search.get("fund_type"))),
@@ -54,6 +52,7 @@ const initialFilterValues = (search: URLSearchParams): FundFilterValues => ({
   ...emptyFundFilters(),
   asset_class: split(search.get("asset_class")),
   strategy: split(search.get("strategy")),
+  strategy_tags: split(search.get("strategy_tags")),
   geography: split(search.get("geography")),
   product_structure: split(search.get("product_structure")),
   market_attributes: split(search.get("market_attributes")),
@@ -68,7 +67,7 @@ const initialFilterValues = (search: URLSearchParams): FundFilterValues => ({
   order: search.get("order") || "asc",
 });
 
-const serializeFilters = (values: FundFilterValues) => {
+export const serializeFilters = (values: FundFilterValues) => {
   const next = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
     const serialized = Array.isArray(value) ? value.join(",") : value;
@@ -141,7 +140,17 @@ export const FundResearchPage = () => {
     setSearch(next);
   };
   const activeFilters = Object.entries(filters).flatMap(([key, value]) => {
-    if (["page_size", "sort", "order"].includes(key)) return [];
+    if (
+      [
+        "page_size",
+        "sort",
+        "order",
+        "geography",
+        "product_structure",
+        "market_attributes",
+      ].includes(key)
+    )
+      return [];
     const entries = Array.isArray(value) ? value : value ? [value] : [];
     return entries.map((entry) => ({ key, value: entry }));
   });

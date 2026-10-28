@@ -112,14 +112,16 @@ describe("FundResearchPage", () => {
     ).toHaveAttribute("href", "/funds/000001?as_of_date=2026-09-16");
   });
 
-  it("keeps all classification ANY filters in URL requests and query identity", async () => {
+  it("applies only active classification filters while preserving the legacy URL state", async () => {
     const user = userEvent.setup();
     renderPage(
       "/funds?asset_class=EQUITY,BOND&strategy=ACTIVE&geography=CN,US&product_structure=ETF&market_attributes=QDII&classification_status=CONFLICT",
     );
     await screen.findByText("Alpha 稳健基金");
     expect(requests[0].searchParams.get("asset_class")).toBe("EQUITY,BOND");
-    expect(requests[0].searchParams.get("geography")).toBe("CN,US");
+    expect(requests[0].searchParams.get("geography")).toBeNull();
+    expect(requests[0].searchParams.get("product_structure")).toBeNull();
+    expect(requests[0].searchParams.get("market_attributes")).toBeNull();
     await user.deselectOptions(
       screen.getByRole("listbox", { name: "资产类别" }),
       ["EQUITY"],

@@ -12,11 +12,13 @@ import type {
   Evidence,
   ReviewDecisionAction,
   ReviewSubmission,
+  StrategyTagDecisionAction,
 } from "../api/generated/m17.schemas";
 import { ApiError, unwrapResponse } from "../api/http";
 import { ErrorState } from "../components/ErrorState";
 import {
   ClassificationView,
+  activeDimensions,
   dimensions,
   dimensionLabels,
 } from "../features/classifications/ClassificationView";
@@ -29,10 +31,6 @@ export const ClassificationReviewPage = () => {
   const session = useQuery({
     queryKey: ["api", "session"],
     queryFn: async () => unwrapResponse(await getSession()),
-  });
-  const catalog = useQuery({
-    queryKey: ["classification-catalog"],
-    queryFn: async () => unwrapResponse(await getClassificationCatalog()),
   });
   const queue = useQuery({
     queryKey: ["classification-reviews", page],
@@ -53,12 +51,26 @@ export const ClassificationReviewPage = () => {
     enabled: caseId > 0,
     queryFn: async () => unwrapResponse(await getClassificationReview(caseId)),
   });
-  const [dimension, setDimension] = useState<string>(dimensions[0]);
+  const catalogVersion =
+    detail.data?.incoming?.enum_version ?? detail.data?.baseline?.enum_version;
+  const catalog = useQuery({
+    queryKey: ["classification-catalog", catalogVersion],
+    queryFn: async () =>
+      unwrapResponse(
+        await getClassificationCatalog({ enum_version: catalogVersion }),
+      ),
+  });
+  const [dimension, setDimension] = useState<string>(activeDimensions[0]);
   const [action, setAction] = useState<ReviewDecisionAction>("CONFIRM");
   const [values, setValues] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [rawValue, setRawValue] = useState("");
   const [locator, setLocator] = useState("");
+  const [activeValues, setActiveValues] = useState<Record<string, string>>({});
+  const [tagActions, setTagActions] = useState<
+    Record<string, StrategyTagDecisionAction | "">
+  >({});
+  const [acceptVersion, setAcceptVersion] = useState(false);
   const [notice, setNotice] = useState("");
   const mutation = useMutation({
     mutationFn: async (body: ReviewSubmission) =>
@@ -79,6 +91,9 @@ export const ClassificationReviewPage = () => {
       if (error instanceof ApiError && error.status === 409) {
         setNotice("基线已变化，已重新加载。请重新比较证据后提交。");
         setValues([]);
+        setActiveValues({});
+        setTagActions({});
+        setAcceptVersion(false);
         setReason("");
         setRawValue("");
         await detail.refetch();
@@ -92,6 +107,9 @@ export const ClassificationReviewPage = () => {
     setSearch(next);
     setNotice("");
     setValues([]);
+    setActiveValues({});
+    setTagActions({});
+    setAcceptVersion(false);
     setReason("");
     setRawValue("");
     mutation.reset();
@@ -109,6 +127,58 @@ export const ClassificationReviewPage = () => {
       raw_value: rawValue.trim(),
       locator: locator.trim(),
     };
+    const incomingSnapshot = detail.data.incoming;
+    const isV3Review = incomingSnapshot?.rule_version === "3.0.0";
+    const isV3Upgrade =
+      isV3Review &&
+      detail.data.baseline?.rule_version !== incomingSnapshot.rule_version;
+    if (isV3Review) {
+      if (isV3Upgrade && !acceptVersion) return;
+      const scope = detail.data.active_scope.filter((name) =>
+        activeDimensions.includes(name as (typeof activeDimensions)[number]),
+      );
+      const decisions = Object.fromEntries(
+        scope.map((name) => [
+          name,
+          {
+            action: "CONFIRM" as ReviewDecisionAction,
+            value: activeValues[name] || "UNKNOWN",
+            evidence: [{ ...evidence, raw_field: name }],
+          },
+        ]),
+      );
+      const tag_decisions = Object.fromEntries(
+        Object.entries(tagActions)
+          .filter((entry): entry is [string, StrategyTagDecisionAction] =>
+            Boolean(entry[1]),
+          )
+          .map(([tag, tagAction]) => [
+            tag,
+            {
+              action: tagAction,
+              evidence: [{ ...evidence, raw_field: "strategy" }],
+            },
+          ]),
+      );
+      const requiredTags = Object.keys(
+        incomingSnapshot?.strategy_tag_results ?? {},
+      );
+      if (
+        scope.some((name) => !activeValues[name]) ||
+        requiredTags.some((tag) => !tagActions[tag])
+      )
+        return;
+      mutation.mutate({
+        expected_revision: detail.data.expected_revision,
+        reason: reason.trim(),
+        decisions,
+        tag_decisions,
+        ...(isV3Upgrade
+          ? { accept_incoming_version: incomingSnapshot?.rule_version }
+          : {}),
+      });
+      return;
+    }
     mutation.mutate({
       expected_revision: detail.data.expected_revision,
       reason: reason.trim(),
@@ -122,6 +192,32 @@ export const ClassificationReviewPage = () => {
           evidence: [evidence],
         },
       },
+    });
+  };
+  const incoming = detail.data?.incoming;
+  const baseline = detail.data?.baseline;
+  const isV3Review = incoming?.rule_version === "3.0.0";
+  const isV3Upgrade =
+    isV3Review && baseline?.rule_version !== incoming.rule_version;
+  const reviewScope = isV3Review
+    ? (detail.data?.active_scope.filter((name) =>
+        activeDimensions.includes(name as (typeof activeDimensions)[number]),
+      ) ?? [])
+    : [];
+  const requiredTags = isV3Review
+    ? Object.keys(incoming?.strategy_tag_results ?? {}).filter(
+        (tag) =>
+          JSON.stringify(incoming?.strategy_tag_results?.[tag]) !==
+          JSON.stringify(baseline?.strategy_tag_results?.[tag]),
+      )
+    : [];
+  const rejectUpgrade = () => {
+    if (!detail.data || !reason.trim()) return;
+    mutation.mutate({
+      expected_revision: detail.data.expected_revision,
+      reason: reason.trim(),
+      decisions: {},
+      reject_upgrade: true,
     });
   };
   return (
@@ -159,12 +255,40 @@ export const ClassificationReviewPage = () => {
             复核 #{detail.data.case_id} · 基线 {detail.data.expected_revision}
           </h2>
           <p>{detail.data.status}</p>
+          {(detail.data.active_scope?.length > 0 ||
+            detail.data.historical_scope?.length > 0) && (
+            <p>
+              当前复核范围：
+              {(detail.data.active_scope ?? [])
+                .map((name) => dimensionLabels[name] ?? name)
+                .join("、") || "无"}
+              。只读历史维度：
+              {(detail.data.historical_scope ?? [])
+                .map((name) => dimensionLabels[name] ?? name)
+                .join("、") || "无"}
+              {detail.data.evaluation_state
+                ? ` · 评估状态 ${detail.data.evaluation_state}`
+                : ""}
+            </p>
+          )}
+          {isV3Upgrade && (
+            <p>
+              规则升级：{baseline?.rule_version} → {incoming?.rule_version}
+              。提交后将以新版两维分类和标签替换本次有效结果；暂停维度仅保留历史来源，不会被修改。
+            </p>
+          )}
           <h3>维度证据比较</h3>
-          <h4>当前基线</h4>
+          <h4>
+            当前基线（规则 {detail.data.baseline?.rule_version ?? "旧版本"} ·
+            枚举 {detail.data.baseline?.enum_version ?? "旧版本"}）
+          </h4>
           <ClassificationView classification={detail.data.baseline} evidence />
           {detail.data.incoming && (
             <>
-              <h4>新到资料</h4>
+              <h4>
+                新到资料（规则 {detail.data.incoming.rule_version ?? "旧版本"} ·
+                枚举 {detail.data.incoming.enum_version ?? "旧版本"}）
+              </h4>
               <ClassificationView
                 classification={detail.data.incoming}
                 evidence
@@ -178,68 +302,163 @@ export const ClassificationReviewPage = () => {
           {session.data?.capabilities.can_review_classifications === true &&
           detail.data.status === "PENDING" ? (
             <form aria-label="分类复核" onSubmit={submit}>
-              <label>
-                复核维度
-                <select
-                  value={dimension}
-                  onChange={(e) => {
-                    setDimension(e.target.value);
-                    setValues([]);
-                  }}
-                >
-                  {dimensions.map((name) => (
-                    <option key={name} value={name}>
-                      {dimensionLabels[name]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                复核操作
-                <select
-                  value={action}
-                  onChange={(e) =>
-                    setAction(e.target.value as ReviewDecisionAction)
-                  }
-                >
-                  <option value="CONFIRM">确认候选</option>
-                  <option value="OVERRIDE">覆盖分类</option>
-                  <option value="REJECT">驳回候选（保留 UNKNOWN）</option>
-                </select>
-              </label>
-              <label>
-                决定值
-                <select
-                  required={action !== "REJECT"}
-                  multiple={
-                    dimension === "geography" ||
-                    dimension === "market_attributes"
-                  }
-                  value={
-                    dimension === "geography" ||
-                    dimension === "market_attributes"
-                      ? values
-                      : values[0] || ""
-                  }
-                  onChange={(e) =>
-                    setValues(
-                      Array.from(e.target.selectedOptions, (o) => o.value),
-                    )
-                  }
-                >
-                  <option value="">请选择</option>
-                  {(action === "CONFIRM" && detail.data.baseline
-                    ? detail.data.baseline[
-                        dimension as (typeof dimensions)[number]
-                      ].candidates || []
-                    : catalog.data?.dimensions[dimension]
-                  )?.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {isV3Review ? (
+                <>
+                  <fieldset>
+                    <legend>本次需要确认的活跃维度</legend>
+                    {reviewScope.map((name) => {
+                      const candidates =
+                        incoming?.[name as (typeof activeDimensions)[number]]
+                          .candidates ?? [];
+                      const options = [
+                        ...new Set([
+                          ...candidates,
+                          ...(catalog.data?.dimensions[name] ?? []),
+                        ]),
+                      ];
+                      return (
+                        <label key={name}>
+                          {dimensionLabels[name]}决定值
+                          {candidates.length > 0 && (
+                            <span> · 候选：{candidates.join("、")}</span>
+                          )}
+                          <select
+                            required
+                            aria-label={`${dimensionLabels[name]}决定值`}
+                            value={activeValues[name] ?? ""}
+                            onChange={(event) =>
+                              setActiveValues((current) => ({
+                                ...current,
+                                [name]: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">请选择</option>
+                            {options.map((value) => (
+                              <option key={value} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                  {requiredTags.length > 0 && (
+                    <fieldset>
+                      <legend>发生变化的策略标签决定</legend>
+                      {requiredTags.map((tag) => (
+                        <label key={tag}>
+                          {tag} 标签决定
+                          <select
+                            required
+                            aria-label={`${tag} 标签决定`}
+                            value={tagActions[tag] ?? ""}
+                            onChange={(event) =>
+                              setTagActions((current) => ({
+                                ...current,
+                                [tag]: event.target.value as
+                                  StrategyTagDecisionAction | "",
+                              }))
+                            }
+                          >
+                            <option value="">请选择</option>
+                            <option value="CONFIRM">确认标签</option>
+                            <option value="REJECT">拒绝标签</option>
+                          </select>
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
+                  {isV3Upgrade && (
+                    <>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={acceptVersion}
+                          onChange={(event) =>
+                            setAcceptVersion(event.target.checked)
+                          }
+                        />
+                        接受规则与枚举版本 {incoming?.rule_version} /{" "}
+                        {incoming?.enum_version}
+                      </label>
+                      <button
+                        type="button"
+                        disabled={mutation.isPending || !reason.trim()}
+                        onClick={rejectUpgrade}
+                      >
+                        拒绝升级并保留当前版本
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label>
+                    复核维度
+                    <select
+                      value={dimension}
+                      onChange={(e) => {
+                        setDimension(e.target.value);
+                        setValues([]);
+                      }}
+                    >
+                      {dimensions.map((name) => (
+                        <option key={name} value={name}>
+                          {dimensionLabels[name]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    复核操作
+                    <select
+                      value={action}
+                      onChange={(e) =>
+                        setAction(e.target.value as ReviewDecisionAction)
+                      }
+                    >
+                      <option value="CONFIRM">确认候选</option>
+                      <option value="OVERRIDE">覆盖分类</option>
+                      <option value="REJECT">驳回候选（保留 UNKNOWN）</option>
+                    </select>
+                  </label>
+                  <label>
+                    决定值
+                    <select
+                      required={action !== "REJECT"}
+                      multiple={
+                        dimension === "geography" ||
+                        dimension === "market_attributes"
+                      }
+                      value={
+                        dimension === "geography" ||
+                        dimension === "market_attributes"
+                          ? values
+                          : values[0] || ""
+                      }
+                      onChange={(e) =>
+                        setValues(
+                          Array.from(e.target.selectedOptions, (o) => o.value),
+                        )
+                      }
+                    >
+                      <option value="">请选择</option>
+                      {(action === "CONFIRM" && detail.data.baseline
+                        ? detail.data.baseline[
+                            dimension as (typeof dimensions)[number]
+                          ].candidates || []
+                        : catalog.data?.dimensions[dimension]
+                      )?.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
               <label>
                 复核理由
                 <textarea
@@ -265,7 +484,17 @@ export const ClassificationReviewPage = () => {
                   onChange={(e) => setLocator(e.target.value)}
                 />
               </label>
-              <button disabled={mutation.isPending}>提交复核</button>
+              <button
+                disabled={
+                  mutation.isPending ||
+                  (isV3Review &&
+                    (reviewScope.some((name) => !activeValues[name]) ||
+                      requiredTags.some((tag) => !tagActions[tag]))) ||
+                  (isV3Upgrade && !acceptVersion)
+                }
+              >
+                提交复核
+              </button>
             </form>
           ) : (
             <p>当前会话无分类复核权限，或案件已结束。</p>

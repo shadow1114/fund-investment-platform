@@ -18,13 +18,14 @@ import {
 } from "../../api/generated/m17.schemas";
 import { unwrapResponse } from "../../api/http";
 import {
-  dimensions,
+  activeDimensions,
   dimensionLabels,
 } from "../classifications/ClassificationView";
 
 export type FundFilterValues = {
   asset_class: string[];
   strategy: string[];
+  strategy_tags: string[];
   geography: string[];
   product_structure: string[];
   market_attributes: string[];
@@ -59,6 +60,7 @@ const eligibilityLabels: Record<string, string> = {
 export const emptyFundFilters = (): FundFilterValues => ({
   asset_class: [],
   strategy: [],
+  strategy_tags: [],
   geography: [],
   product_structure: [],
   market_attributes: [],
@@ -153,12 +155,17 @@ export const FundFilters = ({
         </Group>
 
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-          {dimensions.map((dimension) =>
+          {activeDimensions.map((dimension) =>
             multiSelect(
               dimension,
               dimensionLabels[dimension],
               catalog.data?.dimensions[dimension] ?? [],
             ),
+          )}
+          {multiSelect(
+            "strategy_tags",
+            "策略标签（仅已确认）",
+            catalog.data?.strategy_tags ?? [],
           )}
           {multiSelect(
             "classification_status",
@@ -231,6 +238,21 @@ export const FundFilters = ({
             allowDeselect={false}
           />
         </SimpleGrid>
+        <section aria-label="历史维度筛选说明">
+          <strong>历史维度（只读）</strong>
+          <p>
+            投资地域、产品结构和市场属性保留在历史修订中展示；本轮不将其作为当前分类筛选条件。
+          </p>
+          {(values.geography.length > 0 ||
+            values.product_structure.length > 0 ||
+            values.market_attributes.length > 0) && (
+            <p>
+              历史链接条件：地域 {values.geography.join("、") || "无"}；结构{" "}
+              {values.product_structure.join("、") || "无"}；属性{" "}
+              {values.market_attributes.join("、") || "无"}
+            </p>
+          )}
+        </section>
         {catalog.isError && (
           <p role="alert">分类字典加载失败，分类筛选暂不可用。</p>
         )}
