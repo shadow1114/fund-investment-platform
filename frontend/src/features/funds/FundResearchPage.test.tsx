@@ -201,10 +201,64 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   requests.length = 0;
+  localStorage.clear();
 });
 afterAll(() => server.close());
 
 describe("FundResearchPage", () => {
+  it("saves applied filters, restores them through the URL after remount, and deletes the view", async () => {
+    const user = userEvent.setup();
+    const first = renderPage(
+      "/funds?fund_name=Alpha&asset_class=EQUITY&as_of_date=2026-09-16&page=3&token=secret",
+    );
+    await screen.findByText("Alpha 稳健基金");
+    await user.type(screen.getByLabelText("视图名称"), "稳健筛选");
+    await user.click(screen.getByRole("button", { name: "保存当前视图" }));
+    const stored = localStorage.getItem("fip:fund-views:v1");
+    expect(stored).not.toContain("secret");
+    expect(stored).not.toContain("token");
+    await user.type(screen.getByLabelText("视图名称"), "稳健筛选");
+    await user.click(screen.getByRole("button", { name: "保存当前视图" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("视图名称已存在");
+    first.unmount();
+    renderPage("/funds?fund_name=Other&page=2");
+    await user.click(
+      await screen.findByRole("button", { name: "应用视图 稳健筛选" }),
+    );
+    await waitFor(() =>
+      expect(requests.at(-1)?.searchParams.get("fund_name")).toBe("Alpha"),
+    );
+    expect(requests.at(-1)?.searchParams.get("asset_class")).toBe("EQUITY");
+    expect(requests.at(-1)?.searchParams.get("as_of_date")).toBe("2026-09-16");
+    expect(requests.at(-1)?.searchParams.get("page")).toBe("1");
+    expect(screen.getByLabelText("基金名称")).toHaveValue("Alpha");
+    await user.click(screen.getByRole("button", { name: "删除视图 稳健筛选" }));
+    expect(
+      screen.queryByRole("button", { name: "应用视图 稳健筛选" }),
+    ).not.toBeInTheDocument();
+    expect(localStorage.getItem("fip:fund-views:v1")).not.toContain("稳健筛选");
+  });
+  it("reports blocked storage without pretending a view was saved", async () => {
+    const original = Storage.prototype.setItem;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === "fip:fund-views:v1") throw new Error("blocked");
+        return original.call(this, key, value);
+      });
+    try {
+      const user = userEvent.setup();
+      renderPage("/funds");
+      await user.type(screen.getByLabelText("视图名称"), "受限视图");
+      await user.click(screen.getByRole("button", { name: "保存当前视图" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("无法保存视图");
+      expect(
+        screen.queryByRole("button", { name: "应用视图 受限视图" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it("shows readable lifecycle and investment eligibility statuses in results", async () => {
     renderPage("/funds");
     await screen.findByText("Alpha 稳健基金");

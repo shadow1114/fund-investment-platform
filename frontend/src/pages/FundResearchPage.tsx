@@ -21,6 +21,7 @@ import {
   type FundFilterValues,
 } from "../features/funds/FundFilters";
 import { FundTable } from "../features/funds/FundTable";
+import { SavedFundViews } from "../features/funds/SavedFundViews";
 import { getSessionQueryOptions } from "../api/queries";
 import { dimensionLabels } from "../features/classifications/ClassificationView";
 
@@ -168,6 +169,10 @@ export const FundResearchPage = () => {
             · {query.data?.meta.pagination.total_items ?? "—"} 只符合条件
           </Text>
         }
+      />
+      <SavedFundViews
+        filters={serializeFilters(filters).toString()}
+        onApply={(value) => setSearch(new URLSearchParams(value))}
       />
       <FundFilters
         key={serializedSearch}

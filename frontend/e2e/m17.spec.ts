@@ -291,3 +291,29 @@ for (const viewport of [
     }
   });
 }
+
+test("classification review action is available with review capability", async ({
+  page,
+}) => {
+  await installFrozenApi(page, {
+    "/api/v1/session": {
+      status: 200,
+      body: {
+        ...sessionEnvelope,
+        data: {
+          ...sessionEnvelope.data,
+          capabilities: {
+            ...sessionEnvelope.data.capabilities,
+            can_review_classifications: true,
+          },
+        },
+      },
+    },
+  });
+  await page.goto("/funds/000001");
+  await page.getByRole("button", { name: /五维分类与证据/ }).click();
+  await page.getByRole("button", { name: "分类操作" }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "打开分类复核工作区" }),
+  ).toHaveAttribute("href", "/classification-reviews");
+});
