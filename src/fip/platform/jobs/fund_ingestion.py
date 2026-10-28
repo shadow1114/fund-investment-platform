@@ -273,6 +273,13 @@ def _is_transient_result(result: dict[str, Any]) -> bool:
         result.get("status") == "FAILED"
         and isinstance(error, str)
         and error.startswith(
-            ("TimeoutError:", "Timeout:", "ReadTimeout:", "ConnectTimeout:", "ConnectionError:")
+            (
+                "TimeoutExpired:",
+                "TimeoutError:",
+                "Timeout:",
+                "ReadTimeout:",
+                "ConnectTimeout:",
+                "ConnectionError:",
+            )
         )
     )

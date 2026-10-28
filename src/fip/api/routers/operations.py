@@ -55,8 +55,11 @@ def get_operation(
                     raise ForbiddenError()
                 if (
                     job is not None
-                    and not principal.can_manage_data_ingestion
                     and (job.job_payload or {}).get("actor") != principal.user_id
+                    and (
+                        (job.job_payload or {}).get("scoped_items")
+                        or not principal.can_manage_data_ingestion
+                    )
                 ):
                     raise ForbiddenError()
         finally:

@@ -73,3 +73,27 @@ def test_transient_provider_failure_is_classified_for_manual_retry():
 
     assert _is_transient_result({"status": "FAILED", "error": "TimeoutError: timed out"})
     assert not _is_transient_result({"status": "FAILED", "error": "ValueError: bad data"})
+
+
+def test_scoped_job_denies_other_ingestion_managers():
+    from types import SimpleNamespace
+
+    from fip.api.context import Principal
+    from fip.api.routers.fund_ingestions import _can_read_job
+
+    actor = Principal("bob", ("operations",), False, False, True, True)
+    job = SimpleNamespace(
+        job_payload={"actor": "alice", "scope_type": "SINGLE", "scoped_items": True}
+    )
+    assert not _can_read_job(actor, job)
+    legacy = SimpleNamespace(job_payload={"actor": "alice"})
+    assert _can_read_job(actor, legacy)
+
+
+def test_subprocess_timeout_is_retryable():
+    from subprocess import TimeoutExpired
+
+    from fip.platform.jobs.fund_ingestion import _is_transient_result
+
+    error = TimeoutExpired(cmd="akshare", timeout=30)
+    assert _is_transient_result({"status": "FAILED", "error": f"{type(error).__name__}: {error}"})

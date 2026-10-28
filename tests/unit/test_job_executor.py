@@ -44,7 +44,9 @@ def test_running_chunk_releases_lease_without_finishing():
         claimed_by="worker",
         lease_expires_at=now,
     )
-    session = SimpleNamespace(flush=lambda: None)
+    from contextlib import nullcontext
+
+    session = SimpleNamespace(flush=lambda: None, begin_nested=nullcontext)
     executor = JobExecutor({"chunk": lambda _: JobOutcome.running()})
     executor.claim_one = lambda *_: job
 
@@ -54,3 +56,39 @@ def test_running_chunk_releases_lease_without_finishing():
     assert job.finished_at is None
     assert job.claimed_by is None and job.lease_expires_at is None
     assert job.result_ref == "existing"
+
+
+def test_handler_exception_releases_claim_and_keeps_job_running():
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    class Session:
+        def begin_nested(self):
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+        def flush(self):
+            pass
+
+    now = datetime.now(UTC)
+    job = SimpleNamespace(
+        job_type="broken",
+        status="RUNNING",
+        result_ref="ref",
+        error_code=None,
+        error_detail=None,
+        last_error_at=None,
+        finished_at=None,
+        claimed_by="worker",
+        lease_expires_at=now,
+    )
+
+    def broken(_):
+        raise RuntimeError("provider persistence failed")
+
+    executor = JobExecutor({"broken": broken})
+    executor.claim_one = lambda *_: job
+    outcome = executor.execute_one(Session(), "worker", now)
+    assert outcome.status == "RUNNING" and outcome.error_code == "HANDLER_EXCEPTION"
+    assert job.finished_at is None and job.claimed_by is None and job.lease_expires_at is None

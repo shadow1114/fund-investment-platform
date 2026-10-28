@@ -50,6 +50,8 @@ def _can_read_job(principal: Principal, job: CalculationJob) -> bool:
     payload = job.job_payload or {}
     if payload.get("scope_type") == "ALL" and not principal.can_manage_full_universe_ingestion:
         return False
+    if payload.get("scoped_items"):
+        return payload.get("actor") == principal.user_id
     return principal.can_manage_data_ingestion or payload.get("actor") == principal.user_id
 
 
@@ -463,6 +465,20 @@ def get_fund_ingestion(
         session.close()
 
 
+def _lock_scope_sources(session: Session) -> None:
+    """Keep membership and mapping inputs stable through snapshot creation or submission."""
+    from sqlalchemy import text
+
+    session.execute(
+        text(
+            "LOCK TABLE fund.fund, fund.fund_share_class, fund.provider_fund_identity, "
+            "governance.data_provider, fund.fund_classification_revision, "
+            "fund.fund_classification_history, fund.fund_status_history, "
+            "fund.investment_eligibility, fund.fund_manager_assignment IN SHARE MODE"
+        )
+    )
+
+
 def _resolve_snapshot(
     session: Session, dataset: str, scope: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -492,6 +508,31 @@ def _resolve_snapshot(
                 for row in FundRepository(session).list()
                 if _matches(row, normalized)
             }
+            from fip.platform.decision_data.pit import resolve_visible_until
+            from fip.services.data_service.repositories.classification import (
+                SqlClassificationPitRepository,
+            )
+
+            no_shares = session.scalars(
+                select(Fund).where(
+                    ~select(FundShareClass.id).where(FundShareClass.fund_id == Fund.id).exists()
+                )
+            ).all()
+            classification = SqlClassificationPitRepository(
+                session, resolve_visible_until(date.today())
+            )
+            for fund in no_shares:
+                current = classification.current(fund.id)
+                row = {
+                    "fund_id": fund.fund_code,
+                    "fund_name": fund.product_name,
+                    "classification": classification.snapshot(fund.id),
+                    "fund_classification": current.classification_code if current else "UNKNOWN",
+                    "lifecycle_status": "UNKNOWN",
+                    "investment_eligibility": "UNKNOWN",
+                }
+                if _matches(row, normalized):
+                    ids.add(fund.fund_code)
             funds = session.scalars(select(Fund).where(Fund.fund_code.in_(ids))).all()
         else:
             funds = session.scalars(select(Fund)).all()
@@ -565,6 +606,7 @@ def preview_fund_ingestion(
     scope = payload.scope.model_dump(mode="json", exclude_none=True)
     session = _session(request)
     try:
+        _lock_scope_sources(session)
         members = _resolve_snapshot(session, payload.dataset, scope)
         preview = FundIngestionPreview(
             id=str(uuid.uuid4()),
@@ -638,6 +680,7 @@ def submit_scoped_fund_ingestion(
         else:
             if preview.expires_at <= datetime.now(UTC):
                 raise ConflictError("Preview expired; create a new preview")
+            _lock_scope_sources(session)
             try:
                 current = _resolve_snapshot(session, preview.dataset, preview.scope)
             except NotFoundError as error:
@@ -723,12 +766,13 @@ def submit_scoped_fund_ingestion(
 def _authorized_scoped_job(
     session: Session, operation_id: str, principal: Principal, *, write: bool = False
 ) -> CalculationJob:
-    job = session.scalar(
-        select(CalculationJob).where(
-            CalculationJob.execution_id == operation_id,
-            CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest")),
-        )
+    stmt = select(CalculationJob).where(
+        CalculationJob.execution_id == operation_id,
+        CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest")),
     )
+    if write:
+        stmt = stmt.with_for_update()
+    job = session.scalar(stmt)
     if job is None:
         raise NotFoundError("fund ingestion", operation_id)
     if not _can_read_job(principal, job):
@@ -859,8 +903,11 @@ def list_ingestion_history(
         where: list[ColumnElement[bool]] = [
             CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest"))
         ]
-        if not principal.can_manage_data_ingestion:
-            where.append(CalculationJob.job_payload["actor"].astext == principal.user_id)
+        owner = CalculationJob.job_payload["actor"].astext == principal.user_id
+        if principal.can_manage_data_ingestion:
+            where.append(or_(owner, CalculationJob.job_payload["scoped_items"].astext.is_(None)))
+        else:
+            where.append(owner)
         if not principal.can_manage_full_universe_ingestion:
             where.append(
                 or_(

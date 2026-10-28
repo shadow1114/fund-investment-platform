@@ -96,7 +96,15 @@ class JobExecutor:
         if job is None:
             return None
         context = JobContext(job=job, session=session, worker_id=worker_id, now=now)
-        outcome = self.outcome_for(job.job_type, context)
+        try:
+            with session.begin_nested():
+                outcome = self.outcome_for(job.job_type, context)
+        except Exception as error:
+            outcome = JobOutcome(
+                ExecutionStatus.RUNNING.value,
+                error_code="HANDLER_EXCEPTION",
+                error_message=f"{type(error).__name__}: {error}",
+            )
         job.status = outcome.status
         if outcome.result_ref is not None:
             job.result_ref = outcome.result_ref

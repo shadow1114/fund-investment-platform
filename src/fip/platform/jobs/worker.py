@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import signal
 import uuid
 from datetime import UTC, datetime
@@ -27,8 +28,9 @@ def _job_executor() -> JobExecutor:
 
 
 def run_once(*, worker_id: str | None = None) -> bool:
-    engine = create_engine(settings.database_url, future=True)
+    engine = None
     try:
+        engine = create_engine(settings.database_url, future=True)
         with Session(engine, future=True) as session:
             executor = _job_executor()
             outcome = executor.execute_one(
@@ -37,9 +39,13 @@ def run_once(*, worker_id: str | None = None) -> bool:
                 datetime.now(UTC),
             )
             session.commit()
-            return outcome is not None
+            return outcome is not None and outcome.error_code != "HANDLER_EXCEPTION"
+    except Exception:
+        logging.getLogger(__name__).exception("Worker iteration failed; will retry")
+        return False
     finally:
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
 
 
 def main() -> None:
