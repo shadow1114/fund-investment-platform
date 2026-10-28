@@ -26,6 +26,10 @@ class JobOutcome:
     error_message: str | None = None
 
     @classmethod
+    def running(cls) -> JobOutcome:
+        return cls(ExecutionStatus.RUNNING.value)
+
+    @classmethod
     def completed(cls, result_ref: str | None = None) -> JobOutcome:
         return cls(ExecutionStatus.COMPLETED.value, result_ref=result_ref)
 
@@ -94,11 +98,12 @@ class JobExecutor:
         context = JobContext(job=job, session=session, worker_id=worker_id, now=now)
         outcome = self.outcome_for(job.job_type, context)
         job.status = outcome.status
-        job.result_ref = outcome.result_ref
+        if outcome.result_ref is not None:
+            job.result_ref = outcome.result_ref
         job.error_code = outcome.error_code
         job.error_detail = outcome.error_message
         job.last_error_at = now if outcome.error_code else None
-        job.finished_at = now
+        job.finished_at = now if outcome.status != ExecutionStatus.RUNNING.value else None
         job.claimed_by = None
         job.lease_expires_at = None
         session.flush()

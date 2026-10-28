@@ -88,6 +88,7 @@ export type SessionCapabilities = {
   can_review_decisions: boolean;
   can_review_classifications?: boolean;
   can_manage_data_ingestion: boolean;
+  can_manage_full_universe_ingestion?: boolean;
 };
 
 export interface Session {
@@ -146,6 +147,187 @@ export interface OperationEnvelope {
   data: Operation;
   meta: ResponseMeta;
   error: EmptyError;
+}
+
+export interface FundIngestionFilters {
+  fund_name?: string;
+  fund_type?: string[];
+  lifecycle_status?: string[];
+  investment_eligibility?: string[];
+  asset_class?: string;
+  strategy?: string;
+  geography?: string;
+  product_structure?: string;
+  market_attributes?: string;
+  classification_status?: string;
+}
+
+export type SingleFundScopeType =
+  (typeof SingleFundScopeType)[keyof typeof SingleFundScopeType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const SingleFundScopeType = {
+  SINGLE: "SINGLE",
+} as const;
+
+export interface SingleFundScope {
+  type: SingleFundScopeType;
+  /** @minLength 1 */
+  fund_id: string;
+}
+
+export type SelectedFundsScopeType =
+  (typeof SelectedFundsScopeType)[keyof typeof SelectedFundsScopeType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const SelectedFundsScopeType = {
+  SELECTED: "SELECTED",
+} as const;
+
+export interface SelectedFundsScope {
+  type: SelectedFundsScopeType;
+  /**
+   * @minItems 2
+   * @maxItems 100
+   */
+  fund_ids: string[];
+}
+
+export type AllFundsScopeType =
+  (typeof AllFundsScopeType)[keyof typeof AllFundsScopeType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const AllFundsScopeType = {
+  ALL: "ALL",
+} as const;
+
+export interface AllFundsScope {
+  type: AllFundsScopeType;
+  filters?: FundIngestionFilters;
+}
+
+export type FundIngestionPreviewRequestDataset =
+  (typeof FundIngestionPreviewRequestDataset)[keyof typeof FundIngestionPreviewRequestDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionPreviewRequestDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export type FundIngestionPreviewRequestScope =
+  SingleFundScope | SelectedFundsScope | AllFundsScope;
+
+export interface FundIngestionPreviewRequest {
+  dataset: FundIngestionPreviewRequestDataset;
+  scope: FundIngestionPreviewRequestScope;
+}
+
+export interface FundIngestionJobRequest {
+  preview_id: string;
+}
+
+export type FundIngestionPreviewDataset =
+  (typeof FundIngestionPreviewDataset)[keyof typeof FundIngestionPreviewDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionPreviewDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export type FundIngestionPreviewScopeType =
+  (typeof FundIngestionPreviewScopeType)[keyof typeof FundIngestionPreviewScopeType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionPreviewScopeType = {
+  SINGLE: "SINGLE",
+  SELECTED: "SELECTED",
+  ALL: "ALL",
+} as const;
+
+export interface FundIngestionPreview {
+  preview_id: string;
+  dataset: FundIngestionPreviewDataset;
+  scope_type: FundIngestionPreviewScopeType;
+  fund_count: number;
+  supported_fund_count: number;
+  unavailable_mapping_count: number;
+  subject_count: number;
+  source: string;
+  expires_at: string;
+}
+
+export interface FundIngestionPreviewEnvelope {
+  data: FundIngestionPreview;
+  meta: ResponseMeta;
+  error: null;
+}
+
+export type FundIngestionRunItemShareClassId = number | null;
+
+export type FundIngestionRunItemSymbol = string | null;
+
+export type FundIngestionRunItemStatus =
+  (typeof FundIngestionRunItemStatus)[keyof typeof FundIngestionRunItemStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionRunItemStatus = {
+  PENDING: "PENDING",
+  RUNNING: "RUNNING",
+  SUCCESS: "SUCCESS",
+  FAILED: "FAILED",
+  SKIPPED: "SKIPPED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type FundIngestionRunItemResultAnyOf = { [key: string]: unknown };
+
+export type FundIngestionRunItemResult = FundIngestionRunItemResultAnyOf | null;
+
+export type FundIngestionRunItemError = string | null;
+
+export type FundIngestionRunItemStartedAt = string | null;
+
+export type FundIngestionRunItemFinishedAt = string | null;
+
+export interface FundIngestionRunItem {
+  id: number;
+  fund_id: string;
+  share_class_id?: FundIngestionRunItemShareClassId;
+  symbol?: FundIngestionRunItemSymbol;
+  status: FundIngestionRunItemStatus;
+  attempts: number;
+  result?: FundIngestionRunItemResult;
+  error?: FundIngestionRunItemError;
+  started_at?: FundIngestionRunItemStartedAt;
+  finished_at?: FundIngestionRunItemFinishedAt;
+}
+
+export interface FundIngestionItemsPage {
+  items: FundIngestionRunItem[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface FundIngestionItemsEnvelope {
+  data: FundIngestionItemsPage;
+  meta: ResponseMeta;
+  error: null;
+}
+
+export interface FundIngestionHistoryPage {
+  items: FundIngestionTask[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface FundIngestionHistoryEnvelope {
+  data: FundIngestionHistoryPage;
+  meta: ResponseMeta;
+  error: null;
 }
 
 export type FundIngestionRequestDataset =
@@ -240,6 +422,14 @@ export type FundIngestionTaskSuccessCount = number | null;
 
 export type FundIngestionTaskFailureCount = number | null;
 
+export type FundIngestionTaskSkippedCount = number | null;
+
+export type FundIngestionTaskCancelledCount = number | null;
+
+export type FundIngestionTaskScopeType = "SINGLE" | "SELECTED" | "ALL" | null;
+
+export type FundIngestionTaskParentOperationId = string | null;
+
 export type FundIngestionTaskStartedAt = string | null;
 
 export type FundIngestionTaskFinishedAt = string | null;
@@ -258,6 +448,10 @@ export interface FundIngestionTask {
   requested_count: number;
   success_count?: FundIngestionTaskSuccessCount;
   failure_count?: FundIngestionTaskFailureCount;
+  skipped_count?: FundIngestionTaskSkippedCount;
+  cancelled_count?: FundIngestionTaskCancelledCount;
+  scope_type?: FundIngestionTaskScopeType;
+  parent_operation_id?: FundIngestionTaskParentOperationId;
   created_at: string;
   started_at?: FundIngestionTaskStartedAt;
   finished_at?: FundIngestionTaskFinishedAt;
@@ -2357,6 +2551,78 @@ export type ListFundIngestionsParams = {
    */
   limit?: number;
 };
+
+export type ListFundIngestionHistoryParams = {
+  /**
+   * @minimum 1
+   */
+  page?: PageParameter;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  page_size?: PageSizeParameter;
+  status?: ListFundIngestionHistoryStatus;
+  dataset?: ListFundIngestionHistoryDataset;
+  scope_type?: ListFundIngestionHistoryScopeType;
+};
+
+export type ListFundIngestionHistoryStatus =
+  (typeof ListFundIngestionHistoryStatus)[keyof typeof ListFundIngestionHistoryStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundIngestionHistoryStatus = {
+  RUNNING: "RUNNING",
+  COMPLETED: "COMPLETED",
+  BLOCKED: "BLOCKED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type ListFundIngestionHistoryDataset =
+  (typeof ListFundIngestionHistoryDataset)[keyof typeof ListFundIngestionHistoryDataset];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundIngestionHistoryDataset = {
+  BASIC_INFO: "BASIC_INFO",
+  NAV: "NAV",
+} as const;
+
+export type ListFundIngestionHistoryScopeType =
+  (typeof ListFundIngestionHistoryScopeType)[keyof typeof ListFundIngestionHistoryScopeType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundIngestionHistoryScopeType = {
+  SINGLE: "SINGLE",
+  SELECTED: "SELECTED",
+  ALL: "ALL",
+} as const;
+
+export type ListFundIngestionItemsParams = {
+  /**
+   * @minimum 1
+   */
+  page?: PageParameter;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  page_size?: PageSizeParameter;
+  status?: ListFundIngestionItemsStatus;
+};
+
+export type ListFundIngestionItemsStatus =
+  (typeof ListFundIngestionItemsStatus)[keyof typeof ListFundIngestionItemsStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundIngestionItemsStatus = {
+  PENDING: "PENDING",
+  RUNNING: "RUNNING",
+  SUCCESS: "SUCCESS",
+  FAILED: "FAILED",
+  SKIPPED: "SKIPPED",
+  CANCELLED: "CANCELLED",
+} as const;
 
 export type GetFundBasicInfoHistoryParams = {
   as_of_date?: AsOfDateParameter;

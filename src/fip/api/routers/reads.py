@@ -83,6 +83,7 @@ def get_session(request: Request) -> dict[str, Any]:
                 "can_review_decisions": principal.can_review_decisions,
                 "can_review_classifications": principal.can_review_classifications,
                 "can_manage_data_ingestion": principal.can_manage_data_ingestion,
+                "can_manage_full_universe_ingestion": principal.can_manage_full_universe_ingestion,
             },
         },
         request_id=_request_id(request),

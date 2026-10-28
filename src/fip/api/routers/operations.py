@@ -30,6 +30,8 @@ def get_operation(
     principal: Principal = Depends(get_principal),
 ) -> dict[str, object]:
     session: Session | None = None
+    operation_total: int | None = None
+    operation_unit = "operation"
     if getattr(request.app.state, "persistent_operations", False):
         session = Session(request.app.state.api_engine, future=True)
         try:
@@ -41,6 +43,16 @@ def get_operation(
                 job = session.execute(
                     select(CalculationJob).where(CalculationJob.execution_id == operation_id)
                 ).scalar_one_or_none()
+                if job is not None and (job.job_payload or {}).get("scoped_items"):
+                    total = (job.result_payload or {}).get("requested_count")
+                    operation_total = total if isinstance(total, int) else None
+                    operation_unit = "items"
+                if (
+                    job is not None
+                    and (job.job_payload or {}).get("scope_type") == "ALL"
+                    and not principal.can_manage_full_universe_ingestion
+                ):
+                    raise ForbiddenError()
                 if (
                     job is not None
                     and not principal.can_manage_data_ingestion
@@ -58,8 +70,8 @@ def get_operation(
         "status": record.status,
         "progress": {
             "completed": getattr(record, "progress", 0),
-            "total": None,
-            "unit": "operation",
+            "total": operation_total,
+            "unit": operation_unit,
         },
         "result_ref": getattr(record, "result_ref", None),
         "failure": (

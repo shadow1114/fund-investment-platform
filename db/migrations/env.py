@@ -21,6 +21,7 @@ from fip.platform.jobs import models as jobs_models  # noqa: F401 — platform �
 from fip.services.data_service.models import (
     benchmark,  # noqa: F401 — services 层
     fund,  # noqa: F401 — services 层
+    fund_ingestion,  # noqa: F401 — services 层
     governance,  # noqa: F401 — services 层
     market,  # noqa: F401 — services 层
     raw,  # noqa: F401 — services 层

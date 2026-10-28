@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Generic, Literal, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 from fip.services.data_service.classification.models import ClassificationSnapshot
 
@@ -106,6 +106,94 @@ class OperationFailure(StrictModel):
     message: str
 
 
+class FundIngestionFilters(StrictModel):
+    fund_name: str | None = None
+    fund_type: list[str] | None = None
+    lifecycle_status: list[str] | None = None
+    investment_eligibility: list[str] | None = None
+    asset_class: str | None = None
+    strategy: str | None = None
+    geography: str | None = None
+    product_structure: str | None = None
+    market_attributes: str | None = None
+    classification_status: str | None = None
+
+
+class SingleFundScope(StrictModel):
+    type: Literal["SINGLE"]
+    fund_id: str = Field(min_length=1)
+
+
+class SelectedFundsScope(StrictModel):
+    type: Literal["SELECTED"]
+    fund_ids: list[str] = Field(min_length=2, max_length=100)
+
+    @field_validator("fund_ids")
+    @classmethod
+    def unique_fund_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value) or any(not item for item in value):
+            raise ValueError("fund IDs must be nonempty and unique")
+        return value
+
+
+class AllFundsScope(StrictModel):
+    type: Literal["ALL"]
+    filters: FundIngestionFilters | None = None
+
+
+FundIngestionScope = Annotated[
+    SingleFundScope | SelectedFundsScope | AllFundsScope, Field(discriminator="type")
+]
+
+
+class FundIngestionPreviewRequest(StrictModel):
+    dataset: Literal["BASIC_INFO", "NAV"]
+    scope: FundIngestionScope
+
+
+class FundIngestionPreviewModel(StrictModel):
+    preview_id: str
+    dataset: Literal["BASIC_INFO", "NAV"]
+    scope_type: Literal["SINGLE", "SELECTED", "ALL"]
+    fund_count: int
+    supported_fund_count: int
+    unavailable_mapping_count: int
+    subject_count: int
+    source: str
+    expires_at: datetime
+
+
+class FundIngestionJobRequest(StrictModel):
+    preview_id: str
+
+
+class FundIngestionItemModel(StrictModel):
+    id: int
+    fund_id: str
+    share_class_id: int | None
+    symbol: str | None
+    status: Literal["PENDING", "RUNNING", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"]
+    attempts: int
+    result: dict[str, Any] | None
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class FundIngestionItemsPage(StrictModel):
+    items: list[FundIngestionItemModel]
+    page: int
+    page_size: int
+    total: int
+
+
+class FundIngestionHistoryPage(StrictModel):
+    items: list[FundIngestionTaskModel]
+    page: int
+    page_size: int
+    total: int
+
+
 class FundIngestionSubmissionModel(StrictModel):
     operation_id: str
     fund_id: str
@@ -126,6 +214,10 @@ class FundIngestionTaskModel(StrictModel):
     requested_count: int
     success_count: int | None = None
     failure_count: int | None = None
+    skipped_count: int | None = None
+    cancelled_count: int | None = None
+    scope_type: Literal["SINGLE", "SELECTED", "ALL"] | None = None
+    parent_operation_id: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None

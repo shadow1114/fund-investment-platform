@@ -4,6 +4,12 @@ from __future__ import annotations
 # operation responses use their existing shared envelopes and are intentionally
 # excluded from this domain registry.
 RESPONSE_COMPONENT_REGISTRY: dict[str, str] = {
+    "previewFundIngestion": "FundIngestionPreviewEnvelope",
+    "submitScopedFundIngestion": "FundIngestionSubmissionEnvelope",
+    "listFundIngestionHistory": "FundIngestionHistoryEnvelope",
+    "listFundIngestionItems": "FundIngestionItemsEnvelope",
+    "cancelFundIngestion": "FundIngestionEnvelope",
+    "retryFundIngestionFailures": "FundIngestionSubmissionEnvelope",
     "submitFundIngestion": "FundIngestionSubmissionEnvelope",
     "submitFundIngestionBatch": "FundIngestionSubmissionEnvelope",
     "listFundIngestions": "FundIngestionListEnvelope",

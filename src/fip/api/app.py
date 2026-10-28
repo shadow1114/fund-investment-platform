@@ -33,6 +33,9 @@ from fip.api.schemas import (
     DecisionReviewOutcomeModel,
     EvaluationPayloadModel,
     FundBasicInfoHistoryModel,
+    FundIngestionHistoryPage,
+    FundIngestionItemsPage,
+    FundIngestionPreviewModel,
     FundIngestionSubmissionModel,
     FundIngestionTaskModel,
     FundListPayloadModel,
@@ -190,6 +193,12 @@ def create_app(
     if strict_contracts:
         models: dict[str, object] = {
             "getSession": SessionPayloadModel,
+            "previewFundIngestion": FundIngestionPreviewModel,
+            "submitScopedFundIngestion": FundIngestionSubmissionModel,
+            "listFundIngestionHistory": FundIngestionHistoryPage,
+            "listFundIngestionItems": FundIngestionItemsPage,
+            "cancelFundIngestion": FundIngestionTaskModel,
+            "retryFundIngestionFailures": FundIngestionSubmissionModel,
             "submitFundIngestion": FundIngestionSubmissionModel,
             "submitFundIngestionBatch": FundIngestionSubmissionModel,
             "listFundIngestions": list[FundIngestionTaskModel],

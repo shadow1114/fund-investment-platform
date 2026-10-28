@@ -42,3 +42,8 @@ def test_development_headers_create_principal():
         _request({"X-User-ID": "USR-1", "X-Roles": "reviewer"}, environment="development")
     )
     assert principal == Principal("USR-1", ("reviewer",), True, True)
+
+
+def test_full_universe_capability_defaults_to_false_even_for_development_admin():
+    principal = resolve_principal(_request({"X-Roles": "admin"}, environment="development"))
+    assert principal.can_manage_full_universe_ingestion is False

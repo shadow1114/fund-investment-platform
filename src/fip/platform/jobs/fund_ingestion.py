@@ -32,6 +32,8 @@ def handle_fund_ingestion(context: JobContext) -> JobOutcome:
     of module-level dependencies on the services layer.
     """
     payload = context.job.job_payload or {}
+    if payload.get("scoped_items"):
+        return _handle_scoped_ingestion(context)
     dataset = payload.get("dataset")
     actor = payload.get("actor")
     subjects = payload.get("subjects")
@@ -154,3 +156,123 @@ def handle_fund_ingestion(context: JobContext) -> JobOutcome:
         )
         return JobOutcome.failed("INGESTION_FAILED", first_error)
     return JobOutcome.completed(result_ref=f"/api/v1/ingestions/{context.job.execution_id}")
+
+
+def _run_scoped_chunk(context: JobContext, subjects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    job = context.job
+    original_payload, original_result, original_progress = (
+        job.job_payload,
+        job.result_payload,
+        job.progress,
+    )
+    try:
+        job.job_payload = {**(original_payload or {}), "scoped_items": False, "subjects": subjects}
+        handle_fund_ingestion(context)
+        result = job.result_payload or {}
+        raw_items = result.get("items", [])
+        return (
+            [item for item in raw_items if isinstance(item, dict)]
+            if isinstance(raw_items, list)
+            else []
+        )
+    finally:
+        job.job_payload, job.result_payload, job.progress = (
+            original_payload,
+            original_result,
+            original_progress,
+        )
+
+
+def _handle_scoped_ingestion(context: JobContext) -> JobOutcome:
+    from sqlalchemy import func, select, update
+
+    from fip.services.data_service.models.fund_ingestion import FundIngestionRunItem
+
+    job = context.job
+    session = context.session
+    items = list(
+        session.scalars(
+            select(FundIngestionRunItem)
+            .where(
+                FundIngestionRunItem.operation_id == job.execution_id,
+                FundIngestionRunItem.status == "PENDING",
+            )
+            .order_by(FundIngestionRunItem.id)
+            .limit(50)
+        )
+    )
+    if (job.job_payload or {}).get("cancel_requested"):
+        session.execute(
+            update(FundIngestionRunItem)
+            .where(
+                FundIngestionRunItem.operation_id == job.execution_id,
+                FundIngestionRunItem.status == "PENDING",
+            )
+            .values(status="CANCELLED", finished_at=context.now)
+        )
+        items = []
+    if items:
+        subjects = [
+            {
+                "fund_id": item.fund_id,
+                "public_fund_id": item.public_fund_id,
+                "share_class_id": item.share_class_id,
+                "symbol": item.symbol,
+            }
+            for item in items
+        ]
+        results = _run_scoped_chunk(context, subjects)
+        if len(results) != len(items):
+            raise RuntimeError("Ingestion chunk returned an unexpected number of results")
+        for item, result in zip(items, results, strict=True):
+            item.attempts += 1
+            item.started_at = context.now
+            item.finished_at = context.now
+            item.status = str(result.get("status", "FAILED"))
+            if _is_transient_result(result):
+                result["error_code"] = "PROVIDER_TEMPORARY_FAILURE"
+                result["retryable"] = True
+            item.result = result
+            item.error = str(result["error"]) if result.get("error") else None
+    session.flush()
+    counts: dict[str, int] = {
+        status: count
+        for status, count in session.execute(
+            select(FundIngestionRunItem.status, func.count())
+            .where(FundIngestionRunItem.operation_id == job.execution_id)
+            .group_by(FundIngestionRunItem.status)
+        ).all()
+    }
+    successes = counts.get("SUCCESS", 0)
+    failures = counts.get("FAILED", 0)
+    skipped = counts.get("SKIPPED", 0)
+    cancelled = counts.get("CANCELLED", 0)
+    job.progress = successes + failures + skipped + cancelled
+    job.result_payload = {
+        "dataset": (job.job_payload or {}).get("dataset"),
+        "requested_count": sum(counts.values()),
+        "success_count": successes,
+        "failure_count": failures,
+        "skipped_count": skipped,
+        "cancelled_count": cancelled,
+    }
+    if counts.get("PENDING", 0):
+        return JobOutcome.running()
+    if (job.job_payload or {}).get("cancel_requested"):
+        return JobOutcome("CANCELLED", result_ref=job.result_ref)
+    summary = "FAILED" if not successes else "PARTIAL_SUCCESS" if failures or skipped else "SUCCESS"
+    job.result_payload = {**job.result_payload, "task_status": summary}
+    if summary == "FAILED":
+        return JobOutcome.failed("INGESTION_FAILED", "No ingestion items succeeded")
+    return JobOutcome.completed(result_ref=job.result_ref)
+
+
+def _is_transient_result(result: dict[str, Any]) -> bool:
+    error = result.get("error")
+    return (
+        result.get("status") == "FAILED"
+        and isinstance(error, str)
+        and error.startswith(
+            ("TimeoutError:", "Timeout:", "ReadTimeout:", "ConnectTimeout:", "ConnectionError:")
+        )
+    )

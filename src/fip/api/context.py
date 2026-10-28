@@ -12,6 +12,7 @@ class Principal:
     can_review_decisions: bool
     can_review_classifications: bool = False
     can_manage_data_ingestion: bool = False
+    can_manage_full_universe_ingestion: bool = False
 
 
 def principal_from_request(request: Request) -> Principal:

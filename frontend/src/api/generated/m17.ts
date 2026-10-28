@@ -21,7 +21,12 @@ import type {
   FundBasicInfoHistoryListResponseResponse,
   FundEvaluationResponseResponse,
   FundIngestionBatchRequest,
+  FundIngestionHistoryEnvelope,
+  FundIngestionItemsEnvelope,
+  FundIngestionJobRequest,
   FundIngestionListResponseResponse,
+  FundIngestionPreviewEnvelope,
+  FundIngestionPreviewRequest,
   FundIngestionRequest,
   FundIngestionResponseResponse,
   FundIngestionSubmissionResponseResponse,
@@ -37,6 +42,8 @@ import type {
   GetFundParams,
   GetFundScoresParams,
   ListClassificationReviewsParams,
+  ListFundIngestionHistoryParams,
+  ListFundIngestionItemsParams,
   ListFundIngestionsParams,
   ListFundsParams,
   ListPortfoliosParams,
@@ -412,6 +419,60 @@ export const listFundIngestions = async (
   );
 };
 
+export type listFundIngestionHistoryResponse200 = {
+  data: FundIngestionHistoryEnvelope;
+  status: 200;
+};
+
+export type listFundIngestionHistoryResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listFundIngestionHistoryResponseSuccess =
+  listFundIngestionHistoryResponse200 & {
+    headers: Headers;
+  };
+export type listFundIngestionHistoryResponseError =
+  listFundIngestionHistoryResponseDefault & {
+    headers: Headers;
+  };
+
+export type listFundIngestionHistoryResponse =
+  | listFundIngestionHistoryResponseSuccess
+  | listFundIngestionHistoryResponseError;
+
+export const getListFundIngestionHistoryUrl = (
+  params?: ListFundIngestionHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/fund-ingestions?${stringifiedParams}`
+    : `/api/v1/fund-ingestions`;
+};
+
+export const listFundIngestionHistory = async (
+  params?: ListFundIngestionHistoryParams,
+  options?: RequestInit,
+): Promise<listFundIngestionHistoryResponse> => {
+  return apiFetch<listFundIngestionHistoryResponse>(
+    getListFundIngestionHistoryUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
 export type submitFundIngestionBatchResponse202 = {
   data: FundIngestionSubmissionResponseResponse;
   status: 202;
@@ -450,6 +511,220 @@ export const submitFundIngestionBatch = async (
       method: "POST",
       headers: { "Content-Type": "application/json", ...options?.headers },
       body: JSON.stringify(fundIngestionBatchRequest),
+    },
+  );
+};
+
+export type previewFundIngestionResponse200 = {
+  data: FundIngestionPreviewEnvelope;
+  status: 200;
+};
+
+export type previewFundIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type previewFundIngestionResponseSuccess =
+  previewFundIngestionResponse200 & {
+    headers: Headers;
+  };
+export type previewFundIngestionResponseError =
+  previewFundIngestionResponseDefault & {
+    headers: Headers;
+  };
+
+export type previewFundIngestionResponse =
+  previewFundIngestionResponseSuccess | previewFundIngestionResponseError;
+
+export const getPreviewFundIngestionUrl = () => {
+  return `/api/v1/fund-ingestion-previews`;
+};
+
+export const previewFundIngestion = async (
+  fundIngestionPreviewRequest: FundIngestionPreviewRequest,
+  options?: RequestInit,
+): Promise<previewFundIngestionResponse> => {
+  return apiFetch<previewFundIngestionResponse>(getPreviewFundIngestionUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(fundIngestionPreviewRequest),
+  });
+};
+
+export type submitScopedFundIngestionResponse202 = {
+  data: FundIngestionSubmissionResponseResponse;
+  status: 202;
+};
+
+export type submitScopedFundIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type submitScopedFundIngestionResponseSuccess =
+  submitScopedFundIngestionResponse202 & {
+    headers: Headers;
+  };
+export type submitScopedFundIngestionResponseError =
+  submitScopedFundIngestionResponseDefault & {
+    headers: Headers;
+  };
+
+export type submitScopedFundIngestionResponse =
+  | submitScopedFundIngestionResponseSuccess
+  | submitScopedFundIngestionResponseError;
+
+export const getSubmitScopedFundIngestionUrl = () => {
+  return `/api/v1/fund-ingestion-jobs`;
+};
+
+export const submitScopedFundIngestion = async (
+  fundIngestionJobRequest: FundIngestionJobRequest,
+  options?: RequestInit,
+): Promise<submitScopedFundIngestionResponse> => {
+  return apiFetch<submitScopedFundIngestionResponse>(
+    getSubmitScopedFundIngestionUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(fundIngestionJobRequest),
+    },
+  );
+};
+
+export type listFundIngestionItemsResponse200 = {
+  data: FundIngestionItemsEnvelope;
+  status: 200;
+};
+
+export type listFundIngestionItemsResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listFundIngestionItemsResponseSuccess =
+  listFundIngestionItemsResponse200 & {
+    headers: Headers;
+  };
+export type listFundIngestionItemsResponseError =
+  listFundIngestionItemsResponseDefault & {
+    headers: Headers;
+  };
+
+export type listFundIngestionItemsResponse =
+  listFundIngestionItemsResponseSuccess | listFundIngestionItemsResponseError;
+
+export const getListFundIngestionItemsUrl = (
+  operationId: string,
+  params?: ListFundIngestionItemsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/ingestions/${operationId}/items?${stringifiedParams}`
+    : `/api/v1/ingestions/${operationId}/items`;
+};
+
+export const listFundIngestionItems = async (
+  operationId: string,
+  params?: ListFundIngestionItemsParams,
+  options?: RequestInit,
+): Promise<listFundIngestionItemsResponse> => {
+  return apiFetch<listFundIngestionItemsResponse>(
+    getListFundIngestionItemsUrl(operationId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export type cancelFundIngestionResponse202 = {
+  data: FundIngestionResponseResponse;
+  status: 202;
+};
+
+export type cancelFundIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type cancelFundIngestionResponseSuccess =
+  cancelFundIngestionResponse202 & {
+    headers: Headers;
+  };
+export type cancelFundIngestionResponseError =
+  cancelFundIngestionResponseDefault & {
+    headers: Headers;
+  };
+
+export type cancelFundIngestionResponse =
+  cancelFundIngestionResponseSuccess | cancelFundIngestionResponseError;
+
+export const getCancelFundIngestionUrl = (operationId: string) => {
+  return `/api/v1/ingestions/${operationId}/cancel`;
+};
+
+export const cancelFundIngestion = async (
+  operationId: string,
+  options?: RequestInit,
+): Promise<cancelFundIngestionResponse> => {
+  return apiFetch<cancelFundIngestionResponse>(
+    getCancelFundIngestionUrl(operationId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export type retryFundIngestionFailuresResponse202 = {
+  data: FundIngestionSubmissionResponseResponse;
+  status: 202;
+};
+
+export type retryFundIngestionFailuresResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type retryFundIngestionFailuresResponseSuccess =
+  retryFundIngestionFailuresResponse202 & {
+    headers: Headers;
+  };
+export type retryFundIngestionFailuresResponseError =
+  retryFundIngestionFailuresResponseDefault & {
+    headers: Headers;
+  };
+
+export type retryFundIngestionFailuresResponse =
+  | retryFundIngestionFailuresResponseSuccess
+  | retryFundIngestionFailuresResponseError;
+
+export const getRetryFundIngestionFailuresUrl = (operationId: string) => {
+  return `/api/v1/ingestions/${operationId}/retry-failed`;
+};
+
+export const retryFundIngestionFailures = async (
+  operationId: string,
+  options?: RequestInit,
+): Promise<retryFundIngestionFailuresResponse> => {
+  return apiFetch<retryFundIngestionFailuresResponse>(
+    getRetryFundIngestionFailuresUrl(operationId),
+    {
+      ...options,
+      method: "POST",
     },
   );
 };

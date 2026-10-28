@@ -26,3 +26,9 @@ def test_review_requires_reviewer_role() -> None:
             json={"action": "APPROVED", "reason": "validated"},
         )
     assert response.status_code == 403
+
+
+def test_session_exposes_full_universe_capability_as_default_false() -> None:
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/session", headers={"X-Roles": "admin"})
+    assert response.json()["data"]["capabilities"]["can_manage_full_universe_ingestion"] is False
