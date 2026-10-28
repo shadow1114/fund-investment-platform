@@ -377,15 +377,20 @@ class ClassificationService:
         if product is None:
             raise LookupError(f"fund {fund_id} not found")
 
-    def latest(self, fund_id: int) -> FundClassificationRevision | None:
+    def latest(
+        self, fund_id: int, *, available_at: dt.datetime | None = None
+    ) -> FundClassificationRevision | None:
+        filters = [
+            FundClassificationRevision.fund_id == fund_id,
+            FundClassificationRevision.scheme == SCHEME,
+        ]
+        order = [FundClassificationRevision.version.desc()]
+        if available_at is not None:
+            if available_at.utcoffset() is None:
+                raise ValueError("available_at must include timezone")
+            filters.append(FundClassificationRevision.available_at <= available_at)
         return self.session.scalar(
-            select(FundClassificationRevision)
-            .where(
-                FundClassificationRevision.fund_id == fund_id,
-                FundClassificationRevision.scheme == SCHEME,
-            )
-            .order_by(FundClassificationRevision.version.desc())
-            .limit(1)
+            select(FundClassificationRevision).where(*filters).order_by(*order).limit(1)
         )
 
     def intervals(self, revision_id: int) -> list[StoredInterval]:

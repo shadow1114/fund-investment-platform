@@ -227,9 +227,17 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
 
 
 def _latest_classification_interval(
-    service: ClassificationService, fund_id: int, target: dt.date
+    service: ClassificationService,
+    fund_id: int,
+    target: dt.date,
+    *,
+    cutoff: dt.datetime | None = None,
 ) -> tuple[FundClassificationRevision | None, StoredInterval | None]:
-    revision = service.latest(fund_id)
+    revision = (
+        service.latest(fund_id, available_at=cutoff)
+        if cutoff is not None
+        else service.latest(fund_id)
+    )
     if revision is None:
         return None, None
     intervals = service.intervals(revision.id)
@@ -255,7 +263,14 @@ def _active_review_cases(
     return selected
 
 
-def _saved_v3_source_evidence(session: Session, symbol: str) -> tuple[Evidence, ...]:
+def _classification_replay_cutoff() -> dt.datetime:
+    """Current-knowledge cutoff for replay commands without an explicit as-of date."""
+    return dt.datetime.now(dt.UTC)
+
+
+def _saved_v3_source_evidence(
+    session: Session, symbol: str, *, cutoff: dt.datetime
+) -> tuple[Evidence, ...]:
     """Replay saved source payloads only; this helper never constructs an adapter."""
 
     from fip.services.data_service.adapters.akshare.classification_sources import (
@@ -272,7 +287,11 @@ def _saved_v3_source_evidence(session: Session, symbol: str) -> tuple[Evidence, 
         select(RawPayload)
         .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
         .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
-        .where(DataProvider.provider_code == "AKSHARE", DataProviderDataset.dataset_code.in_(codes))
+        .where(
+            DataProvider.provider_code == "AKSHARE",
+            DataProviderDataset.dataset_code.in_(codes),
+            RawPayload.ingested_at <= cutoff,
+        )
         .order_by(RawPayload.ingested_at.desc(), RawPayload.id.desc())
     )
     latest: dict[str, RawPayload] = {}
@@ -315,7 +334,7 @@ def _saved_v3_source_evidence(session: Session, symbol: str) -> tuple[Evidence, 
             payload_ref=f"raw_payload:{detail.id}",
         )
         evidence.extend(parsed.evidence)
-    return tuple(evidence)
+    return tuple(item for item in evidence if item.classified_at <= cutoff)
 
 
 def _classify_saved_v3(
@@ -343,14 +362,18 @@ def _classify_saved_v3(
         source_record_from_payload(payload, dataset="fund_list"),
         payload_ref=f"raw_payload:{payload.id}",
     )
-    evidence = (*listed.get(symbol, ()), *_saved_v3_source_evidence(session, symbol))
+    cutoff = _classification_replay_cutoff()
+    evidence = (
+        *(item for item in listed.get(symbol, ()) if item.classified_at <= cutoff),
+        *_saved_v3_source_evidence(session, symbol, cutoff=cutoff),
+    )
     service = ClassificationService(session)
-    target = evidence_effective_date(payload.ingested_at.date(), evidence)
-    previous, interval = _latest_classification_interval(service, fund_id, target)
+    target = max(cutoff.date(), evidence_effective_date(cutoff.date(), evidence))
+    previous, interval = _latest_classification_interval(service, fund_id, target, cutoff=cutoff)
     baseline = interval[2] if interval else None
     revision_id = previous.id if previous else None
     merged = merge_snapshot_observations(baseline, evidence)
-    available_at = max((item.classified_at for item in merged), default=payload.ingested_at)
+    available_at = max(cutoff, *(item.classified_at for item in merged))
     proposed = classify_v3_preview(
         merged,
         available_at=available_at,
@@ -362,6 +385,12 @@ def _classify_saved_v3(
     )
     action = preview.action
     if not dry_run and action != "NO_CHANGE":
+        latest = service.latest(fund_id)
+        if latest is not None and latest.available_at > cutoff and latest.id != revision_id:
+            raise RuntimeError(
+                "classification replay cannot write while a revision newer than its "
+                "current-UTC cutoff exists"
+            )
         service.refresh_v3(
             fund_id,
             evidence,
@@ -369,7 +398,6 @@ def _classify_saved_v3(
             actor=actor,
             reason="replay saved classification payloads",
             valid_from=target,
-            ingested_at=payload.ingested_at,
         )
     return preview.snapshot, action, preview.unrecognized_reasons
 

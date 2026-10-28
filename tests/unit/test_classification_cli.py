@@ -179,7 +179,7 @@ def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeyp
         provider_available_at=None,
     )
     session = MemorySession()
-    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args: ())
+    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: ())
     before = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
 
     snapshot, action, reasons = cli._classify_saved_v3(
@@ -229,7 +229,9 @@ def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
         ),
     )
     session = MemorySession()
-    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args: (later,))
+    cutoff = dt.datetime(2026, 10, 31, tzinfo=dt.UTC)
+    monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
+    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: (later,))
     captured = {}
 
     def refresh(_self, _fund_id, _evidence, **kwargs):
@@ -238,4 +240,95 @@ def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
 
     monkeypatch.setattr(ClassificationService, "refresh_v3", refresh)
     cli._classify_saved_v3(session, 1, "000001", payload, actor="operator", dry_run=False)
-    assert captured["valid_from"] == dt.date(2026, 10, 30)
+    assert captured["valid_from"] == dt.date(2026, 10, 31)
+    assert captured["available_at"] == cutoff
+    assert "ingested_at" not in captured
+
+
+def test_replay_selects_latest_revision_visible_at_current_cutoff(monkeypatch):
+    import datetime as dt
+
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.models.fund import FundClassificationRevision
+    from tests.unit.test_classification_revision_v3 import MemorySession
+
+    cutoff = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
+
+    def revision(row_id, version, available_at):
+        return FundClassificationRevision(
+            id=row_id,
+            fund_id=1,
+            scheme="FIP_CLASSIFICATION_V1",
+            version=version,
+            rule_version="3.0.0",
+            enum_version="3.0.0",
+            content_hash="0" * 64,
+            classified_at=available_at,
+            available_at=available_at,
+            availability_quality="INFERRED",
+            published_at=None,
+            provider_available_at=None,
+            ingested_at=available_at,
+            reason="fixture",
+            actor="test",
+            reviewed=False,
+        )
+
+    visible = revision(10, 2, cutoff - dt.timedelta(days=1))
+    future = revision(11, 3, cutoff + dt.timedelta(days=1))
+    session = MemorySession()
+    session.rows.extend((visible, future))
+    seen = []
+    monkeypatch.setattr(
+        ClassificationService, "intervals", lambda _self, rid: seen.append(rid) or []
+    )
+
+    selected, interval = cli._latest_classification_interval(
+        ClassificationService(session), 1, cutoff.date(), cutoff=cutoff
+    )
+
+    assert selected is visible
+    assert interval is None
+    assert seen == [visible.id]
+
+
+def test_non_dry_run_fails_safely_when_newer_revision_is_after_replay_cutoff(monkeypatch):
+    import datetime as dt
+
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.models.raw import RawPayload
+    from tests.unit.test_classification_revision_v3 import MemorySession
+
+    cutoff = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
+    future = SimpleNamespace(id=99, available_at=cutoff + dt.timedelta(days=1))
+    monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
+    monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: ())
+
+    frame = pd.DataFrame(
+        [{"基金代码": "000001", "基金简称": "测试基金", "基金类型": "混合型-偏股"}]
+    )
+    payload = RawPayload(
+        id=17,
+        dataset_id=2,
+        payload=frame.to_parquet(index=False),
+        row_count=1,
+        ingested_at=cutoff - dt.timedelta(days=1),
+        request_params={},
+        published_at=None,
+        provider_available_at=None,
+    )
+
+    def latest(_self, _fund_id, *, available_at=None):
+        return None if available_at is not None else future
+
+    monkeypatch.setattr(ClassificationService, "latest", latest)
+    monkeypatch.setattr(
+        ClassificationService,
+        "refresh_v3",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unsafe write")),
+    )
+
+    with pytest.raises(RuntimeError, match="newer than its current-UTC cutoff"):
+        cli._classify_saved_v3(
+            MemorySession(), 1, "000001", payload, actor="operator", dry_run=False
+        )
