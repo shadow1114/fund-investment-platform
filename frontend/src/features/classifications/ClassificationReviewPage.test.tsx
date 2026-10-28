@@ -268,3 +268,76 @@ it("reviews v1 to v3 with both active decisions, changed tag, version acceptance
     tag_decisions: { QUANTITATIVE: { action: "CONFIRM" } },
   });
 });
+
+it("does not require a decision for an unchanged tag in a same-version v3 review", async () => {
+  const user = userEvent.setup();
+  reviewItem = {
+    ...item,
+    active_scope: ["asset_class", "strategy"],
+    historical_scope: ["geography", "product_structure", "market_attributes"],
+    evaluation_state: "EVALUATED",
+    baseline: v3Snapshot,
+    incoming: v3Snapshot,
+  };
+  server.use(
+    http.post(
+      "/api/v1/classification-reviews/1/review",
+      async ({ request }) => {
+        posts++;
+        submitted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          data: { revision_id: 13, version: 2, case_id: 1 },
+          meta: {},
+          error: null,
+        });
+      },
+    ),
+  );
+  show();
+  await screen.findByText("新到资料（规则 3.0.0 · 枚举 3.0.0）");
+  expect(screen.queryByLabelText("QUANTITATIVE 标签决定")).toBeNull();
+  expect(screen.queryByLabelText(/接受规则与枚举版本/)).toBeNull();
+
+  await user.selectOptions(screen.getByLabelText("资产类别决定值"), "EQUITY");
+  await user.selectOptions(
+    screen.getByLabelText("投资策略决定值"),
+    "ENHANCED_INDEX",
+  );
+  await user.type(screen.getByLabelText("复核理由"), "确认两个活跃维度");
+  await user.type(screen.getByLabelText("证据原文"), "产品资料支持以上分类");
+  await user.type(screen.getByLabelText("资料定位"), "产品资料第3页");
+  await user.click(screen.getByRole("button", { name: "提交复核" }));
+
+  await screen.findByText("复核已保存，请选择下一条待复核记录。");
+  expect(submitted).toMatchObject({
+    decisions: {
+      asset_class: { value: "EQUITY" },
+      strategy: { value: "ENHANCED_INDEX" },
+    },
+    tag_decisions: {},
+  });
+  expect(submitted).not.toHaveProperty("accept_incoming_version");
+});
+
+it("keeps a historical paused-dimension case read-only", async () => {
+  reviewItem = {
+    ...item,
+    active_scope: [],
+    historical_scope: ["geography"],
+    evaluation_state: "PAUSED",
+    details: { dimension: "geography", source_dimensions: ["geography"] },
+  };
+  show();
+
+  await screen.findByText(
+    "当前复核范围：无。只读历史维度：投资地域 · 评估状态 PAUSED",
+  );
+  expect(
+    screen.getByText(
+      "此案件只涉及暂停维度的历史分类，当前版本只读，不接受分类决定。",
+    ),
+  ).toBeVisible();
+  expect(screen.queryByRole("form", { name: "分类复核" })).toBeNull();
+  expect(screen.queryByLabelText("决定值")).toBeNull();
+  expect(screen.queryByLabelText("投资地域决定值")).toBeNull();
+});

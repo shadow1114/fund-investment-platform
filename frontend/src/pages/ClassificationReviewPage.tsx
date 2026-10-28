@@ -10,6 +10,7 @@ import {
 } from "../api/generated/m17";
 import type {
   Evidence,
+  ClassificationSnapshot,
   ReviewDecisionAction,
   ReviewSubmission,
   StrategyTagDecisionAction,
@@ -19,9 +20,18 @@ import { ErrorState } from "../components/ErrorState";
 import {
   ClassificationView,
   activeDimensions,
-  dimensions,
   dimensionLabels,
 } from "../features/classifications/ClassificationView";
+
+const changedStrategyTags = (
+  incoming?: ClassificationSnapshot | null,
+  baseline?: ClassificationSnapshot | null,
+) =>
+  Object.keys(incoming?.strategy_tag_results ?? {}).filter(
+    (tag) =>
+      JSON.stringify(incoming?.strategy_tag_results?.[tag]) !==
+      JSON.stringify(baseline?.strategy_tag_results?.[tag]),
+  );
 
 export const ClassificationReviewPage = () => {
   const [search, setSearch] = useSearchParams();
@@ -160,8 +170,9 @@ export const ClassificationReviewPage = () => {
             },
           ]),
       );
-      const requiredTags = Object.keys(
-        incomingSnapshot?.strategy_tag_results ?? {},
+      const requiredTags = changedStrategyTags(
+        incomingSnapshot,
+        detail.data.baseline,
       );
       if (
         scope.some((name) => !activeValues[name]) ||
@@ -185,10 +196,7 @@ export const ClassificationReviewPage = () => {
       decisions: {
         [dimension]: {
           action,
-          value:
-            dimension === "geography" || dimension === "market_attributes"
-              ? values
-              : values[0] || "UNKNOWN",
+          value: values[0] || "UNKNOWN",
           evidence: [evidence],
         },
       },
@@ -205,12 +213,15 @@ export const ClassificationReviewPage = () => {
       ) ?? [])
     : [];
   const requiredTags = isV3Review
-    ? Object.keys(incoming?.strategy_tag_results ?? {}).filter(
-        (tag) =>
-          JSON.stringify(incoming?.strategy_tag_results?.[tag]) !==
-          JSON.stringify(baseline?.strategy_tag_results?.[tag]),
-      )
+    ? changedStrategyTags(incoming, baseline)
     : [];
+  const activeLegacyScope = (detail.data?.active_scope ?? []).filter((name) =>
+    activeDimensions.includes(name as (typeof activeDimensions)[number]),
+  );
+  const isReadOnlyHistoricalCase =
+    detail.data?.evaluation_state === "PAUSED" ||
+    ((detail.data?.historical_scope?.length ?? 0) > 0 &&
+      activeLegacyScope.length === 0);
   const rejectUpgrade = () => {
     if (!detail.data || !reason.trim()) return;
     mutation.mutate({
@@ -301,201 +312,201 @@ export const ClassificationReviewPage = () => {
           </details>
           {session.data?.capabilities.can_review_classifications === true &&
           detail.data.status === "PENDING" ? (
-            <form aria-label="分类复核" onSubmit={submit}>
-              {isV3Review ? (
-                <>
-                  <fieldset>
-                    <legend>本次需要确认的活跃维度</legend>
-                    {reviewScope.map((name) => {
-                      const candidates =
-                        incoming?.[name as (typeof activeDimensions)[number]]
-                          .candidates ?? [];
-                      const options = [
-                        ...new Set([
-                          ...candidates,
-                          ...(catalog.data?.dimensions[name] ?? []),
-                        ]),
-                      ];
-                      return (
-                        <label key={name}>
-                          {dimensionLabels[name]}决定值
-                          {candidates.length > 0 && (
-                            <span> · 候选：{candidates.join("、")}</span>
-                          )}
-                          <select
-                            required
-                            aria-label={`${dimensionLabels[name]}决定值`}
-                            value={activeValues[name] ?? ""}
-                            onChange={(event) =>
-                              setActiveValues((current) => ({
-                                ...current,
-                                [name]: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">请选择</option>
-                            {options.map((value) => (
-                              <option key={value} value={value}>
-                                {value}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    })}
-                  </fieldset>
-                  {requiredTags.length > 0 && (
+            isReadOnlyHistoricalCase && !isV3Review ? (
+              <p>
+                此案件只涉及暂停维度的历史分类，当前版本只读，不接受分类决定。
+              </p>
+            ) : (
+              <form aria-label="分类复核" onSubmit={submit}>
+                {isV3Review ? (
+                  <>
                     <fieldset>
-                      <legend>发生变化的策略标签决定</legend>
-                      {requiredTags.map((tag) => (
-                        <label key={tag}>
-                          {tag} 标签决定
-                          <select
-                            required
-                            aria-label={`${tag} 标签决定`}
-                            value={tagActions[tag] ?? ""}
-                            onChange={(event) =>
-                              setTagActions((current) => ({
-                                ...current,
-                                [tag]: event.target.value as
-                                  StrategyTagDecisionAction | "",
-                              }))
-                            }
-                          >
-                            <option value="">请选择</option>
-                            <option value="CONFIRM">确认标签</option>
-                            <option value="REJECT">拒绝标签</option>
-                          </select>
-                        </label>
-                      ))}
+                      <legend>本次需要确认的活跃维度</legend>
+                      {reviewScope.map((name) => {
+                        const candidates =
+                          incoming?.[name as (typeof activeDimensions)[number]]
+                            .candidates ?? [];
+                        const options = [
+                          ...new Set([
+                            ...candidates,
+                            ...(catalog.data?.dimensions[name] ?? []),
+                          ]),
+                        ];
+                        return (
+                          <label key={name}>
+                            {dimensionLabels[name]}决定值
+                            {candidates.length > 0 && (
+                              <span> · 候选：{candidates.join("、")}</span>
+                            )}
+                            <select
+                              required
+                              aria-label={`${dimensionLabels[name]}决定值`}
+                              value={activeValues[name] ?? ""}
+                              onChange={(event) =>
+                                setActiveValues((current) => ({
+                                  ...current,
+                                  [name]: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">请选择</option>
+                              {options.map((value) => (
+                                <option key={value} value={value}>
+                                  {value}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })}
                     </fieldset>
-                  )}
-                  {isV3Upgrade && (
-                    <>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={acceptVersion}
-                          onChange={(event) =>
-                            setAcceptVersion(event.target.checked)
-                          }
-                        />
-                        接受规则与枚举版本 {incoming?.rule_version} /{" "}
-                        {incoming?.enum_version}
-                      </label>
-                      <button
-                        type="button"
-                        disabled={mutation.isPending || !reason.trim()}
-                        onClick={rejectUpgrade}
+                    {requiredTags.length > 0 && (
+                      <fieldset>
+                        <legend>发生变化的策略标签决定</legend>
+                        {requiredTags.map((tag) => (
+                          <label key={tag}>
+                            {tag} 标签决定
+                            <select
+                              required
+                              aria-label={`${tag} 标签决定`}
+                              value={tagActions[tag] ?? ""}
+                              onChange={(event) =>
+                                setTagActions((current) => ({
+                                  ...current,
+                                  [tag]: event.target.value as
+                                    StrategyTagDecisionAction | "",
+                                }))
+                              }
+                            >
+                              <option value="">请选择</option>
+                              <option value="CONFIRM">确认标签</option>
+                              <option value="REJECT">拒绝标签</option>
+                            </select>
+                          </label>
+                        ))}
+                      </fieldset>
+                    )}
+                    {isV3Upgrade && (
+                      <>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={acceptVersion}
+                            onChange={(event) =>
+                              setAcceptVersion(event.target.checked)
+                            }
+                          />
+                          接受规则与枚举版本 {incoming?.rule_version} /{" "}
+                          {incoming?.enum_version}
+                        </label>
+                        <button
+                          type="button"
+                          disabled={mutation.isPending || !reason.trim()}
+                          onClick={rejectUpgrade}
+                        >
+                          拒绝升级并保留当前版本
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      复核维度
+                      <select
+                        value={dimension}
+                        onChange={(e) => {
+                          setDimension(e.target.value);
+                          setValues([]);
+                        }}
                       >
-                        拒绝升级并保留当前版本
-                      </button>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <label>
-                    复核维度
-                    <select
-                      value={dimension}
-                      onChange={(e) => {
-                        setDimension(e.target.value);
-                        setValues([]);
-                      }}
-                    >
-                      {dimensions.map((name) => (
-                        <option key={name} value={name}>
-                          {dimensionLabels[name]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    复核操作
-                    <select
-                      value={action}
-                      onChange={(e) =>
-                        setAction(e.target.value as ReviewDecisionAction)
-                      }
-                    >
-                      <option value="CONFIRM">确认候选</option>
-                      <option value="OVERRIDE">覆盖分类</option>
-                      <option value="REJECT">驳回候选（保留 UNKNOWN）</option>
-                    </select>
-                  </label>
-                  <label>
-                    决定值
-                    <select
-                      required={action !== "REJECT"}
-                      multiple={
-                        dimension === "geography" ||
-                        dimension === "market_attributes"
-                      }
-                      value={
-                        dimension === "geography" ||
-                        dimension === "market_attributes"
-                          ? values
-                          : values[0] || ""
-                      }
-                      onChange={(e) =>
-                        setValues(
-                          Array.from(e.target.selectedOptions, (o) => o.value),
-                        )
-                      }
-                    >
-                      <option value="">请选择</option>
-                      {(action === "CONFIRM" && detail.data.baseline
-                        ? detail.data.baseline[
-                            dimension as (typeof dimensions)[number]
-                          ].candidates || []
-                        : catalog.data?.dimensions[dimension]
-                      )?.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-              <label>
-                复核理由
-                <textarea
-                  required
-                  maxLength={1024}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              </label>
-              <label>
-                证据原文
-                <textarea
-                  required
-                  value={rawValue}
-                  onChange={(e) => setRawValue(e.target.value)}
-                />
-              </label>
-              <label>
-                资料定位
-                <input
-                  required
-                  value={locator}
-                  onChange={(e) => setLocator(e.target.value)}
-                />
-              </label>
-              <button
-                disabled={
-                  mutation.isPending ||
-                  (isV3Review &&
-                    (reviewScope.some((name) => !activeValues[name]) ||
-                      requiredTags.some((tag) => !tagActions[tag]))) ||
-                  (isV3Upgrade && !acceptVersion)
-                }
-              >
-                提交复核
-              </button>
-            </form>
+                        {activeDimensions.map((name) => (
+                          <option key={name} value={name}>
+                            {dimensionLabels[name]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      复核操作
+                      <select
+                        value={action}
+                        onChange={(e) =>
+                          setAction(e.target.value as ReviewDecisionAction)
+                        }
+                      >
+                        <option value="CONFIRM">确认候选</option>
+                        <option value="OVERRIDE">覆盖分类</option>
+                        <option value="REJECT">驳回候选（保留 UNKNOWN）</option>
+                      </select>
+                    </label>
+                    <label>
+                      决定值
+                      <select
+                        required={action !== "REJECT"}
+                        value={values[0] || ""}
+                        onChange={(e) =>
+                          setValues(
+                            Array.from(
+                              e.target.selectedOptions,
+                              (o) => o.value,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="">请选择</option>
+                        {(action === "CONFIRM" && detail.data.baseline
+                          ? detail.data.baseline[
+                              dimension as (typeof activeDimensions)[number]
+                            ].candidates || []
+                          : catalog.data?.dimensions[dimension]
+                        )?.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label>
+                  复核理由
+                  <textarea
+                    required
+                    maxLength={1024}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                </label>
+                <label>
+                  证据原文
+                  <textarea
+                    required
+                    value={rawValue}
+                    onChange={(e) => setRawValue(e.target.value)}
+                  />
+                </label>
+                <label>
+                  资料定位
+                  <input
+                    required
+                    value={locator}
+                    onChange={(e) => setLocator(e.target.value)}
+                  />
+                </label>
+                <button
+                  disabled={
+                    mutation.isPending ||
+                    (isV3Review &&
+                      (reviewScope.some((name) => !activeValues[name]) ||
+                        requiredTags.some((tag) => !tagActions[tag]))) ||
+                    (isV3Upgrade && !acceptVersion)
+                  }
+                >
+                  提交复核
+                </button>
+              </form>
+            )
           ) : (
             <p>当前会话无分类复核权限，或案件已结束。</p>
           )}
