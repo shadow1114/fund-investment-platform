@@ -18,3 +18,17 @@ def test_preview_rejects_all_without_capability_and_invalid_scope():
         )
     assert response.status_code == 403
     assert invalid.status_code == 422
+
+
+def test_history_time_range_is_typed_and_rejects_reversed_bounds():
+    app = create_app(persistent_operations=True)
+    schema = app.openapi()["paths"]["/api/v1/fund-ingestions"]["get"]
+    names = {parameter.get("name") for parameter in schema["parameters"]}
+    assert {"created_from", "created_to"} <= names
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/fund-ingestions",
+            params={"created_from": "2026-10-29T00:00:00Z", "created_to": "2026-10-28T00:00:00Z"},
+            headers={"X-Roles": "operations"},
+        )
+    assert response.status_code == 422

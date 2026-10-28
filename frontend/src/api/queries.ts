@@ -1,6 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import {
+  getFundIngestion,
+  listFundIngestionHistory,
+  listFundIngestionItems,
   getBacktestBiasCheck,
   getBacktestPerformance,
   getBacktestResult,
@@ -22,6 +25,8 @@ import {
   listUniverses,
 } from "./generated/m17";
 import type {
+  ListFundIngestionHistoryParams,
+  ListFundIngestionItemsParams,
   GetBacktestPerformanceParams,
   GetFundEvaluationsParams,
   GetFundNavSeriesParams,
@@ -237,4 +242,44 @@ export const getOperationQueryOptions = (operationId: string) =>
   queryOptions({
     queryKey: queryKeys.operation(operationId),
     queryFn: async () => unwrapResponse(await getOperation(operationId)),
+  });
+
+export const ingestionKeys = {
+  history: ["api", "ingestion-history"] as const,
+  task: (id: string) => ["api", "ingestion-tasks", id] as const,
+  items: (id: string) => ["api", "ingestion-items", id] as const,
+};
+
+export const getIngestionHistoryQueryOptions = (
+  params: ListFundIngestionHistoryParams,
+) =>
+  queryOptions({
+    queryKey: [...ingestionKeys.history, params],
+    queryFn: async () => unwrapResponse(await listFundIngestionHistory(params)),
+    refetchInterval: (query) =>
+      query.state.data?.items.some((task) => task.status === "RUNNING")
+        ? 2500
+        : false,
+  });
+
+export const getIngestionTaskQueryOptions = (id: string) =>
+  queryOptions({
+    queryKey: ingestionKeys.task(id),
+    queryFn: async () => unwrapResponse(await getFundIngestion(id)),
+    enabled: Boolean(id),
+    refetchInterval: (query) =>
+      query.state.data?.status === "RUNNING" ? 2500 : false,
+  });
+
+export const getIngestionItemsQueryOptions = (
+  id: string,
+  params: ListFundIngestionItemsParams,
+  running = false,
+) =>
+  queryOptions({
+    queryKey: [...ingestionKeys.items(id), params],
+    queryFn: async () =>
+      unwrapResponse(await listFundIngestionItems(id, params)),
+    enabled: Boolean(id),
+    refetchInterval: running ? 2500 : false,
   });

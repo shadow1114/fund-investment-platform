@@ -2,6 +2,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 
 import {
+  submitScopedFundIngestion,
+  cancelFundIngestion,
+  retryFundIngestionFailures,
   createBacktest,
   submitFundIngestion,
   submitFundIngestionBatch,
@@ -18,7 +21,7 @@ import type {
   OptimizationRequest,
 } from "./generated/m17.schemas";
 import { unwrapResponse, withIdempotencyKey } from "./http";
-import { queryKeys } from "./queries";
+import { ingestionKeys, queryKeys } from "./queries";
 
 export type SubmitOptimizationVariables = {
   portfolioId: string;
@@ -189,5 +192,62 @@ export function useRunBacktest() {
         queryKey: queryKeys.backtestStatus(variables.backtestId),
       });
     },
+  });
+}
+
+// A key remains attached to its preview across transport errors. Retrying the
+// same snapshot cannot create another job when the first response was lost.
+export function useSubmitScopedIngestion() {
+  const client = useQueryClient();
+  const keys = useRef(new Map<string, string>());
+  return useMutation({
+    mutationFn: async (previewId: string) => {
+      const key = keys.current.get(previewId) ?? globalThis.crypto.randomUUID();
+      keys.current.set(previewId, key);
+      return unwrapResponse(
+        await submitScopedFundIngestion(
+          { preview_id: previewId },
+          withIdempotencyKey(key),
+        ),
+      );
+    },
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ingestionKeys.history }),
+  });
+}
+
+export function useCancelIngestion() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      unwrapResponse(await cancelFundIngestion(id)),
+    onSuccess: async (task) => {
+      client.setQueryData(ingestionKeys.task(task.operation_id), task);
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: ingestionKeys.task(task.operation_id),
+        }),
+        client.invalidateQueries({
+          queryKey: ingestionKeys.items(task.operation_id),
+        }),
+        client.invalidateQueries({ queryKey: ingestionKeys.history }),
+      ]);
+    },
+  });
+}
+
+export function useRetryIngestionFailures() {
+  const client = useQueryClient();
+  const keys = useRef(new Map<string, string>());
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const key = keys.current.get(id) ?? globalThis.crypto.randomUUID();
+      keys.current.set(id, key);
+      return unwrapResponse(
+        await retryFundIngestionFailures(id, withIdempotencyKey(key)),
+      );
+    },
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ingestionKeys.history }),
   });
 }

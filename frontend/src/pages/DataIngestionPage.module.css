@@ -1,0 +1,16 @@
+.page {
+  min-width: 0;
+}
+
+.page fieldset {
+  min-width: 0;
+}
+
+.page dd {
+  margin-inline-start: 0;
+  overflow-wrap: anywhere;
+}
+
+.page td {
+  vertical-align: top;
+}

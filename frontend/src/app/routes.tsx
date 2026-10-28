@@ -6,6 +6,11 @@ import { Link } from "react-router-dom";
 import { WorkspaceHomePage } from "../pages/WorkspaceHomePage";
 
 import { PageHeader } from "../components/PageHeader";
+const DataIngestionPage = lazy(() =>
+  import("../pages/DataIngestionPage").then((module) => ({
+    default: module.DataIngestionPage,
+  })),
+);
 const FundDetailPage = lazy(() =>
   import("../pages/FundDetailPage").then((module) => ({
     default: module.FundDetailPage,
@@ -66,6 +71,7 @@ export const routes: { path: string; element: ReactNode }[] = [
     path: "/classification-reviews",
     element: withLoading(<ClassificationReviewPage />),
   },
+  { path: "/data-ingestion", element: withLoading(<DataIngestionPage />) },
   { path: "/funds", element: withLoading(<FundResearchPage />) },
   { path: "/funds/:fundId", element: withLoading(<FundDetailPage />) },
   { path: "/universes", element: withLoading(<UniverseSnapshotPage />) },

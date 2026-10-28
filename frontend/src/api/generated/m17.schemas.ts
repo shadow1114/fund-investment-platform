@@ -2565,6 +2565,8 @@ export type ListFundIngestionHistoryParams = {
   status?: ListFundIngestionHistoryStatus;
   dataset?: ListFundIngestionHistoryDataset;
   scope_type?: ListFundIngestionHistoryScopeType;
+  created_from?: string;
+  created_to?: string;
 };
 
 export type ListFundIngestionHistoryStatus =

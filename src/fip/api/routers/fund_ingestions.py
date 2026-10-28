@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from fip.api.auth import get_principal
 from fip.api.context import Principal
 from fip.api.contracts import success
-from fip.api.errors import ConflictError, ForbiddenError, NotFoundError, ServiceUnavailableError
+from fip.api.errors import (
+    ConflictError,
+    ForbiddenError,
+    InvalidQueryError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from fip.api.schemas import (
     FundBasicInfoHistoryModel,
     FundIngestionHistoryPage,
@@ -893,11 +899,19 @@ def list_ingestion_history(
     ),
     dataset: Literal["BASIC_INFO", "NAV"] | None = None,
     scope_type: Literal["SINGLE", "SELECTED", "ALL"] | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     principal: Principal = Depends(get_principal),
 ) -> dict[str, Any]:
     from sqlalchemy import func
     from sqlalchemy.sql.elements import ColumnElement
 
+    if created_from is not None:
+        created_from = created_from.replace(tzinfo=created_from.tzinfo or UTC)
+    if created_to is not None:
+        created_to = created_to.replace(tzinfo=created_to.tzinfo or UTC)
+    if created_from and created_to and created_from > created_to:
+        raise InvalidQueryError("created_from must be before or equal to created_to")
     session = _session(request)
     try:
         where: list[ColumnElement[bool]] = [
@@ -921,6 +935,10 @@ def list_ingestion_history(
             where.append(CalculationJob.job_payload["dataset"].astext == dataset)
         if scope_type:
             where.append(CalculationJob.job_payload["scope_type"].astext == scope_type)
+        if created_from:
+            where.append(CalculationJob.created_at >= created_from)
+        if created_to:
+            where.append(CalculationJob.created_at <= created_to)
         total = session.scalar(select(func.count()).select_from(CalculationJob).where(*where)) or 0
         rows = session.scalars(
             select(CalculationJob)
