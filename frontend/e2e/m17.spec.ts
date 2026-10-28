@@ -236,11 +236,13 @@ for (const viewport of [
   test(`customer research workspace at ${viewport.width}px`, async ({
     page,
   }, testInfo) => {
+    test.setTimeout(120_000);
     await page.setViewportSize(viewport);
     for (const [path, title, name] of [
       ["/funds", "基金研究", "funds"],
       ["/funds/000001", "Alpha 稳健基金", "fund-detail"],
       ["/universes", "候选池快照", "universes"],
+      ["/universes/UNI-001", "候选池快照 UNI-001", "universe-detail"],
       ["/portfolios/P001", "稳健组合", "portfolio"],
       ["/backtests", "回测分析", "backtest"],
     ] as const) {
@@ -249,7 +251,38 @@ for (const viewport of [
         page.getByRole("heading", { level: 1, name: title }),
       ).toBeVisible();
       await expect(page.locator("h1")).toHaveCount(1);
+      if (viewport.width < 768)
+        await page.getByRole("button", { name: "打开导航" }).click();
+      const navName = name.startsWith("fund")
+        ? "基金研究"
+        : name.startsWith("universe")
+          ? "候选池"
+          : name === "portfolio"
+            ? "组合管理"
+            : "策略回测";
+      const navigation =
+        viewport.width < 768
+          ? page
+              .getByRole("dialog", { name: "客户投资工作区" })
+              .getByRole("navigation", { name: "主导航" })
+          : page
+              .getByRole("navigation", { name: "主导航" })
+              .filter({ visible: true });
+      await expect(
+        navigation.getByRole("link", { name: navName }),
+      ).toHaveAttribute("aria-current", "page");
+      await expect(
+        navigation.getByRole("link", { name: "数据抓取" }),
+      ).toHaveCount(0);
+      await expect(
+        navigation.getByRole("link", { name: "分类复核" }),
+      ).toHaveCount(0);
+      if (viewport.width < 768) await page.keyboard.press("Escape");
       if (name === "funds") {
+        await expect(
+          page.getByRole("button", { name: "查询基金" }),
+        ).toBeVisible();
+        await expect(page.getByText("点时数据：是")).toBeVisible();
         const contrast = await page
           .getByRole("table", { name: "基金研究结果" })
           .getByText("可新建仓", { exact: true })
@@ -278,7 +311,69 @@ for (const viewport of [
         path: testInfo.outputPath(`${name}-${viewport.width}.png`),
         fullPage: true,
       });
+      if (name === "fund-detail") {
+        await expect(
+          page.getByRole("link", { name: "返回基金研究" }),
+        ).toBeVisible();
+        await page.getByRole("tab", { name: "业绩风险" }).click();
+        await expect(page).toHaveURL(/tab=evaluation/);
+        const evaluation = page.getByRole("tabpanel", { name: "业绩风险" });
+        await expect(evaluation.getByText("暂无评估因子。")).toBeVisible();
+        await expect(evaluation.getByText("1Y · 2026-09-16")).toBeVisible();
+        await expect(evaluation.getByText("点时数据：是")).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath(`fund-evaluation-${viewport.width}.png`),
+          fullPage: true,
+        });
+        await page.getByRole("tab", { name: "评分归因" }).click();
+        await expect(page).toHaveURL(/tab=score/);
+        const score = page.getByRole("tabpanel", { name: "评分归因" });
+        await expect(score.getByText("部分完成")).toBeVisible();
+        await expect(
+          score.getByText("不可用（INSUFFICIENT_SAMPLE）").first(),
+        ).toBeVisible();
+        await expect(score.getByText("暂无评分归因。")).toBeVisible();
+        await page.reload();
+        await expect(
+          page.getByRole("tab", { name: "评分归因" }),
+        ).toHaveAttribute("aria-selected", "true");
+        await page.screenshot({
+          path: testInfo.outputPath(`fund-score-${viewport.width}.png`),
+          fullPage: true,
+        });
+      }
+      if (name === "universe-detail") {
+        await expect(
+          page.getByRole("link", { name: "返回候选池列表" }),
+        ).toBeVisible();
+        await expect(
+          page.getByText("资格规则版本：eligibility-v4"),
+        ).toBeVisible();
+        const selected = page.getByRole("table", { name: "已入选成员" });
+        await expect(
+          selected.getByText("已入选", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          selected.getByText("不可用（ELIGIBILITY_ONLY）"),
+        ).toHaveCount(3);
+        await page.getByRole("tab", { name: "已排除（1）" }).click();
+        const rejected = page.getByRole("table", { name: "已排除成员" });
+        await expect(
+          rejected.getByText("已排除", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          rejected.getByText("不可用（FAILED_ELIGIBILITY）"),
+        ).toHaveCount(3);
+        await page.screenshot({
+          path: testInfo.outputPath(`universe-rejected-${viewport.width}.png`),
+          fullPage: true,
+        });
+      }
       if (name === "portfolio") {
+        await expect(page.getByText("运行中", { exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("link", { name: "返回组合列表" }),
+        ).toBeVisible();
         await expect(page.getByRole("tab", { name: "实盘持仓" })).toHaveCount(
           0,
         );
@@ -316,4 +411,60 @@ test("classification review action is available with review capability", async (
   await expect(
     page.getByRole("menuitem", { name: "打开分类复核工作区" }),
   ).toHaveAttribute("href", "/classification-reviews");
+});
+
+test("fund research shows explicit empty and retryable error states", async ({
+  page,
+}) => {
+  await installFrozenApi(page, {
+    "/api/v1/funds": {
+      status: 200,
+      body: {
+        ...fundListEnvelope,
+        data: [],
+        meta: {
+          ...fundListEnvelope.meta,
+          pagination: {
+            page: 1,
+            page_size: 20,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      },
+    },
+  });
+  await page.goto("/funds");
+  await expect(page.getByText("没有符合条件的基金")).toBeVisible();
+  await installFrozenApi(page, {
+    "/api/v1/funds": { status: 503, body: errorEnvelope("FUNDS_UNAVAILABLE") },
+  });
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("FUNDS_UNAVAILABLE", {
+    timeout: 15000,
+  });
+  await expect(page.getByRole("button", { name: "重新读取" })).toBeVisible();
+});
+
+test("fund detail keeps other tabs usable when score data fails", async ({
+  page,
+}) => {
+  await installFrozenApi(page, {
+    "/api/v1/funds/000001/scores": {
+      status: 503,
+      body: errorEnvelope("SCORE_UNAVAILABLE"),
+    },
+  });
+  await page.goto("/funds/000001?tab=score");
+  const score = page.getByRole("tabpanel", { name: "评分归因" });
+  await expect(score.getByRole("alert")).toContainText("SCORE_UNAVAILABLE", {
+    timeout: 15000,
+  });
+  await expect(score.getByRole("button", { name: "重新读取" })).toBeVisible();
+  await page.getByRole("tab", { name: "业绩风险" }).click();
+  await expect(
+    page
+      .getByRole("tabpanel", { name: "业绩风险" })
+      .getByText("暂无评估因子。"),
+  ).toBeVisible();
 });

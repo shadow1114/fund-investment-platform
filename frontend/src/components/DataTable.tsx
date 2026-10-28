@@ -56,6 +56,8 @@ export const DataTable = <TData,>({
   const columns = table.getAllLeafColumns();
   const hideableColumns = columns.filter((column) => column.getCanHide());
   const visibility = table.getState().columnVisibility;
+  // TanStack resolves a built-in cell renderer into every column definition.
+  const defaultCell = table._getDefaultColumnDef().cell;
 
   useEffect(() => {
     if (!restored.current) {
@@ -158,8 +160,9 @@ export const DataTable = <TData,>({
                 <Table.Tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <Table.Td key={cell.id}>
-                      {cell.renderValue() == null &&
-                      "accessorKey" in cell.column.columnDef
+                      {cell.getValue() == null &&
+                      cell.column.columnDef.cell === defaultCell &&
+                      !table.options.defaultColumn?.cell
                         ? "—"
                         : flexRender(
                             cell.column.columnDef.cell,

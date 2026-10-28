@@ -23,6 +23,8 @@ const viewLabels: Record<SeriesView, string> = {
   rolling_excess_return: "滚动超额收益",
 };
 
+const seriesColors = ["#075985", "#9f1239", "#4d7c0f"];
+
 const chartPoints = (points: SeriesPoint[]) =>
   points.map((point) => [
     point.date,
@@ -84,7 +86,7 @@ export const BacktestPerformanceChart = ({
       enabled: true,
       description: `${viewLabels[view]}按日期变化；有效点 ${allPoints.length - unavailable.length} 个，缺失值断线显示。`,
     },
-    color: ["#075985", "#9f1239", "#4d7c0f"],
+    color: seriesColors,
     tooltip: { trigger: "axis" },
     xAxis: { type: "time", axisLabel: { hideOverlap: true } },
     yAxis: {
@@ -128,6 +130,32 @@ export const BacktestPerformanceChart = ({
           ）
         </Alert>
       )}
+      <ul
+        aria-label="图表图例"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.5rem 1rem",
+          listStyle: "none",
+          padding: 0,
+        }}
+      >
+        {activeSeries.map(({ name }, index) => (
+          <li
+            key={name}
+            style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 20,
+                borderTop: `3px solid ${seriesColors[index % seriesColors.length]}`,
+              }}
+            />
+            {name}
+          </li>
+        ))}
+      </ul>
       <ChartFrame
         title={`${viewLabels[view]}（${performance.segment === "FULL" ? "完整区间" : performance.segment === "IN_SAMPLE" ? "样本内" : performance.segment === "OUT_OF_SAMPLE" ? "样本外" : `未知区间 ${performance.segment}`}）`}
         description={`有效序列 ${allPoints.length - unavailable.length} 点 · 缺失/不可用 ${unavailable.length} 点。缺失点保持断线，不按零绘制。`}
