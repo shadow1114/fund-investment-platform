@@ -343,6 +343,7 @@ def _classify_saved_v3(
     symbol: str,
     payload: RawPayload,
     *,
+    cutoff: dt.datetime,
     actor: str,
     dry_run: bool,
 ) -> tuple[ClassificationSnapshot, str, tuple[str, ...]]:
@@ -362,7 +363,6 @@ def _classify_saved_v3(
         source_record_from_payload(payload, dataset="fund_list"),
         payload_ref=f"raw_payload:{payload.id}",
     )
-    cutoff = _classification_replay_cutoff()
     evidence = (
         *(item for item in listed.get(symbol, ()) if item.classified_at <= cutoff),
         *_saved_v3_source_evidence(session, symbol, cutoff=cutoff),
@@ -514,7 +514,8 @@ def cmd_classification(args: argparse.Namespace) -> None:
         # Classification replay consumes saved payloads only. It must not
         # instantiate or invoke a source adapter until an explicitly requested
         # non-v3 legacy replay reaches the parsing branch below.
-        payloads = session.scalars(
+        replay_cutoff = _classification_replay_cutoff() if args.rule_version == "3.0.0" else None
+        payload_query = (
             select(RawPayload)
             .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
             .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
@@ -524,6 +525,9 @@ def cmd_classification(args: argparse.Namespace) -> None:
             )
             .order_by(RawPayload.ingested_at.desc(), RawPayload.id.desc())
         )
+        if replay_cutoff is not None:
+            payload_query = payload_query.where(RawPayload.ingested_at <= replay_cutoff)
+        payloads = session.scalars(payload_query)
         seen: set[str] = set()
         processed = 0
         from fip.services.data_service.classification import DIMENSIONS
@@ -550,11 +554,13 @@ def cmd_classification(args: argparse.Namespace) -> None:
                 if args.fund_id and args.fund_id != share.fund_id:
                     continue
                 if args.rule_version == "3.0.0":
+                    assert replay_cutoff is not None
                     snapshot, action, reasons = _classify_saved_v3(
                         session,
                         share.fund_id,
                         symbol,
                         payload,
+                        cutoff=replay_cutoff,
                         actor=args.actor,
                         dry_run=args.dry_run,
                     )

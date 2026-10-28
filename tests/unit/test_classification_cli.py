@@ -160,6 +160,82 @@ def test_v3_classification_replay_never_constructs_or_fetches_source_adapter(mon
     assert "asset_class:UNRECOGNIZED" in json.loads(output[-1])["summary"]["unrecognized_reasons"]
 
 
+def test_v3_replay_skips_future_fund_list_payload_at_shared_cutoff(monkeypatch, capsys):
+    import datetime as dt
+
+    from fip.services.data_service.classification import classify
+    from fip.services.data_service.classification.policy import load_policy
+    from fip.services.data_service.models.raw import RawPayload
+
+    cutoff = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
+
+    def payload(payload_id, symbol, ingested_at):
+        frame = pd.DataFrame(
+            [{"基金代码": symbol, "基金简称": f"测试{symbol}", "基金类型": "混合型-偏股"}]
+        )
+        return RawPayload(
+            id=payload_id,
+            dataset_id=2,
+            payload=frame.to_parquet(index=False),
+            row_count=1,
+            ingested_at=ingested_at,
+            request_params={},
+            published_at=None,
+            provider_available_at=None,
+        )
+
+    payloads = [
+        payload(17, "000001", cutoff - dt.timedelta(days=1)),
+        payload(18, "000002", cutoff + dt.timedelta(days=1)),
+    ]
+
+    class FakeSession:
+        commits = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def scalars(self, statement):
+            where = " ".join(str(item) for item in statement._where_criteria)
+            assert "raw_payload.ingested_at <=" in where
+            return [row for row in payloads if row.ingested_at <= cutoff]
+
+        def get(self, _model, _key):
+            return None
+
+        def commit(self):
+            self.commits += 1
+
+    session = FakeSession()
+    snapshot = classify([], classified_at=cutoff, policy=load_policy(rule_version="3.0.0"))
+    calls = []
+    monkeypatch.setattr(cli, "_session", lambda: session)
+    monkeypatch.setattr(cli, "_classification_replay_cutoff", lambda: cutoff)
+    monkeypatch.setattr(
+        cli,
+        "_resolve",
+        lambda _session, symbol: calls.append(("resolve", symbol)) or SimpleNamespace(fund_id=8),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_classify_saved_v3",
+        lambda _session, _fund_id, symbol, _payload, **kwargs: calls.append(
+            ("classify", symbol, kwargs["cutoff"])
+        )
+        or (snapshot, "NO_CHANGE", ()),
+    )
+
+    cli.main(["classify-funds", "--actor", "operator", "--rule-version", "3.0.0", "--dry-run"])
+
+    assert [item[1] for item in calls if item[0] == "resolve"] == ["000001"]
+    assert [item[1:] for item in calls if item[0] == "classify"] == [("000001", cutoff)]
+    assert session.commits == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["summary"]["processed"] == 1
+
+
 def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeypatch):
     from fip.services.data_service.models.fund import FundClassificationRevision
     from fip.services.data_service.models.raw import RawPayload
@@ -181,9 +257,10 @@ def test_v3_saved_payload_dry_run_uses_pure_rules_without_revision_write(monkeyp
     session = MemorySession()
     monkeypatch.setattr(cli, "_saved_v3_source_evidence", lambda *_args, **_kwargs: ())
     before = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
+    cutoff = pd.Timestamp("2026-10-28T12:00:00Z").to_pydatetime()
 
     snapshot, action, reasons = cli._classify_saved_v3(
-        session, 1, "000001", payload, actor="operator", dry_run=True
+        session, 1, "000001", payload, cutoff=cutoff, actor="operator", dry_run=True
     )
 
     after = len([row for row in session.rows if isinstance(row, FundClassificationRevision)])
@@ -239,7 +316,9 @@ def test_saved_v3_replay_does_not_backdate_newer_detail_evidence(monkeypatch):
         return SimpleNamespace(id=22)
 
     monkeypatch.setattr(ClassificationService, "refresh_v3", refresh)
-    cli._classify_saved_v3(session, 1, "000001", payload, actor="operator", dry_run=False)
+    cli._classify_saved_v3(
+        session, 1, "000001", payload, cutoff=cutoff, actor="operator", dry_run=False
+    )
     assert captured["valid_from"] == dt.date(2026, 10, 31)
     assert captured["available_at"] == cutoff
     assert "ingested_at" not in captured
@@ -330,5 +409,11 @@ def test_non_dry_run_fails_safely_when_newer_revision_is_after_replay_cutoff(mon
 
     with pytest.raises(RuntimeError, match="newer than its current-UTC cutoff"):
         cli._classify_saved_v3(
-            MemorySession(), 1, "000001", payload, actor="operator", dry_run=False
+            MemorySession(),
+            1,
+            "000001",
+            payload,
+            cutoff=cutoff,
+            actor="operator",
+            dry_run=False,
         )
