@@ -90,6 +90,15 @@ const colors: Partial<Record<Domain, Record<string, string>>> = {
   },
 };
 
+const darkColors: Record<string, string> = {
+  green: "#14532d",
+  yellow: "#713f12",
+  orange: "#7c2d12",
+  red: "#7f1d1d",
+  blue: "#1e3a8a",
+  gray: "#374151",
+};
+
 export const StatusBadge = ({
   domain,
   value,
@@ -99,6 +108,7 @@ export const StatusBadge = ({
 }) => (
   <Badge
     color={colors[domain]?.[value] ?? "gray"}
+    style={{ color: darkColors[colors[domain]?.[value] ?? "gray"] }}
     variant={colors[domain]?.[value] ? "light" : "outline"}
     title={labels[value] ? undefined : `原始状态：${value}`}
   >

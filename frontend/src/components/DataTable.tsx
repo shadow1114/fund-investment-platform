@@ -158,7 +158,8 @@ export const DataTable = <TData,>({
                 <Table.Tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <Table.Td key={cell.id}>
-                      {cell.renderValue() == null
+                      {cell.renderValue() == null &&
+                      "accessorKey" in cell.column.columnDef
                         ? "—"
                         : flexRender(
                             cell.column.columnDef.cell,

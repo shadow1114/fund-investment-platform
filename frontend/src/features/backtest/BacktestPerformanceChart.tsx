@@ -84,6 +84,7 @@ export const BacktestPerformanceChart = ({
       enabled: true,
       description: `${viewLabels[view]}按日期变化；有效点 ${allPoints.length - unavailable.length} 个，缺失值断线显示。`,
     },
+    color: ["#075985", "#9f1239", "#4d7c0f"],
     tooltip: { trigger: "axis" },
     xAxis: { type: "time", axisLabel: { hideOverlap: true } },
     yAxis: {

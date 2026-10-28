@@ -50,12 +50,10 @@ import { PageHeader } from "../components/PageHeader";
 import { ProvenanceBar } from "../components/ProvenanceBar";
 import { WorkbenchPanels } from "../components/WorkbenchPanels";
 import { DecisionReviewPanel } from "../features/portfolio/DecisionReviewPanel";
-import { LivePortfolioPanel } from "../features/portfolio/LivePortfolioPanel";
 import { OptimizationForm } from "../features/portfolio/OptimizationForm";
 import { OptimizationResult } from "../features/portfolio/OptimizationResult";
 import { PortfolioList } from "../features/portfolio/PortfolioList";
 import { PortfolioOverview } from "../features/portfolio/PortfolioOverview";
-import { RebalancingPanel } from "../features/portfolio/RebalancingPanel";
 
 type Props = { pollIntervalMs?: number };
 
@@ -192,10 +190,7 @@ const PortfolioDetail = ({
   );
   const decisionId = searchParams.get("decision_id") ?? undefined;
   const tabValue = searchParams.get("tab");
-  const activeTab: "optimization" | "decision" | "live" | "rebalance" =
-    tabValue === "decision" || tabValue === "live" || tabValue === "rebalance"
-      ? tabValue
-      : "optimization";
+  const activeTab = tabValue === "decision" ? "decision" : "optimization";
   const selectTab = (value: string | null) => {
     const next = new URLSearchParams(searchParams);
     if (value && value !== "optimization") next.set("tab", value);
@@ -352,8 +347,6 @@ const PortfolioDetail = ({
         <Tabs.List aria-label="组合功能">
           <Tabs.Tab value="optimization">组合优化</Tabs.Tab>
           <Tabs.Tab value="decision">决策复核</Tabs.Tab>
-          <Tabs.Tab value="live">实盘持仓</Tabs.Tab>
-          <Tabs.Tab value="rebalance">再平衡</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="optimization" pt="md">
@@ -497,12 +490,6 @@ const PortfolioDetail = ({
               </>
             )}
           </Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value="live" pt="md">
-          <LivePortfolioPanel portfolioId={portfolioId} />
-        </Tabs.Panel>
-        <Tabs.Panel value="rebalance" pt="md">
-          <RebalancingPanel portfolioId={portfolioId} />
         </Tabs.Panel>
       </Tabs>
     </Stack>

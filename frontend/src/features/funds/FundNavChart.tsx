@@ -20,7 +20,7 @@ export const FundNavChart = ({ points }: { points: NavPoint[] }) => {
     tooltip: { trigger: "axis" },
     xAxis: {
       type: "category",
-      data: availablePoints.map((point) => point.date),
+      data: points.map((point) => point.date),
     },
     yAxis: { type: "value", scale: true },
     series: [
@@ -28,6 +28,8 @@ export const FundNavChart = ({ points }: { points: NavPoint[] }) => {
         name: "净值",
         type: "line",
         showSymbol: false,
+        connectNulls: false,
+        lineStyle: { color: "#075985", width: 2 },
         data: points.map((point) => [
           point.date,
           point.nav_status === "VALID" ? point.nav : null,

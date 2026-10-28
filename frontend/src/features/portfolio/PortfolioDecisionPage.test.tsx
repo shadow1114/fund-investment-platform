@@ -1,3 +1,4 @@
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -183,17 +184,19 @@ const renderPage = (initialEntry = "/portfolios/P001") => {
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route path="/portfolios" element={<PortfolioDecisionPage />} />
-          <Route
-            path="/portfolios/:portfolioId"
-            element={<PortfolioDecisionPage pollIntervalMs={1} />}
-          />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/portfolios" element={<PortfolioDecisionPage />} />
+            <Route
+              path="/portfolios/:portfolioId"
+              element={<PortfolioDecisionPage pollIntervalMs={1} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
   );
 };
 
@@ -208,6 +211,20 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("PortfolioDecisionPage", () => {
+  it("does not expose unsupported live and rebalancing controls, including on old URLs", async () => {
+    renderPage("/portfolios/P001?tab=live");
+    await screen.findByRole("heading", { name: "稳健组合" });
+    expect(
+      screen.queryByRole("tab", { name: "实盘持仓" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "再平衡" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "组合优化" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
   it("submits only frozen version references with an idempotency key", async () => {
     const user = userEvent.setup();
     renderPage();

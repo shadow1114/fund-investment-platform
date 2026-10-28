@@ -48,6 +48,7 @@ export const ProvenanceBar = ({ meta }: Props) => {
           <Badge
             color={meta?.is_point_in_time ? "green" : "yellow"}
             variant="light"
+            style={{ color: meta?.is_point_in_time ? "#14532d" : "#713f12" }}
           >
             点时数据：
             {meta?.is_point_in_time === undefined
@@ -69,6 +70,14 @@ export const ProvenanceBar = ({ meta }: Props) => {
                         : "yellow"
                   }
                   variant="light"
+                  style={{
+                    color:
+                      quality === "EXACT"
+                        ? "#14532d"
+                        : quality === "DERIVED"
+                          ? "#1e3a8a"
+                          : "#713f12",
+                  }}
                 >
                   {qualityLabels[quality] ?? `未知（${quality}）`} {count}
                 </Badge>

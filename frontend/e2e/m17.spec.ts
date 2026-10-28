@@ -15,6 +15,8 @@ import {
   backtestValidationEnvelope,
   errorEnvelope,
   fundDetailEnvelope,
+  fundBasicInfoHistoryEnvelope,
+  fundIngestionListEnvelope,
   fundEvaluationEnvelope,
   fundListEnvelope,
   fundNavEnvelope,
@@ -31,6 +33,8 @@ const apiFixtures: Record<string, unknown> = {
   "/api/v1/funds/000001/classification-history": classificationHistoryEnvelope,
   "/api/v1/funds": fundListEnvelope,
   "/api/v1/funds/000001": fundDetailEnvelope,
+  "/api/v1/funds/000001/basic-info-history": fundBasicInfoHistoryEnvelope,
+  "/api/v1/funds/000001/ingestions": fundIngestionListEnvelope,
   "/api/v1/funds/000001/nav-series": fundNavEnvelope,
   "/api/v1/funds/000001/evaluations": fundEvaluationEnvelope,
   "/api/v1/funds/000001/scores": fundScoreEnvelope,
@@ -223,3 +227,67 @@ test("backtest creation keeps API validation errors visible", async ({
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "启动回测" })).toBeDisabled();
 });
+
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 1024, height: 768 },
+  { width: 390, height: 844 },
+]) {
+  test(`customer research workspace at ${viewport.width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize(viewport);
+    for (const [path, title, name] of [
+      ["/funds", "基金研究", "funds"],
+      ["/funds/000001", "Alpha 稳健基金", "fund-detail"],
+      ["/universes", "候选池快照", "universes"],
+      ["/portfolios/P001", "稳健组合", "portfolio"],
+      ["/backtests", "回测分析", "backtest"],
+    ] as const) {
+      await page.goto(path);
+      await expect(
+        page.getByRole("heading", { level: 1, name: title }),
+      ).toBeVisible();
+      await expect(page.locator("h1")).toHaveCount(1);
+      if (name === "funds") {
+        const contrast = await page
+          .getByRole("table", { name: "基金研究结果" })
+          .getByText("可新建仓", { exact: true })
+          .evaluate((node) => {
+            const badge = node.closest(".mantine-Badge-root")!;
+            const style = getComputedStyle(badge);
+            const luminance = (color: string) => {
+              const channels = color.match(/[\d.]+/g)!.map(Number);
+              const alpha = channels[3] ?? 1;
+              const rgb = channels
+                .slice(0, 3)
+                .map((v) => (v * alpha + 255 * (1 - alpha)) / 255)
+                .map((v) =>
+                  v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4,
+                );
+              return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+            };
+            const a = luminance(style.color);
+            const b = luminance(style.backgroundColor);
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+          });
+        console.log(`Eligibility badge contrast: ${contrast.toFixed(2)}:1`);
+        expect(contrast).toBeGreaterThanOrEqual(4.5);
+      }
+      await page.screenshot({
+        path: testInfo.outputPath(`${name}-${viewport.width}.png`),
+        fullPage: true,
+      });
+      if (name === "portfolio") {
+        await expect(page.getByRole("tab", { name: "实盘持仓" })).toHaveCount(
+          0,
+        );
+        await page.getByRole("tab", { name: "决策复核" }).click();
+        await page.screenshot({
+          path: testInfo.outputPath(`portfolio-decision-${viewport.width}.png`),
+          fullPage: true,
+        });
+      }
+    }
+  });
+}

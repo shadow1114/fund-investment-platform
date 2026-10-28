@@ -2,6 +2,8 @@ import {
   Accordion,
   Alert,
   Paper,
+  Menu,
+  Button,
   SimpleGrid,
   Stack,
   Tabs,
@@ -202,7 +204,18 @@ export const FundDetailPage = () => {
               evidence
             />
             <ClassificationHistory fundId={fundId} decisionAt={asOfDate} />
-            <Link to="/classification-reviews">打开分类复核工作区</Link>
+            {session.data?.capabilities?.can_review_classifications && (
+              <Menu>
+                <Menu.Target>
+                  <Button variant="default">分类操作</Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item component={Link} to="/classification-reviews">
+                    打开分类复核工作区
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            )}
           </Accordion.Panel>
         </Accordion.Item>
       </Accordion>

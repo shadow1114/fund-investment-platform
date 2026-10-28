@@ -4,7 +4,7 @@ import {
 } from "../../test/classificationFixtures";
 import { sessionEnvelope } from "../../test/contractFixtures";
 import { QueryClient } from "@tanstack/react-query";
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import type { ChangeEvent } from "react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -205,6 +205,22 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("FundResearchPage", () => {
+  it("shows readable lifecycle and investment eligibility statuses in results", async () => {
+    renderPage("/funds");
+    await screen.findByText("Alpha 稳健基金");
+    const table = screen.getByRole("table", { name: "基金研究结果" });
+    expect(
+      within(table).getByRole("checkbox", { name: "选择 Alpha 稳健基金" }),
+    ).toBeVisible();
+    expect(within(table).getByText("正常")).toBeVisible();
+    expect(within(table).getByText("可新建仓")).toBeVisible();
+    await userEvent
+      .setup()
+      .click(
+        within(table).getByRole("checkbox", { name: "选择 Alpha 稳健基金" }),
+      );
+    expect(screen.getByText(/已选择本页 1 只/)).toBeVisible();
+  });
   it("passes frozen filters through unchanged and renders PIT provenance", async () => {
     renderPage(
       "/funds?fund_name=Alpha&fund_type=EQUITY%2CBOND&lifecycle_status=NORMAL&investment_eligibility=FULLY_ELIGIBLE&as_of_date=2026-09-16&page=2&page_size=10&sort=fund_name&order=asc",

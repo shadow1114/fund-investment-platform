@@ -7,6 +7,7 @@ import {
   fundIngestionListEnvelope,
   sessionEnvelope,
 } from "../../test/contractFixtures";
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -25,7 +26,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { FundDetailPage } from "../../pages/FundDetailPage";
 
-vi.mock("echarts-for-react", () => ({
+vi.mock("echarts-for-react/lib/core", () => ({
   default: ({ option }: { option: { series: { data: unknown[] }[] } }) => (
     <div aria-label="基金净值图">
       图表数据点：{option.series[0].data.length}
@@ -201,13 +202,15 @@ const renderPage = () => {
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/funds/000001?as_of_date=2026-09-16"]}>
-        <Routes>
-          <Route path="/funds/:fundId" element={<FundDetailPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <MantineProvider>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/funds/000001?as_of_date=2026-09-16"]}>
+          <Routes>
+            <Route path="/funds/:fundId" element={<FundDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
   );
 };
 
@@ -219,6 +222,15 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("FundDetailPage", () => {
+  it("only offers classification review to authorized users", async () => {
+    renderPage();
+    await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /五维分类与证据/ }));
+    await screen.findByText("分类：UNKNOWN（暂无可见修订）");
+    expect(screen.queryByText("打开分类复核工作区")).not.toBeInTheDocument();
+  });
   it("shows NAV null semantics and PIT provenance without inventing zero", async () => {
     renderPage();
     expect(

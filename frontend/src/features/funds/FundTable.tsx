@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 
 import type { FundSummary } from "../../api/generated/m17.schemas";
 import { DataTable } from "../../components/DataTable";
+import { StatusBadge } from "../../components/StatusBadge";
 import { ClassificationView } from "../classifications/ClassificationView";
 import {
   FundBasicInfoRefreshButton,
@@ -115,8 +116,18 @@ export const FundTable = ({
         ),
       }),
       column.accessor("share_class", { header: "份额类别" }),
-      column.accessor("lifecycle_status", { header: "生命周期" }),
-      column.accessor("investment_eligibility", { header: "投资资格" }),
+      column.accessor("lifecycle_status", {
+        header: "生命周期",
+        cell: ({ getValue }) => (
+          <StatusBadge domain="lifecycle" value={getValue()} />
+        ),
+      }),
+      column.accessor("investment_eligibility", {
+        header: "投资资格",
+        cell: ({ getValue }) => (
+          <StatusBadge domain="eligibility" value={getValue()} />
+        ),
+      }),
       column.accessor("inception_date", {
         id: "inception_date",
         header: () => (
