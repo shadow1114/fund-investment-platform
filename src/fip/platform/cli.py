@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import datetime as dt
 import io
 import json
 import os
 import sys
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, select
@@ -24,8 +27,18 @@ from fip.settings import settings
 # 会对此断言）；TYPE_CHECKING 分支在运行时永远为 False，不构成模块级依赖，
 # mypy 仍能据此做类型检查。
 if TYPE_CHECKING:
+    from fip.services.data_service.classification.models import ClassificationSnapshot, Evidence
+    from fip.services.data_service.classification.service import (
+        ClassificationService,
+        StoredInterval,
+    )
     from fip.services.data_service.ingest import IngestService
-    from fip.services.data_service.models.fund import FundShareClass
+    from fip.services.data_service.models.fund import (
+        FundClassificationReviewCase,
+        FundClassificationRevision,
+        FundShareClass,
+    )
+    from fip.services.data_service.models.raw import RawPayload
 
 DATA_SOURCE_RULE_VERSION = "v1"
 
@@ -34,7 +47,7 @@ def _session() -> Session:
     return Session(create_engine(settings.database_url, future=True), future=True)
 
 
-def _service(session: Session) -> "IngestService":
+def _service(session: Session) -> IngestService:
     # 延迟 import：见文件顶部说明。
     from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
     from fip.services.data_service.ingest import IngestService
@@ -42,7 +55,7 @@ def _service(session: Session) -> "IngestService":
     return IngestService(session, AkShareSourceAdapter(), None)
 
 
-def _nav_service(session: Session) -> "IngestService":
+def _nav_service(session: Session) -> IngestService:
     from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
     from fip.services.data_service.ingest import IngestService
 
@@ -51,7 +64,7 @@ def _nav_service(session: Session) -> "IngestService":
     )
 
 
-def _resolve(session: Session, symbol: str) -> "FundShareClass":
+def _resolve(session: Session, symbol: str) -> FundShareClass:
     """把 provider 的基金代码解析为份额类别，经 fund.provider_fund_identity。
 
     symbol 是 AKShare 的数字代码（如 "000001"）。它与平台份额类别之间【唯一】
@@ -213,6 +226,153 @@ def cmd_pit_nav(args: argparse.Namespace) -> None:
         )
 
 
+def _latest_classification_interval(
+    service: ClassificationService, fund_id: int, target: dt.date
+) -> tuple[FundClassificationRevision | None, StoredInterval | None]:
+    revision = service.latest(fund_id)
+    if revision is None:
+        return None, None
+    intervals = service.intervals(revision.id)
+    interval = next(
+        (item for item in intervals if item[0] <= target and (item[1] is None or target < item[1])),
+        None,
+    )
+    return revision, interval
+
+
+def _active_review_cases(
+    cases: Iterable[FundClassificationReviewCase], limit: int
+) -> list[FundClassificationReviewCase]:
+    """Do not put paused legacy issues in the operator's default queue."""
+    selected = []
+    for case in cases:
+        details = case.details if isinstance(case.details, dict) else {}
+        if details.get("evaluation_state") == "PAUSED" or details.get("active_scope") == []:
+            continue
+        selected.append(case)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _saved_v3_source_evidence(session: Session, symbol: str) -> tuple[Evidence, ...]:
+    """Replay saved source payloads only; this helper never constructs an adapter."""
+
+    from fip.services.data_service.adapters.akshare.classification_sources import (
+        parse_fund_overview_observations,
+        parse_index_batch,
+        parse_snowball_detail,
+        source_record_from_payload,
+    )
+    from fip.services.data_service.models.governance import DataProvider, DataProviderDataset
+    from fip.services.data_service.models.raw import RawPayload
+
+    codes = {"fund_overview", "fund_detail_xq", "fund_index_passive", "fund_index_enhanced"}
+    rows = session.scalars(
+        select(RawPayload)
+        .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
+        .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
+        .where(DataProvider.provider_code == "AKSHARE", DataProviderDataset.dataset_code.in_(codes))
+        .order_by(RawPayload.ingested_at.desc(), RawPayload.id.desc())
+    )
+    latest: dict[str, RawPayload] = {}
+    for payload in rows:
+        dataset = session.get(DataProviderDataset, payload.dataset_id)
+        if dataset is None:
+            continue
+        code = dataset.dataset_code
+        if (
+            code in {"fund_overview", "fund_detail_xq"}
+            and payload.request_params.get("symbol") != symbol
+        ):
+            continue
+        latest.setdefault(code, payload)
+    evidence: list[Evidence] = []
+    for code in ("fund_index_passive", "fund_index_enhanced"):
+        selected = latest.get(code)
+        if selected is None:
+            continue
+        record = source_record_from_payload(selected, dataset=code)
+        batch = parse_index_batch(
+            record,
+            batch_id=f"saved:{selected.id}",
+            payload_ref=f"raw_payload:{selected.id}",
+        )
+        evidence.extend(item for item in batch.evidence if item.raw_value == symbol)
+    overview = latest.get("fund_overview")
+    if overview is not None:
+        evidence.extend(
+            parse_fund_overview_observations(
+                source_record_from_payload(overview, dataset="fund_overview"),
+                payload_ref=f"raw_payload:{overview.id}",
+                symbol=symbol,
+            )
+        )
+    detail = latest.get("fund_detail_xq")
+    if detail is not None:
+        parsed = parse_snowball_detail(
+            source_record_from_payload(detail, dataset="fund_detail_xq"),
+            payload_ref=f"raw_payload:{detail.id}",
+        )
+        evidence.extend(parsed.evidence)
+    return tuple(evidence)
+
+
+def _classify_saved_v3(
+    session: Session,
+    fund_id: int,
+    symbol: str,
+    payload: RawPayload,
+    *,
+    actor: str,
+    dry_run: bool,
+) -> tuple[ClassificationSnapshot, str]:
+    from fip.services.data_service.adapters.akshare.classification_sources import (
+        parse_fund_list_observations,
+        source_record_from_payload,
+    )
+    from fip.services.data_service.classification.service import ClassificationService
+    from fip.services.data_service.classification.workflow import (
+        classify_v3_preview,
+        merge_snapshot_observations,
+        preview_classification,
+    )
+
+    listed = parse_fund_list_observations(
+        source_record_from_payload(payload, dataset="fund_list"),
+        payload_ref=f"raw_payload:{payload.id}",
+    )
+    evidence = (*listed.get(symbol, ()), *_saved_v3_source_evidence(session, symbol))
+    service = ClassificationService(session)
+    target = payload.ingested_at.date()
+    previous, interval = _latest_classification_interval(service, fund_id, target)
+    baseline = interval[2] if interval else None
+    revision_id = previous.id if previous else None
+    merged = merge_snapshot_observations(baseline, evidence)
+    available_at = max((item.classified_at for item in merged), default=payload.ingested_at)
+    proposed = classify_v3_preview(
+        merged,
+        available_at=available_at,
+        baseline=baseline,
+        baseline_revision_id=revision_id,
+    )
+    preview = preview_classification(
+        proposed, baseline=baseline, baseline_reviewed=bool(previous and previous.reviewed)
+    )
+    action = preview.action
+    if not dry_run and action != "NO_CHANGE":
+        service.refresh_v3(
+            fund_id,
+            evidence,
+            available_at=available_at,
+            actor=actor,
+            reason="replay saved classification payloads",
+            valid_from=target,
+            ingested_at=payload.ingested_at,
+        )
+    return preview.snapshot, action
+
+
 def cmd_classification(args: argparse.Namespace) -> None:
     import pandas as pd
 
@@ -221,7 +381,7 @@ def cmd_classification(args: argparse.Namespace) -> None:
         ReviewDecision,
     )
     from fip.services.data_service.models.fund import FundClassificationReviewCase
-    from fip.services.data_service.models.governance import DataProviderDataset
+    from fip.services.data_service.models.governance import DataProvider, DataProviderDataset
     from fip.services.data_service.models.raw import RawPayload
 
     with _session() as session:
@@ -231,9 +391,9 @@ def cmd_classification(args: argparse.Namespace) -> None:
                 select(FundClassificationReviewCase)
                 .where(FundClassificationReviewCase.status == "PENDING")
                 .order_by(FundClassificationReviewCase.id)
-                .limit(args.limit)
+                .limit(args.limit * 10)
             )
-            for case in cases:
+            for case in _active_review_cases(cases, args.limit):
                 print(
                     json.dumps(
                         {"id": case.id, "fund_id": case.fund_id, "revision_id": case.revision_id}
@@ -264,29 +424,75 @@ def cmd_classification(args: argparse.Namespace) -> None:
             session.commit()
             print(f"revision={revision.id}")
             return
-        ingest = _service(session)
         if args.command == "refresh-classification":
             share = _resolve(session, args.symbol)
             if args.dry_run:
-                print(f"would fetch fund_overview symbol={args.symbol} fund_id={share.fund_id}")
-                return
-            try:
-                snapshot = ingest.ingest_fund_overview(share.fund_id, args.symbol, actor=args.actor)
-            except Exception:
-                # A contract error carries a retained raw payload; keep it reviewable.
-                from fip.services.data_service.adapters.akshare.client import AkShareContractError
+                from fip.services.data_service.classification.workflow import fund_refresh_requests
 
-                error = sys.exception()
-                if isinstance(error, AkShareContractError):
-                    session.commit()
-                raise
+                print(
+                    json.dumps(
+                        {
+                            "fund_id": share.fund_id,
+                            "symbol": args.symbol,
+                            "rule_version": "3.0.0",
+                            "requests": fund_refresh_requests(args.symbol),
+                            "network_calls": 0,
+                            "write": False,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                return
+            from fip.platform.jobs.submitter import JobSubmitter
+
+            day = dt.date.today().isoformat()
+            job = JobSubmitter(session).submit(
+                "fund_classification_refresh",
+                f"classification-refresh|{share.fund_id}|{args.symbol}|{day}",
+                resource_id=str(share.fund_id),
+                job_payload={
+                    "action": "refresh_fund",
+                    "fund_id": share.fund_id,
+                    "symbol": args.symbol,
+                    "actor": args.actor,
+                },
+            )
             session.commit()
-            print(snapshot.model_dump_json())
+            print(json.dumps({"execution_id": job.execution_id, "status": job.status}))
             return
+        if args.command == "refresh-index-sets":
+            from fip.services.data_service.classification.workflow import index_refresh_requests
+
+            if args.dry_run:
+                print(
+                    json.dumps(
+                        {"requests": index_refresh_requests(), "network_calls": 0, "write": False},
+                        ensure_ascii=False,
+                    )
+                )
+                return
+            from fip.platform.jobs.submitter import JobSubmitter
+
+            day = dt.date.today().isoformat()
+            job = JobSubmitter(session).submit(
+                "fund_classification_index_sets",
+                f"classification-index-sets|{day}",
+                job_payload={"action": "refresh_index_sets", "actor": args.actor},
+            )
+            session.commit()
+            print(json.dumps({"execution_id": job.execution_id, "status": job.status}))
+            return
+        # Classification replay consumes saved payloads only. It must not
+        # instantiate or invoke a source adapter until an explicitly requested
+        # non-v3 legacy replay reaches the parsing branch below.
         payloads = session.scalars(
             select(RawPayload)
             .join(DataProviderDataset, DataProviderDataset.id == RawPayload.dataset_id)
-            .where(DataProviderDataset.dataset_code == "fund_list")
+            .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
+            .where(
+                DataProvider.provider_code == "AKSHARE",
+                DataProviderDataset.dataset_code == "fund_list",
+            )
             .order_by(RawPayload.ingested_at.desc(), RawPayload.id.desc())
         )
         seen: set[str] = set()
@@ -294,8 +500,13 @@ def cmd_classification(args: argparse.Namespace) -> None:
         from fip.services.data_service.classification import DIMENSIONS
         from fip.services.data_service.models.fund import Fund
 
-        unknown = dict.fromkeys(DIMENSIONS, 0)
-        conflicts = dict.fromkeys(DIMENSIONS, 0)
+        report_dimensions = (
+            ("asset_class", "strategy") if args.rule_version == "3.0.0" else DIMENSIONS
+        )
+        unknown = dict.fromkeys(report_dimensions, 0)
+        conflicts = dict.fromkeys(report_dimensions, 0)
+        tag_states: dict[str, int] = {}
+        actions: dict[str, int] = {}
         unknown_types: set[str] = set()
         grouping: set[int] = set()
         for payload in payloads:
@@ -308,28 +519,57 @@ def cmd_classification(args: argparse.Namespace) -> None:
                 share = _resolve(session, symbol)
                 if args.fund_id and args.fund_id != share.fund_id:
                     continue
-                snapshot = ingest.classify_fields(
-                    share.fund_id,
-                    {"基金类型": str(row["基金类型"]), "基金简称": str(row["基金简称"])},
-                    payload,
-                    actor=args.actor,
-                    dry_run=args.dry_run,
-                )
+                if args.rule_version == "3.0.0":
+                    snapshot, action = _classify_saved_v3(
+                        session,
+                        share.fund_id,
+                        symbol,
+                        payload,
+                        actor=args.actor,
+                        dry_run=args.dry_run,
+                    )
+                else:
+                    ingest = _service(session)
+                    previous, interval = _latest_classification_interval(
+                        service, share.fund_id, payload.ingested_at.date()
+                    )
+                    baseline = interval[2] if interval else None
+                    snapshot = ingest.classify_fields(
+                        share.fund_id,
+                        {"基金类型": str(row["基金类型"]), "基金简称": str(row["基金简称"])},
+                        payload,
+                        actor=args.actor,
+                        dry_run=args.dry_run,
+                    )
+                    from fip.services.data_service.classification.workflow import (
+                        preview_classification,
+                    )
+
+                    action = preview_classification(
+                        snapshot,
+                        baseline=baseline,
+                        baseline_reviewed=bool(previous and previous.reviewed),
+                    ).action
                 print(
                     json.dumps(
                         {
                             "symbol": symbol,
                             "fund_id": share.fund_id,
+                            "action": action,
                             "classification": snapshot.to_dict(),
                         },
                         ensure_ascii=False,
                     )
                 )
                 processed += 1
-                for name in DIMENSIONS:
+                actions[action] = actions.get(action, 0) + 1
+                for name in report_dimensions:
                     state = getattr(snapshot, name).status
                     unknown[name] += state == "UNKNOWN"
                     conflicts[name] += state == "CONFLICT"
+                for tag, result in (snapshot.strategy_tag_results or {}).items():
+                    state = f"{tag}:{result.evaluation_state}:{result.status}"
+                    tag_states[state] = tag_states.get(state, 0) + 1
                 if snapshot.asset_class.status == "UNKNOWN":
                     unknown_types.add(str(row["基金类型"]))
                 product = session.get(Fund, share.fund_id)
@@ -357,6 +597,8 @@ def cmd_classification(args: argparse.Namespace) -> None:
                         },
                         "unrecognized_types": sorted(unknown_types),
                         "unconfirmed_grouping_fund_ids": sorted(grouping),
+                        "actions": actions,
+                        "strategy_tag_states": tag_states,
                     }
                 },
                 ensure_ascii=False,
@@ -386,6 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     for command in (
         "classify-funds",
         "refresh-classification",
+        "refresh-index-sets",
         "list-classification-reviews",
         "review-classification",
     ):
@@ -409,12 +652,21 @@ def main(argv: list[str] | None = None) -> int:
                 command_parser.add_argument("--fund-id", type=int)
                 command_parser.add_argument("--limit", type=int, default=100)
                 command_parser.add_argument("--batch-size", type=int, default=50)
+                command_parser.add_argument(
+                    "--rule-version", choices=("1.0.0", "3.0.0"), default="1.0.0"
+                )
 
     args = parser.parse_args(argv)
     if getattr(args, "limit", 1) is not None and getattr(args, "limit", 1) <= 0:
         parser.error("--limit must be positive")
     if getattr(args, "batch_size", 1) <= 0:
         parser.error("--batch-size must be positive")
+    if args.command == "classify-funds" and args.limit > 1000:
+        parser.error("--limit cannot exceed 1000; classification replay must stay bounded")
+    if args.command == "classify-funds" and args.batch_size > 100:
+        parser.error("--batch-size cannot exceed 100")
+    if args.command == "list-classification-reviews" and args.limit > 1000:
+        parser.error("--limit cannot exceed 1000")
     args.func(args)
     return 0
 

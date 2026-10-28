@@ -17,7 +17,7 @@ import pandas as pd
 
 from fip.platform.source.port import SourceAdapter, SourceRecord
 from fip.services.data_service.adapters.akshare.datasets import DATASETS
-from fip.services.data_service.classification.models import Evidence
+from fip.services.data_service.classification.models import Evidence, Source
 
 INDEX_DATASETS = {
     "fund_index_passive": "被动指数型",
@@ -128,6 +128,19 @@ def source_identity(evidence: Evidence) -> dict[str, Any]:
     if not evidence.locator or not evidence.locator.startswith("identity:"):
         raise ValueError("Evidence has no classification source identity")
     return dict(json.JSONDecoder().raw_decode(evidence.locator[len("identity:") :])[0])
+
+
+def source_record_from_payload(payload: Any, *, dataset: str) -> SourceRecord:
+    """Reconstruct the source transport envelope for an already persisted payload."""
+    return SourceRecord(
+        dataset=dataset,
+        payload=payload.payload,
+        row_count=payload.row_count,
+        ingested_at=payload.ingested_at,
+        request_params=payload.request_params,
+        published_at=payload.published_at,
+        provider_available_at=payload.provider_available_at,
+    )
 
 
 def parse_index_batch(
@@ -267,6 +280,119 @@ def parse_snowball_detail(record: SourceRecord, *, payload_ref: str) -> Snowball
         tuple(evidence),
         tuple(diagnostics),
     )
+
+
+def parse_fund_list_observations(
+    record: SourceRecord, *, payload_ref: str
+) -> dict[str, tuple[Evidence, ...]]:
+    """Convert saved fund-name rows into source-identified v3 observations."""
+    if record.dataset != "fund_list":
+        raise ValueError("fund list dataset mismatch")
+    frame = pd.read_parquet(io.BytesIO(record.payload))
+    required = DATASETS["fund_list"].required_columns
+    if not frame.columns.is_unique or not required <= set(frame.columns):
+        raise ValueError("fund list columns missing or duplicated")
+    if len(frame) != record.row_count:
+        raise ValueError("fund list row count mismatch")
+    result: dict[str, tuple[Evidence, ...]] = {}
+    for position, row in enumerate(frame.to_dict("records")):
+        code = row["基金代码"]
+        if not _fund_code(code):
+            continue
+        values: list[Evidence] = []
+        fields: tuple[tuple[str, str, Source], ...] = (
+            ("基金类型", "formal_type", "AGGREGATOR"),
+            ("基金简称", "name", "NAME"),
+        )
+        for raw_field, normalized, source in fields:
+            value = row.get(raw_field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            identity = json.dumps(
+                {
+                    "adapter": "AKSHARE",
+                    "provider": "EASTMONEY",
+                    "dataset": record.dataset,
+                    "function": DATASETS[record.dataset].callable_name,
+                    "params": dict(record.request_params),
+                    "provider_fund_code": code,
+                    "raw_field": raw_field,
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            values.append(
+                Evidence(
+                    source=source,
+                    rule_id="SOURCE",
+                    confidence="NAME_HINT" if source == "NAME" else "PUBLIC_AGGREGATOR",
+                    classified_at=record.ingested_at,
+                    raw_field=raw_field,
+                    normalized_field=normalized,
+                    raw_value=value.strip(),
+                    payload_ref=payload_ref,
+                    locator=f"identity:{identity};row:{position}",
+                )
+            )
+        result[code] = tuple(values)
+    return result
+
+
+def parse_fund_overview_observations(
+    record: SourceRecord, *, payload_ref: str, symbol: str
+) -> tuple[Evidence, ...]:
+    """Convert only present classification fields from an overview row."""
+    if record.dataset != "fund_overview" or record.request_params.get("symbol") != symbol:
+        raise ValueError("fund overview identity mismatch")
+    frame = pd.read_parquet(io.BytesIO(record.payload))
+    if len(frame) != record.row_count or frame.empty or not frame.columns.is_unique:
+        raise ValueError("fund overview row/column contract invalid")
+    row = frame.iloc[0]
+    mapping = {
+        "基金类型": "formal_type",
+        "投资策略": "investment_strategy",
+        "跟踪标的": "tracking_target",
+    }
+    evidence: list[Evidence] = []
+    for raw_field, normalized in mapping.items():
+        if raw_field not in frame.columns:
+            continue
+        value = row[raw_field]
+        if not isinstance(value, str):
+            if pd.api.types.is_scalar(value) and pd.isna(value):
+                value = ""
+            else:
+                raise ValueError(f"invalid fund overview value for {raw_field}")
+        params = {key: value for key, value in record.request_params.items() if key != "timeout"}
+        identity = json.dumps(
+            {
+                "adapter": "AKSHARE",
+                "provider": "EASTMONEY",
+                "dataset": record.dataset,
+                "function": DATASETS[record.dataset].callable_name,
+                "params": params,
+                "provider_fund_code": symbol,
+                "raw_field": raw_field,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        evidence.append(
+            Evidence(
+                source="AGGREGATOR",
+                rule_id="SOURCE",
+                confidence="PUBLIC_AGGREGATOR",
+                classified_at=record.ingested_at,
+                raw_field=raw_field,
+                normalized_field=normalized,
+                raw_value=value,
+                payload_ref=payload_ref,
+                locator=f"identity:{identity};row:0",
+            )
+        )
+    return tuple(evidence)
 
 
 def collect_index_batches(
