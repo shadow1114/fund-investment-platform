@@ -33,13 +33,31 @@ class DatasetSpec:
 
 
 DATASETS: dict[str, DatasetSpec] = {
+    "fund_index_passive": DatasetSpec(
+        code="fund_index_passive",
+        callable_name="fund_info_index_em",
+        fixed_params={"symbol": "全部", "indicator": "被动指数型"},
+        required_columns=frozenset({"基金代码", "跟踪标的", "跟踪方式"}),
+    ),
+    "fund_index_enhanced": DatasetSpec(
+        code="fund_index_enhanced",
+        callable_name="fund_info_index_em",
+        fixed_params={"symbol": "全部", "indicator": "增强指数型"},
+        required_columns=frozenset({"基金代码", "跟踪标的", "跟踪方式"}),
+    ),
+    "fund_detail_xq": DatasetSpec(
+        code="fund_detail_xq",
+        callable_name="fund_individual_basic_info_xq",
+        required_columns=frozenset({"item", "value"}),
+    ),
     "fund_list": DatasetSpec(
         code="fund_list",
         callable_name="fund_name_em",
         required_columns=frozenset({"基金代码", "基金简称", "基金类型"}),
     ),
     "fund_overview": DatasetSpec(
-        code="fund_overview", callable_name="fund_overview_em",
+        code="fund_overview",
+        callable_name="fund_overview_em",
         required_columns=frozenset({"基金全称", "基金类型"}),
     ),
     "fund_nav": DatasetSpec(

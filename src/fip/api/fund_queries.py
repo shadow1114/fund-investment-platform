@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
 
+from fip.api.classification_policy import get_classification_policy
 from fip.api.errors import InvalidQueryError, NotFoundError
 from fip.api.repositories import FundRepository
 
@@ -51,6 +52,36 @@ def _row_date(value: object) -> str | None:
 
 def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
     classification = row.get("classification")
+    catalog = None
+    classification_filters = (
+        "asset_class",
+        "strategy",
+        "geography",
+        "product_structure",
+        "market_attributes",
+        "strategy_tags",
+        "classification_status",
+        "enum_version",
+    )
+    if any(filters.get(name) for name in classification_filters):
+        if not isinstance(classification, Mapping):
+            # Existing UNKNOWN-status reads also include funds without a snapshot.
+            if any(
+                filters.get(name)
+                for name in classification_filters
+                if name != "classification_status"
+            ):
+                return False
+        else:
+            version = classification.get("enum_version", "1.0.0")
+            if filters.get("enum_version") and version != filters["enum_version"]:
+                return False
+            try:
+                catalog = get_classification_policy(
+                    cast(str, classification.get("rule_version", version)), cast(str, version)
+                )
+            except InvalidQueryError:
+                return False
     for dimension in (
         "asset_class",
         "strategy",
@@ -62,15 +93,40 @@ def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
         if choices:
             if not isinstance(classification, Mapping):
                 return False
+            if catalog is None or not set(cast(Sequence[str], choices)).intersection(
+                catalog.catalog[dimension]
+            ):
+                return False
             result = classification.get(dimension)
             if not isinstance(result, Mapping) or result.get("status") != "CONFIRMED":
                 return False
             value = result.get("value")
             values = [value] if isinstance(value, str) else value
             if not isinstance(values, list | tuple) or not set(values).intersection(
-                cast(Sequence[str], choices)
+                cast(Sequence[str], choices), catalog.catalog[dimension]
             ):
                 return False
+    tags = filters.get("strategy_tags")
+    if tags:
+        results = (
+            classification.get("strategy_tag_results")
+            if isinstance(classification, Mapping)
+            else None
+        )
+        if (
+            catalog is None
+            or not isinstance(results, Mapping)
+            or not any(
+                tag in catalog.strategy_tag_catalog
+                and isinstance(result := results.get(tag), Mapping)
+                and result.get("status") == "CONFIRMED"
+                and result.get("value") == tag
+                and result.get("evaluation_state") == "EVALUATED"
+                and bool(result.get("evidence"))
+                for tag in cast(Sequence[str], tags)
+            )
+        ):
+            return False
     statuses = filters.get("classification_status")
     if statuses:
         present = (
@@ -168,6 +224,8 @@ class FundQueries:
         fund_name: str | None,
         asset_class: Sequence[str] | None = None,
         strategy: Sequence[str] | None = None,
+        strategy_tags: Sequence[str] | None = None,
+        enum_version: str | None = None,
         geography: Sequence[str] | None = None,
         product_structure: Sequence[str] | None = None,
         market_attributes: Sequence[str] | None = None,
@@ -190,6 +248,8 @@ class FundQueries:
         filters: dict[str, object] = {
             "asset_class": _as_tuple(asset_class),
             "strategy": _as_tuple(strategy),
+            "strategy_tags": _as_tuple(strategy_tags),
+            "enum_version": enum_version,
             "geography": _as_tuple(geography),
             "product_structure": _as_tuple(product_structure),
             "market_attributes": _as_tuple(market_attributes),
@@ -209,6 +269,8 @@ class FundQueries:
         for key in (
             "asset_class",
             "strategy",
+            "strategy_tags",
+            "enum_version",
             "geography",
             "product_structure",
             "market_attributes",

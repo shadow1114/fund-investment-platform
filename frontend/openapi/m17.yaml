@@ -111,6 +111,26 @@ paths:
           in: query
           schema:
             type: string
+        - name: strategy_tags
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          description:
+            Matches only evidence-backed CONFIRMED independent tags; legacy QUANTITATIVE strategy
+            is not a tag.
+          style: form
+          explode: false
+        - name: enum_version
+          in: query
+          required: false
+          schema:
+            type: string
+          description:
+            Restricts classification filters to this registered catalog. Omit to use each snapshot
+            version exactly.
       responses:
         "200":
           $ref: "#/components/responses/FundListResponse"
@@ -476,6 +496,19 @@ paths:
                 $ref: "#/components/schemas/TypedEnvelope_CatalogPayload_"
         default:
           $ref: "#/components/responses/ErrorResponse"
+      parameters:
+        - name: rule_version
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Registered rule version; defaults to enum_version or 1.0.0.
+        - name: enum_version
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Registered enum version; defaults to rule_version or 1.0.0.
   /api/v1/funds/{fund_id}/classification-history:
     get:
       summary: History
@@ -545,6 +578,18 @@ paths:
                 format: date
               - type: "null"
             title: Decision At
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - ACTIVE
+              - HISTORY
+            default: ACTIVE
+          description:
+            ACTIVE omits paused historical cases; HISTORY includes them. Status and PIT filters
+            apply in both scopes.
       responses:
         "200":
           description: Successful Response
@@ -3614,91 +3659,147 @@ components:
         - action
       title: ReviewDecision
     DimensionResult:
+      additionalProperties: false
       properties:
         status:
-          type: string
           enum:
             - CONFIRMED
             - CANDIDATE
             - CONFLICT
             - UNKNOWN
           title: Status
+          type: string
         value:
           anyOf:
             - type: string
             - items:
                 type: string
               type: array
-          title: Value
           default: UNKNOWN
+          title: Value
         candidates:
+          default: []
           items:
             type: string
-          type: array
           title: Candidates
-          default: []
+          type: array
         evidence:
+          default: []
           items:
             $ref: "#/components/schemas/Evidence"
-          type: array
           title: Evidence
-          default: []
-      additionalProperties: false
-      type: object
+          type: array
+        evaluation_state:
+          anyOf:
+            - enum:
+                - NOT_EVALUATED
+                - EVALUATED
+                - PAUSED
+              type: string
+            - type: "null"
+          default: null
+          title: Evaluation State
+        carried_from_revision_id:
+          anyOf:
+            - type: integer
+            - type: "null"
+          default: null
+          title: Carried From Revision Id
+        source_rule_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+          title: Source Rule Version
+        source_enum_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+          title: Source Enum Version
       required:
         - status
       title: DimensionResult
+      type: object
     Evidence:
+      additionalProperties: false
       properties:
         source:
-          type: string
           enum:
             - OFFICIAL
             - AGGREGATOR
             - NAME
           title: Source
+          type: string
         rule_id:
-          type: string
           title: Rule Id
-        confidence:
           type: string
+        confidence:
           enum:
             - OFFICIAL_DOCUMENT
             - PUBLIC_AGGREGATOR
             - NAME_HINT
           title: Confidence
-        classified_at:
           type: string
+        classified_at:
           format: date-time
           title: Classified At
-        raw_field:
           type: string
+        raw_field:
           title: Raw Field
+          type: string
         normalized_field:
           anyOf:
             - type: string
             - type: "null"
+          default: null
           title: Normalized Field
         raw_value:
-          type: string
           title: Raw Value
+          type: string
         payload_ref:
           anyOf:
             - type: string
             - type: "null"
+          default: null
           title: Payload Ref
         locator:
           anyOf:
             - type: string
             - type: "null"
+          default: null
           title: Locator
         conflict_reason:
           anyOf:
             - type: string
             - type: "null"
+          default: null
           title: Conflict Reason
-      additionalProperties: false
-      type: object
+        required_observations:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/Evidence"
+              type: array
+            - type: "null"
+          default: null
+          title: Required Observations
+        assertion_status:
+          anyOf:
+            - enum:
+                - CONFIRMED
+                - CANDIDATE
+                - CONFLICT
+                - UNKNOWN
+              type: string
+            - type: "null"
+          default: null
+          title: Assertion Status
+        rationale:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+          title: Rationale
       required:
         - source
         - rule_id
@@ -3707,6 +3808,7 @@ components:
         - raw_field
         - raw_value
       title: Evidence
+      type: object
     ReviewSubmission:
       properties:
         expected_revision:
@@ -3723,6 +3825,18 @@ components:
           maxLength: 1024
           minLength: 1
           title: Reason
+        tag_decisions:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/StrategyTagDecision"
+        accept_incoming_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        reject_upgrade:
+          type: boolean
+          default: false
       additionalProperties: false
       type: object
       required:
@@ -3730,6 +3844,10 @@ components:
         - decisions
         - reason
       title: ReviewSubmission
+      description:
+        V3 requires both active dimension decisions and every changed/tag-case tag decision. Paused
+        dimensions cannot be changed. Version upgrades require explicit acceptance, or reject_upgrade with
+        empty decisions. Legacy decisions remain supported. Expected revision is enforced by CAS.
     ReviewOutcome:
       properties:
         revision_id:
@@ -3788,6 +3906,22 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ClassificationSnapshot"
             - type: "null"
+        active_scope:
+          type: array
+          items:
+            type: string
+        historical_scope:
+          type: array
+          items:
+            type: string
+        evaluation_state:
+          anyOf:
+            - type: string
+              enum:
+                - NOT_EVALUATED
+                - EVALUATED
+                - PAUSED
+            - type: "null"
       type: object
       required:
         - case_id
@@ -3799,6 +3933,8 @@ components:
         - created_at
         - resolved_at
         - result_revision_id
+        - active_scope
+        - historical_scope
       title: ReviewCasePayload
     ValidationError:
       properties:
@@ -3896,18 +4032,18 @@ components:
     ClassificationPayloadModel:
       properties:
         scheme:
-          type: string
           const: FIP_CLASSIFICATION_V1
-          title: Scheme
           default: FIP_CLASSIFICATION_V1
+          title: Scheme
+          type: string
         rule_version:
-          type: string
+          default: 1.0.0
           title: Rule Version
-          default: 1.0.0
-        enum_version:
           type: string
-          title: Enum Version
+        enum_version:
           default: 1.0.0
+          title: Enum Version
+          type: string
         asset_class:
           $ref: "#/components/schemas/DimensionResult"
         strategy:
@@ -3919,11 +4055,11 @@ components:
         market_attributes:
           $ref: "#/components/schemas/DimensionResult"
         review_items:
+          default: []
           items:
             type: string
-          type: array
           title: Review Items
-          default: []
+          type: array
         revision_id:
           type: integer
           title: Revision Id
@@ -3955,6 +4091,53 @@ components:
         trading_eligibility:
           type: object
           title: Trading Eligibility
+        strategy_tag_results:
+          anyOf:
+            - additionalProperties:
+                $ref: "#/components/schemas/StrategyTagResult"
+              type: object
+            - type: "null"
+          default: null
+          title: Strategy Tag Results
+        strategy_tags:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          default: null
+          title: Strategy Tags
+        observations:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/Evidence"
+              type: array
+            - type: "null"
+          default: null
+          title: Observations
+        source_diagnostics:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          default: null
+          title: Source Diagnostics
+        published_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        provider_available_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        ingested_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
       additionalProperties: false
       type: object
       required:
@@ -4003,6 +4186,18 @@ components:
             type: string
           type: object
           title: Confidence Grades
+        active_dimensions:
+          type: array
+          items:
+            type: string
+        paused_dimensions:
+          type: array
+          items:
+            type: string
+        strategy_tags:
+          type: array
+          items:
+            type: string
       type: object
       required:
         - scheme
@@ -4012,6 +4207,9 @@ components:
         - dimensions
         - statuses
         - confidence_grades
+        - active_dimensions
+        - paused_dimensions
+        - strategy_tags
       title: CatalogPayload
     TypedEnvelope_CatalogPayload_:
       properties:
@@ -4182,6 +4380,26 @@ components:
             $ref: "#/components/schemas/ClassificationHistoryInterval"
           type: array
           title: Intervals
+        published_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        provider_available_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        ingested_at:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+        availability_quality:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
       type: object
       required:
         - revision_id
@@ -4196,20 +4414,21 @@ components:
         - intervals
       title: ClassificationHistoryPayload
     ClassificationSnapshot:
+      additionalProperties: false
       properties:
         scheme:
-          type: string
           const: FIP_CLASSIFICATION_V1
-          title: Scheme
           default: FIP_CLASSIFICATION_V1
+          title: Scheme
+          type: string
         rule_version:
-          type: string
+          default: 1.0.0
           title: Rule Version
-          default: 1.0.0
-        enum_version:
           type: string
-          title: Enum Version
+        enum_version:
           default: 1.0.0
+          title: Enum Version
+          type: string
         asset_class:
           $ref: "#/components/schemas/DimensionResult"
         strategy:
@@ -4221,13 +4440,43 @@ components:
         market_attributes:
           $ref: "#/components/schemas/DimensionResult"
         review_items:
+          default: []
           items:
             type: string
-          type: array
           title: Review Items
-          default: []
-      additionalProperties: false
-      type: object
+          type: array
+        strategy_tag_results:
+          anyOf:
+            - additionalProperties:
+                $ref: "#/components/schemas/StrategyTagResult"
+              type: object
+            - type: "null"
+          default: null
+          title: Strategy Tag Results
+        strategy_tags:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          default: null
+          title: Strategy Tags
+        observations:
+          anyOf:
+            - items:
+                $ref: "#/components/schemas/Evidence"
+              type: array
+            - type: "null"
+          default: null
+          title: Observations
+        source_diagnostics:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+          default: null
+          title: Source Diagnostics
       required:
         - asset_class
         - strategy
@@ -4235,3 +4484,91 @@ components:
         - product_structure
         - market_attributes
       title: ClassificationSnapshot
+      type: object
+    StrategyTagResult:
+      additionalProperties: false
+      description: Independent tag assertion; a missing legacy result is represented by None.
+      properties:
+        status:
+          enum:
+            - CONFIRMED
+            - CANDIDATE
+            - CONFLICT
+            - UNKNOWN
+          title: Status
+          type: string
+        value:
+          anyOf:
+            - type: string
+            - items:
+                type: string
+              type: array
+          default: UNKNOWN
+          title: Value
+        candidates:
+          default: []
+          items:
+            type: string
+          title: Candidates
+          type: array
+        evidence:
+          default: []
+          items:
+            $ref: "#/components/schemas/Evidence"
+          title: Evidence
+          type: array
+        evaluation_state:
+          default: NOT_EVALUATED
+          enum:
+            - NOT_EVALUATED
+            - EVALUATED
+          title: Evaluation State
+          type: string
+        carried_from_revision_id:
+          anyOf:
+            - type: integer
+            - type: "null"
+          default: null
+          title: Carried From Revision Id
+        source_rule_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+          title: Source Rule Version
+        source_enum_version:
+          anyOf:
+            - type: string
+            - type: "null"
+          default: null
+          title: Source Enum Version
+        manual_action:
+          anyOf:
+            - enum:
+                - CONFIRM
+                - REJECT
+              type: string
+            - type: "null"
+          default: null
+          title: Manual Action
+      required:
+        - status
+      title: StrategyTagResult
+      type: object
+
+    StrategyTagDecision:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - evidence
+      properties:
+        action:
+          type: string
+          enum:
+            - CONFIRM
+            - REJECT
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/Evidence"

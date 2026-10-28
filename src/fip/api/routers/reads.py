@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from fip.api.auth import get_principal
+from fip.api.classification_policy import get_classification_policy
 from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
@@ -18,7 +19,7 @@ from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, Port
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import ReadEnvelopeModel
 from fip.api.universe_queries import UniverseQueries
-from fip.services.data_service.classification import CATALOG
+from fip.services.data_service.classification.policy import POLICY_REGISTRY
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
 # ruff: noqa: B008
@@ -103,6 +104,8 @@ def list_funds(
     manager_id: str | None = None,
     asset_class: list[str] | None = Query(None),
     strategy: list[str] | None = Query(None),
+    strategy_tags: list[str] | None = Query(None),
+    enum_version: str | None = None,
     geography: list[str] | None = Query(None),
     product_structure: list[str] | None = Query(None),
     market_attributes: list[str] | None = Query(None),
@@ -123,17 +126,30 @@ def list_funds(
         raise InvalidQueryError("inception_date_from must not be after inception_date_to")
     if aum_min is not None and aum_max is not None and aum_min > aum_max:
         raise InvalidQueryError("aum_min must not be greater than aum_max")
+    policies = (
+        [get_classification_policy(enum_version=enum_version)]
+        if enum_version is not None
+        else [get_classification_policy(rule, enum) for _, rule, enum in POLICY_REGISTRY]
+    )
+    allowed = {
+        name: {value for policy in policies for value in policy.catalog[name]}
+        for name in policies[0].catalog
+    }
     result = FundQueries(repository.funds).list(
-        asset_class=_multi_values(
-            asset_class, name="asset_class", allowed=set(CATALOG["asset_class"])
+        strategy_tags=_multi_values(
+            strategy_tags,
+            name="strategy_tags",
+            allowed={tag for policy in policies for tag in policy.strategy_tag_catalog},
         ),
-        strategy=_multi_values(strategy, name="strategy", allowed=set(CATALOG["strategy"])),
-        geography=_multi_values(geography, name="geography", allowed=set(CATALOG["geography"])),
+        enum_version=enum_version,
+        asset_class=_multi_values(asset_class, name="asset_class", allowed=allowed["asset_class"]),
+        strategy=_multi_values(strategy, name="strategy", allowed=allowed["strategy"]),
+        geography=_multi_values(geography, name="geography", allowed=allowed["geography"]),
         product_structure=_multi_values(
-            product_structure, name="product_structure", allowed=set(CATALOG["product_structure"])
+            product_structure, name="product_structure", allowed=allowed["product_structure"]
         ),
         market_attributes=_multi_values(
-            market_attributes, name="market_attributes", allowed=set(CATALOG["market_attributes"])
+            market_attributes, name="market_attributes", allowed=allowed["market_attributes"]
         ),
         classification_status=_multi_values(
             classification_status,

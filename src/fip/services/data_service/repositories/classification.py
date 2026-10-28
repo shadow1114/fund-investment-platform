@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from fip.platform.decision_data.pit import ClassificationPoint
 from fip.services.data_service.classification import ClassificationSnapshot, project_legacy
+from fip.services.data_service.classification.service import verified_tag_rejections
 from fip.services.data_service.models.fund import (
     Fund,
     FundClassificationHistory,
@@ -75,6 +76,11 @@ class SqlClassificationPitRepository:
             "available_at": _timestamp(revision.available_at),
             "classified_at": _timestamp(revision.classified_at),
             "availability_quality": revision.availability_quality,
+            "published_at": _timestamp(revision.published_at) if revision.published_at else None,
+            "provider_available_at": _timestamp(revision.provider_available_at)
+            if revision.provider_available_at
+            else None,
+            "ingested_at": _timestamp(revision.ingested_at),
             "source_summary": sorted(
                 {
                     e["source"]
@@ -104,6 +110,12 @@ class SqlClassificationPitRepository:
                 "enum_version": r.enum_version,
                 "available_at": _timestamp(r.available_at),
                 "classified_at": _timestamp(r.classified_at),
+                "published_at": _timestamp(r.published_at) if r.published_at else None,
+                "provider_available_at": _timestamp(r.provider_available_at)
+                if r.provider_available_at
+                else None,
+                "ingested_at": _timestamp(r.ingested_at),
+                "availability_quality": r.availability_quality,
                 "actor": r.actor,
                 "reason": r.reason,
                 "reviewed": r.reviewed,
@@ -137,6 +149,17 @@ class SqlClassificationPitRepository:
             projection = project_legacy(
                 snapshot,
                 grouping_confirmed=(product is not None and product.grouping_status == "CONFIRMED"),
+                verified_tag_rejections=verified_tag_rejections(
+                    self._session,
+                    fund_id,
+                    snapshot,
+                    visible_until=self._visible_until,
+                    revision_id=revision.id,
+                    valid_from=dt.date.fromisoformat(result["valid_from"]),
+                    valid_to=dt.date.fromisoformat(result["valid_to"])
+                    if result["valid_to"]
+                    else None,
+                ),
             )
             return ClassificationPoint(
                 projection.value or "UNKNOWN",

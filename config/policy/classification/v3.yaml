@@ -1,0 +1,102 @@
+# Runtime defaults remain v1 until the v3 rules roll out.
+# This checkout has no v2 policy; paused catalogs retain the actual v1 baseline.
+scheme: FIP_CLASSIFICATION_V1
+rule_version: 3.0.0
+enum_version: 3.0.0
+active_dimensions: [asset_class, strategy]
+paused_dimensions: [geography, product_structure, market_attributes]
+strategy_tag_catalog: [QUANTITATIVE]
+# A type only supplies one half of STR030; adopted fund-level active management is required.
+active_non_index_types:
+  - 股票型
+  - 债券型
+  - 混合型
+  - 货币型
+  - FOF
+  - REIT
+  - 商品型
+  - QDII-混合灵活
+  - QDII-普通股票
+  - QDII-商品
+  - QDII-纯债
+  - 债券型-混合一级
+  - FOF-均衡型
+  - 混合型-偏股
+  - 债券型-长债
+  - FOF-稳健型
+  - QDII-FOF
+  - 混合型-绝对收益
+  - 债券型-混合二级
+  - 货币型-浮动净值
+  - 混合型-灵活
+  - FOF-进取型
+  - 债券型-中短债
+  - QDII-混合偏股
+  - QDII-混合平衡
+  - 混合型-平衡
+  - 货币型-普通货币
+  - 混合型-偏债
+# No implicit risk-control vocabulary is registered as a target-risk mechanism.
+target_risk_mechanisms: []
+catalog:
+  asset_class: [EQUITY, BOND, MIXED, MONEY_MARKET, FOF, REIT, COMMODITY, OTHER, UNKNOWN]
+  strategy: [ACTIVE, PASSIVE_INDEX, ENHANCED_INDEX, TARGET_DATE, TARGET_RISK, UNKNOWN]
+  geography: [DOMESTIC, US, HK, JP, EUROPE, GLOBAL, MULTI_REGION, UNKNOWN]
+  product_structure: [ETF, ETF_LINKED, LOF, ORDINARY, UNKNOWN]
+  market_attributes: [DOMESTIC, CROSS_BORDER, QDII, UNKNOWN]
+formal_types:
+  股票型: EQUITY
+  债券型: BOND
+  混合型: MIXED
+  货币型: MONEY_MARKET
+  FOF: FOF
+  REIT: REIT
+  商品型: COMMODITY
+  QDII-混合灵活: MIXED
+  QDII-普通股票: EQUITY
+  QDII-商品: COMMODITY
+  QDII-纯债: BOND
+  指数型-其他: UNKNOWN
+  债券型-混合一级: BOND
+  FOF-均衡型: FOF
+  混合型-偏股: MIXED
+  指数型-股票: EQUITY
+  QDII-混合债: UNKNOWN
+  债券型-长债: BOND
+  FOF-稳健型: FOF
+  QDII-FOF: FOF
+  混合型-绝对收益: MIXED
+  债券型-混合二级: BOND
+  货币型-浮动净值: MONEY_MARKET
+  混合型-灵活: MIXED
+  FOF-进取型: FOF
+  债券型-中短债: BOND
+  QDII-混合偏股: MIXED
+  QDII-REITs: UNKNOWN
+  QDII-混合平衡: MIXED
+  指数型-海外股票: EQUITY
+  混合型-平衡: MIXED
+  指数型-固收: BOND
+  货币型-普通货币: MONEY_MARKET
+  混合型-偏债: MIXED
+# Narrow curated fallback, not an authoritative or complete live index directory.
+# Exact strings only: no aliases, substring rules, compound targets or geography.
+index_asset_mapping_version: "2026-10-27.1"
+index_assets:
+  沪深300指数:
+    asset_class: EQUITY
+    provider: CSI
+    reference: "https://www.csindex.com.cn/#/indices/family/detail?indexCode=000300"
+    verification: CURATED_NOT_LIVE_VERIFIED
+  中证全债指数:
+    asset_class: BOND
+    provider: CSI
+    reference: "https://www.csindex.com.cn/#/indices/family/detail?indexCode=H11001"
+    verification: CURATED_NOT_LIVE_VERIFIED
+  彭博商品指数:
+    asset_class: COMMODITY
+    provider: BLOOMBERG
+    reference: "https://www.bloombergindices.com/bloomberg-commodity-index/"
+    verification: CURATED_NOT_LIVE_VERIFIED
+# Ordering is an execution/review hint, never authority to discard contradictions.
+strategy_priority: [ENHANCED_INDEX, PASSIVE_INDEX, TARGET_DATE, TARGET_RISK, ACTIVE]

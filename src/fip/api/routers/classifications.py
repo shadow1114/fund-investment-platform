@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from fip.api.auth import get_principal
+from fip.api.classification_policy import get_classification_policy
 from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.dependencies import get_api_repositories
@@ -18,11 +19,12 @@ from fip.api.errors import ConflictError, ForbiddenError, InvalidQueryError, Not
 from fip.api.repositories import ApiRepositories
 from fip.api.schemas import TypedEnvelope
 from fip.platform.decision_data.pit import visible_until_for
-from fip.services.data_service.classification import CATALOG, ClassificationSnapshot
+from fip.services.data_service.classification import ClassificationSnapshot
 from fip.services.data_service.classification.service import (
     ClassificationConflict,
     ClassificationService,
     ReviewDecision,
+    StrategyTagDecision,
 )
 from fip.services.data_service.models.fund import (
     FundClassificationHistory,
@@ -42,6 +44,9 @@ class CatalogPayload(BaseModel):
     dimensions: dict[str, list[str]]
     statuses: list[str]
     confidence_grades: dict[str, str]
+    active_dimensions: list[str]
+    paused_dimensions: list[str]
+    strategy_tags: list[str]
 
 
 class ClassificationHistoryInterval(BaseModel):
@@ -62,6 +67,10 @@ class ClassificationHistoryPayload(BaseModel):
     reason: str
     reviewed: bool
     intervals: list[ClassificationHistoryInterval]
+    published_at: str | None = None
+    provider_available_at: str | None = None
+    ingested_at: str | None = None
+    availability_quality: str | None = None
 
 
 class ReviewSubmission(BaseModel):
@@ -69,6 +78,9 @@ class ReviewSubmission(BaseModel):
     expected_revision: int = Field(gt=0)
     decisions: dict[str, ReviewDecision]
     reason: str = Field(min_length=1, max_length=1024)
+    tag_decisions: dict[str, StrategyTagDecision] = Field(default_factory=dict)
+    accept_incoming_version: str | None = None
+    reject_upgrade: bool = False
 
 
 class ReviewOutcome(BaseModel):
@@ -89,6 +101,9 @@ class ReviewCasePayload(BaseModel):
     result_revision_id: int | None
     baseline: ClassificationSnapshot | None = None
     incoming: ClassificationSnapshot | None = None
+    active_scope: list[str]
+    historical_scope: list[str]
+    evaluation_state: Literal["NOT_EVALUATED", "EVALUATED", "PAUSED"] | None = None
 
 
 def _session(repositories: ApiRepositories) -> Session:
@@ -124,7 +139,16 @@ def _view(
     )
     incoming_intervals = case.details.get("intervals", [])
     incoming = incoming_intervals[0][2] if incoming_intervals else None
+    source_scope = case.details.get("source_dimensions") or [case.details.get("dimension")]
+    source_scope = [name for name in source_scope if isinstance(name, str)]
+    paused = case.details.get("evaluation_state") == "PAUSED"
+    active_scope = case.details.get("active_scope", [] if paused else source_scope)
+    historical_scope = case.details.get("historical_source_dimensions", [])
+    historical_scope = sorted(set(historical_scope) | (set(source_scope) - set(active_scope)))
     return ReviewCasePayload(
+        active_scope=active_scope,
+        historical_scope=historical_scope,
+        evaluation_state=case.details.get("evaluation_state"),
         baseline=ClassificationSnapshot.model_validate(baseline) if baseline else None,
         incoming=ClassificationSnapshot.model_validate(incoming) if incoming else None,
         case_id=case.id,
@@ -144,14 +168,20 @@ def _view(
     operation_id="getClassificationCatalog",
     response_model=TypedEnvelope[CatalogPayload],
 )
-def catalog(request: Request) -> dict[str, Any]:
+def catalog(
+    request: Request, rule_version: str | None = None, enum_version: str | None = None
+) -> dict[str, Any]:
+    policy = get_classification_policy(rule_version, enum_version)
     return success(
         CatalogPayload(
-            scheme="FIP_CLASSIFICATION_V1",
-            rule_version="1.0.0",
-            enum_version="1.0.0",
+            scheme=policy.scheme,
+            rule_version=policy.rule_version,
+            enum_version=policy.enum_version,
             mapping_version="FIP_CLASSIFICATION_TO_L2_V1",
-            dimensions={k: list(v) for k, v in CATALOG.items()},
+            dimensions={k: list(v) for k, v in policy.catalog.items()},
+            active_dimensions=list(policy.active_dimensions),
+            paused_dimensions=list(policy.paused_dimensions),
+            strategy_tags=list(policy.strategy_tag_catalog),
             statuses=["CONFIRMED", "CANDIDATE", "CONFLICT", "UNKNOWN"],
             confidence_grades={
                 "OFFICIAL_DOCUMENT": "官方产品资料或名录",
@@ -196,6 +226,7 @@ def list_reviews(
     page_size: int = Query(20, ge=1, le=500),
     status: str | None = "PENDING",
     decision_at: dt.date | None = None,
+    scope: Literal["ACTIVE", "HISTORY"] = "ACTIVE",
     repositories: ApiRepositories = Depends(get_api_repositories),
 ) -> dict[str, Any]:
     if status not in {None, "PENDING", "RESOLVED", "SUPERSEDED"}:
@@ -213,6 +244,8 @@ def list_reviews(
         .all()
     )
     views = [_view(row, cutoff, _session(repositories)) for row in rows]
+    if scope == "ACTIVE":
+        views = [v for v in views if v.evaluation_state != "PAUSED"]
     views = [v for v in views if status is None or v.status == status]
     total = len(views)
     return success(
@@ -268,6 +301,9 @@ def review(
             case_id,
             expected_revision=body.expected_revision,
             decisions=body.decisions,
+            tag_decisions=body.tag_decisions,
+            accept_incoming_version=body.accept_incoming_version,
+            reject_upgrade=body.reject_upgrade,
             actor=principal.user_id,
             reason=body.reason,
             can_review=principal.can_review_classifications,

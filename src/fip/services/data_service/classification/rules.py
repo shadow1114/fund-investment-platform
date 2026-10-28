@@ -1,10 +1,12 @@
 """Pure R1–R6 classification. No grouping, network, database or score access."""
 
+import json
 from collections.abc import Sequence
 from datetime import datetime
 
 from .models import DIMENSIONS, ClassificationSnapshot, DimensionResult, Evidence, Source, Status
 from .policy import ClassificationPolicy
+from .strategy import classify_strategy, classify_tags
 
 CATALOG = {
     "asset_class": (
@@ -143,6 +145,21 @@ def _incompatible(dimension: str, values: set[str]) -> bool:
     return {"DOMESTIC", "CROSS_BORDER"} <= values
 
 
+def _index_query_context(item: Evidence) -> bool:
+    """Read the saved identity only; never import or call a source adapter."""
+    locator = item.locator or ""
+    datasets = {"fund_index_passive", "fund_index_enhanced", "fund_info_index_em"}
+    if locator.startswith("identity:"):
+        try:
+            identity, _ = json.JSONDecoder().raw_decode(locator[len("identity:") :])
+        except ValueError:
+            return False
+        return isinstance(identity, dict) and (
+            identity.get("function") == "fund_info_index_em" or identity.get("dataset") in datasets
+        )
+    return any(locator.startswith(f"dataset:{dataset};") for dataset in datasets)
+
+
 def classify(
     evidence: Sequence[Evidence],
     *,
@@ -154,16 +171,68 @@ def classify(
     policy = policy or DEFAULT_POLICY
     dimensions: dict[str, DimensionResult] = {}
     review: set[str] = set()
+    tag_results = None
+    if policy.rule_version == "3.0.0":
+        tag_results, tag_review = classify_tags(evidence, policy)
+        review.update(tag_review)
     for dimension in DIMENSIONS:
+        if dimension not in policy.active_dimensions:
+            dimensions[dimension] = DimensionResult(
+                status="UNKNOWN",
+                value=("UNKNOWN",)
+                if dimension in ("geography", "market_attributes")
+                else "UNKNOWN",
+                evaluation_state="NOT_EVALUATED",
+            )
+            continue
+        if dimension == "strategy" and policy.rule_version == "3.0.0":
+            dimensions[dimension], strategy_review = classify_strategy(evidence, policy)
+            review.update(strategy_review)
+            continue
         values: set[str] = set()
         candidates: set[str] = set()
         used: list[Evidence] = []
         for item in evidence:
             if item.source == "NAME" or (item.normalized_field or item.raw_field) == "name":
-                hints = _name_values(item.raw_value, dimension)
+                hints = _name_values(item.raw_value, dimension) & set(policy.catalog[dimension])
                 candidates.update(hints)
                 if hints:
                     used.append(item)
+                continue
+            if (
+                policy.rule_version == "3.0.0"
+                and (item.normalized_field or item.raw_field) == "tracking_target"
+            ):
+                if dimension != "asset_class":
+                    continue
+                if _index_query_context(item):
+                    used.append(item)
+                    review.add("asset_class:INDEX_QUERY_CONTEXT")
+                    continue
+                if item.raw_field not in ("tracking_target", "跟踪标的"):
+                    used.append(item)
+                    review.add("asset_class:UNRECOGNIZED")
+                    continue
+                entry = policy.index_assets.get(item.raw_value)
+                if entry is None:
+                    used.append(item)
+                    review.add("asset_class:UNRECOGNIZED")
+                    continue
+                values.add(entry.asset_class)
+                used.append(
+                    item.model_copy(
+                        update={
+                            "rule_id": "ASSET_INDEX_EXACT",
+                            "assertion_status": "CONFIRMED",
+                            "required_observations": (item,),
+                            "rationale": (
+                                f"index_asset_mapping_version={policy.index_asset_mapping_version};"
+                                f"provider={entry.provider};reference={entry.reference};"
+                                f"verification={entry.verification};asset_class={entry.asset_class}"
+                            ),
+                        }
+                    )
+                )
                 continue
             if FIELD_DIMENSION.get(item.normalized_field or item.raw_field) != dimension:
                 continue
@@ -229,7 +298,11 @@ def classify(
         if status != "CONFIRMED":
             review.add(f"{dimension}:{status}")
         dimensions[dimension] = DimensionResult(
-            status=status, value=final, candidates=tuple(sorted(candidates)), evidence=tuple(used)
+            status=status,
+            value=final,
+            candidates=tuple(sorted(candidates)),
+            evidence=tuple(used),
+            evaluation_state="EVALUATED" if policy.rule_version == "3.0.0" else None,
         )
     return ClassificationSnapshot(
         rule_version=policy.rule_version,
@@ -240,4 +313,5 @@ def classify(
         geography=dimensions["geography"],
         product_structure=dimensions["product_structure"],
         market_attributes=dimensions["market_attributes"],
+        strategy_tag_results=tag_results,
     )
