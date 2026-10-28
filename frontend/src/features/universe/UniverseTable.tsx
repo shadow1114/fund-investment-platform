@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import type { UniverseMember } from "../../api/generated/m17.schemas";
 import { DataTable } from "../../components/DataTable";
 import { MetricValue } from "../../components/MetricValue";
+import { statusTextColors } from "../../components/StatusBadge";
 import { ConditionList } from "./ConditionList";
 
 type Props = {
@@ -47,7 +48,11 @@ export const UniverseTable = ({ members, label, decisionAt }: Props) => {
           UNKNOWN: "yellow",
         };
         return (
-          <Badge color={colors[status] ?? "gray"} variant="light">
+          <Badge
+            color={colors[status] ?? "gray"}
+            style={{ color: statusTextColors[colors[status] ?? "gray"] }}
+            variant="light"
+          >
             {labels[status] ?? `未知（${status}）`}
           </Badge>
         );

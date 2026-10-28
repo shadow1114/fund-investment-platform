@@ -468,3 +468,56 @@ test("fund detail keeps other tabs usable when score data fails", async ({
       .getByText("暂无评估因子。"),
   ).toBeVisible();
 });
+
+test("candidate status labels meet AA contrast in every state", async ({
+  page,
+}) => {
+  await installFrozenApi(page, {
+    "/api/v1/fund-universes/UNI-001": {
+      status: 200,
+      body: {
+        ...universeDetailEnvelope,
+        data: {
+          ...universeDetailEnvelope.data,
+          members: [
+            ...universeDetailEnvelope.data.members,
+            {
+              ...universeDetailEnvelope.data.members[0],
+              fund_id: "000003",
+              selection_status: "UNKNOWN",
+            },
+          ],
+        },
+      },
+    },
+  });
+  await page.goto("/universes/UNI-001");
+  const check = async (label: string) => {
+    const ratio = await page
+      .getByRole("table")
+      .getByText(label, { exact: true })
+      .evaluate((node) => {
+        const style = getComputedStyle(node.closest(".mantine-Badge-root")!);
+        const luminance = (color: string) => {
+          const channels = color.match(/[\d.]+/g)!.map(Number);
+          const alpha = channels[3] ?? 1;
+          const rgb = channels
+            .slice(0, 3)
+            .map((v) => (v * alpha + 255 * (1 - alpha)) / 255)
+            .map((v) =>
+              v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4,
+            );
+          return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+        };
+        const a = luminance(style.color);
+        const b = luminance(style.backgroundColor);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+    console.log(`${label}: ${ratio.toFixed(2)}:1`);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  };
+  await check("已入选");
+  await check("未知状态");
+  await page.getByRole("tab", { name: "已排除（1）" }).click();
+  await check("已排除");
+});
