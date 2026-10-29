@@ -45,6 +45,8 @@ type OpenApiProjection = {
 
 const frozenPaths = [
   "/api/v1/fund-classifications/catalog",
+  "/api/v1/fund-ingestion-previews",
+  "/api/v1/fund-ingestion-jobs",
   "/api/v1/fund-ingestions",
   "/api/v1/funds/{fund_id}/classification-history",
   "/api/v1/funds/{fund_id}/basic-info-history",
@@ -55,6 +57,9 @@ const frozenPaths = [
   "/api/v1/session",
   "/api/v1/operations/{operation_id}",
   "/api/v1/ingestions/{operation_id}",
+  "/api/v1/ingestions/{operation_id}/items",
+  "/api/v1/ingestions/{operation_id}/cancel",
+  "/api/v1/ingestions/{operation_id}/retry-failed",
   "/api/v1/funds",
   "/api/v1/funds/{fund_id}",
   "/api/v1/funds/{fund_id}/nav-series",

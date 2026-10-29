@@ -63,7 +63,10 @@ const proposedDecision = {
   portfolio_id: "P001",
   optimization_id: "OPT-0001",
   decision_status: "PROPOSED",
-  proposed_weights: [{ fund_id: "000001", weight: 0.6 }],
+  proposed_weights: [
+    { fund_id: "000001", weight: 0.6 },
+    { fund_id: "000002", weight: 0.4 },
+  ],
   review: null,
   final_weights: null,
 };
@@ -92,6 +95,9 @@ const server = setupServer(
   ),
   http.get("/api/v1/portfolios/:portfolioId", () =>
     HttpResponse.json({ data: portfolio, meta: responseMeta, error: null }),
+  ),
+  http.get("/api/v1/fund-universes", () =>
+    HttpResponse.json({ data: [], meta: responseMeta, error: null }),
   ),
   http.post(
     "/api/v1/portfolios/:portfolioId/optimizations",
@@ -169,8 +175,14 @@ const server = setupServer(
           reason: "降低单一基金集中度",
           reviewed_by: "USR-001",
           reviewed_at: "2026-09-16T09:00:00Z",
-          original_weights: [{ fund_id: "000001", weight: 0.6 }],
-          final_weights: [{ fund_id: "000001", weight: 0.5 }],
+          original_weights: [
+            { fund_id: "000001", weight: 0.6 },
+            { fund_id: "000002", weight: 0.4 },
+          ],
+          final_weights: [
+            { fund_id: "000001", weight: 0.5 },
+            { fund_id: "000002", weight: 0.5 },
+          ],
         },
         meta: { audit_id: "AUDIT-001" },
         error: null,
@@ -230,10 +242,10 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
-    await user.type(screen.getByLabelText("决策日期"), "2026-09-16");
-    await user.type(screen.getByLabelText("候选池 ID"), "UNI-001");
-    await user.type(screen.getByLabelText("收益估计版本"), "return-v5");
-    await user.type(screen.getByLabelText("风险模型版本"), "risk-v3");
+    await user.type(screen.getByLabelText(/决策日期/), "2026-09-16");
+    await user.type(screen.getByLabelText(/手动输入真实候选池 ID/), "UNI-001");
+    await user.type(screen.getByLabelText(/收益估计版本/), "return-v5");
+    await user.type(screen.getByLabelText(/风险模型版本/), "risk-v3");
     await user.click(screen.getByRole("button", { name: "提交优化" }));
 
     await waitFor(() => expect(requests).toHaveLength(1));
@@ -255,10 +267,10 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
-    await user.type(screen.getByLabelText("决策日期"), "2026-09-16");
-    await user.type(screen.getByLabelText("候选池 ID"), "UNI-001");
-    await user.type(screen.getByLabelText("收益估计版本"), "return-v5");
-    await user.type(screen.getByLabelText("风险模型版本"), "risk-v3");
+    await user.type(screen.getByLabelText(/决策日期/), "2026-09-16");
+    await user.type(screen.getByLabelText(/手动输入真实候选池 ID/), "UNI-001");
+    await user.type(screen.getByLabelText(/收益估计版本/), "return-v5");
+    await user.type(screen.getByLabelText(/风险模型版本/), "risk-v3");
     await user.click(screen.getByRole("button", { name: "提交优化" }));
 
     expect(await screen.findByText("无可行解（INFEASIBLE）")).toBeVisible();
@@ -276,7 +288,10 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
-    expect(screen.getByText("当前会话无决策复核权限。")).toBeVisible();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("tab", { name: "决策复核" }));
+    expect(screen.getByText("当前会话没有决策复核权限。")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "批准" }),
     ).not.toBeInTheDocument();
@@ -294,22 +309,30 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
+    await user.click(screen.getByRole("tab", { name: "决策复核" }));
     await user.type(screen.getByLabelText("决策 ID"), "D-001");
     await user.click(screen.getByRole("button", { name: "加载决策" }));
     expect(await screen.findByText("000001 60.00%")).toBeVisible();
 
-    await user.type(screen.getByLabelText("复核原因"), "降低单一基金集中度");
     await user.type(
-      screen.getByLabelText("覆盖权重（每行：基金ID,小数权重）"),
-      "000001,0.5",
+      await screen.findByLabelText(/复核理由/),
+      "降低单一基金集中度",
     );
-    await user.click(screen.getByRole("button", { name: "覆盖" }));
+    await user.clear(screen.getByLabelText("000001 覆盖权重"));
+    await user.type(screen.getByLabelText("000001 覆盖权重"), "0.5");
+    await user.clear(screen.getByLabelText("000002 覆盖权重"));
+    await user.type(screen.getByLabelText("000002 覆盖权重"), "0.5");
+    await user.click(screen.getByRole("button", { name: "确认覆盖" }));
+    await user.click(await screen.findByRole("button", { name: "确认提交" }));
 
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0].body).toEqual({
       action: "OVERRIDDEN",
       reason: "降低单一基金集中度",
-      overridden_weights: [{ fund_id: "000001", weight: 0.5 }],
+      overridden_weights: [
+        { fund_id: "000001", weight: 0.5 },
+        { fund_id: "000002", weight: 0.5 },
+      ],
     });
     expect(await screen.findByText("000001 50.00%")).toBeVisible();
     expect(screen.getByRole("region", { name: "原始建议权重" })).toBeVisible();
@@ -328,7 +351,10 @@ describe("PortfolioDecisionPage", () => {
               ? {
                   ...proposedDecision,
                   decision_id: "D-002",
-                  proposed_weights: [{ fund_id: "000002", weight: 0.7 }],
+                  proposed_weights: [
+                    { fund_id: "000002", weight: 0.7 },
+                    { fund_id: "000001", weight: 0.3 },
+                  ],
                 }
               : proposedDecision,
           meta: responseMeta,
@@ -340,15 +366,17 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
+    await user.click(screen.getByRole("tab", { name: "决策复核" }));
     await user.type(screen.getByLabelText("决策 ID"), "D-001");
     await user.click(screen.getByRole("button", { name: "加载决策" }));
     await screen.findByText("000001 60.00%");
-    await user.type(screen.getByLabelText("复核原因"), "复核 A");
-    await user.type(
-      screen.getByLabelText("覆盖权重（每行：基金ID,小数权重）"),
-      "000001,0.5",
-    );
-    await user.click(screen.getByRole("button", { name: "覆盖" }));
+    await user.type(await screen.findByLabelText(/复核理由/), "复核 A");
+    await user.clear(screen.getByLabelText("000001 覆盖权重"));
+    await user.type(screen.getByLabelText("000001 覆盖权重"), "0.5");
+    await user.clear(screen.getByLabelText("000002 覆盖权重"));
+    await user.type(screen.getByLabelText("000002 覆盖权重"), "0.5");
+    await user.click(screen.getByRole("button", { name: "确认覆盖" }));
+    await user.click(await screen.findByRole("button", { name: "确认提交" }));
     await screen.findByText("000001 50.00%");
 
     await user.clear(screen.getByLabelText("决策 ID"));
@@ -357,13 +385,12 @@ describe("PortfolioDecisionPage", () => {
     expect(await screen.findByText("000002 70.00%")).toBeVisible();
     expect(screen.queryByText("000001 50.00%")).not.toBeInTheDocument();
     expect(screen.queryByText("复核人：USR-001")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("复核原因")).toHaveValue("");
-    expect(
-      screen.getByLabelText("覆盖权重（每行：基金ID,小数权重）"),
-    ).toHaveValue("");
+    expect(await screen.findByLabelText(/复核理由/)).toHaveValue("");
+    expect(screen.getByLabelText("000001 覆盖权重")).toHaveValue("0.3（小数）");
 
-    await user.type(screen.getByLabelText("复核原因"), "复核 B");
+    await user.type(await screen.findByLabelText(/复核理由/), "复核 B");
     await user.click(screen.getByRole("button", { name: "批准" }));
+    await user.click(await screen.findByRole("button", { name: "确认提交" }));
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[1].url.pathname).toBe("/api/v1/decisions/D-002/review");
     expect(requests[1].body).toEqual({ action: "APPROVED", reason: "复核 B" });
@@ -375,11 +402,13 @@ describe("PortfolioDecisionPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "稳健组合" });
+    await user.click(screen.getByRole("tab", { name: "决策复核" }));
     await user.type(screen.getByLabelText("决策 ID"), "D-001");
     await user.click(screen.getByRole("button", { name: "加载决策" }));
     await screen.findByText("000001 60.00%");
-    await user.type(screen.getByLabelText("复核原因"), "复核后重新加载");
+    await user.type(await screen.findByLabelText(/复核理由/), "复核后重新加载");
     await user.click(screen.getByRole("button", { name: "批准" }));
+    await user.click(await screen.findByRole("button", { name: "确认提交" }));
     await screen.findByText("审计 ID：AUDIT-001");
 
     await user.click(screen.getByRole("button", { name: "加载决策" }));

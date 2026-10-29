@@ -117,7 +117,7 @@ const server = setupServer(
         fund_id: "000001",
         evaluation_period: "1Y",
         as_of_date: "2026-09-16",
-        evaluation_status: "WARNING",
+        evaluation_status: "LEGACY_UNKNOWN",
         evaluation_profile: "research-v1",
         data_completeness: { available: 250, expected: 252 },
         factor_results: [
@@ -236,14 +236,16 @@ describe("FundDetailPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Alpha 稳健基金" }),
     ).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("tab", { name: "净值" }));
 
     const nav = await screen.findByRole("tabpanel", { name: "净值" });
-    expect(within(nav).getByText("图表数据点：1")).toBeVisible();
+    expect(await within(nav).findByText("图表数据点：2")).toBeVisible();
+    await userEvent.setup().click(within(nav).getByText("查看图表数值"));
     expect(
       within(nav).getByText("不可用（INSUFFICIENT_SAMPLE）"),
     ).toBeVisible();
     expect(within(nav).queryByText("0")).not.toBeInTheDocument();
-    expect(screen.getByText("点时数据：是")).toBeVisible();
+    expect(within(nav).getByText("点时数据：是")).toBeVisible();
   });
 
   it("normalizes an unknown evaluation status and keeps insufficient-sample reasons", async () => {
@@ -251,13 +253,18 @@ describe("FundDetailPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
 
-    await user.click(screen.getByRole("tab", { name: "评估" }));
-    const evaluation = screen.getByRole("tabpanel", { name: "评估" });
-    expect(within(evaluation).getByText("评估状态：UNKNOWN")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "业绩风险" }));
+    const evaluation = screen.getByRole("tabpanel", { name: "业绩风险" });
+    expect(within(evaluation).getByText("未知")).toBeVisible();
     expect(
       within(evaluation).getByText("不可用（INSUFFICIENT_SAMPLE）"),
     ).toBeVisible();
-    expect(within(evaluation).getByText("eval-v4")).toBeVisible();
+    await user.click(
+      within(evaluation).getByRole("button", { name: "查看计算版本" }),
+    );
+    expect(
+      await within(evaluation).findByText("评估策略版本：eval-v4"),
+    ).toBeInTheDocument();
   });
 
   it("supports roving-tab keyboard navigation", async () => {
@@ -265,8 +272,8 @@ describe("FundDetailPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
     const nav = screen.getByRole("tab", { name: "净值" });
-    const evaluation = screen.getByRole("tab", { name: "评估" });
-    const score = screen.getByRole("tab", { name: "评分" });
+    const evaluation = screen.getByRole("tab", { name: "业绩风险" });
+    const score = screen.getByRole("tab", { name: "评分归因" });
     expect(nav).toHaveAttribute("tabindex", "0");
     expect(evaluation).toHaveAttribute("tabindex", "-1");
     nav.focus();
@@ -284,8 +291,8 @@ describe("FundDetailPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
 
-    await user.click(screen.getByRole("tab", { name: "评分" }));
-    const score = screen.getByRole("tabpanel", { name: "评分" });
+    await user.click(screen.getByRole("tab", { name: "评分归因" }));
+    const score = screen.getByRole("tabpanel", { name: "评分归因" });
     expect(within(score).getByText("总分（无量纲）")).toBeVisible();
     expect(
       within(score).getAllByText("不可用（INSUFFICIENT_SAMPLE）").length,
@@ -313,6 +320,8 @@ describe("FundDetailPage", () => {
       ),
     );
     renderPage();
-    expect(await screen.findByText("HTTP 404 · FUND_NOT_FOUND")).toBeVisible();
+    expect(
+      await screen.findByText("请求失败 · 404 FUND_NOT_FOUND"),
+    ).toBeVisible();
   });
 });

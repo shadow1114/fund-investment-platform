@@ -1,11 +1,21 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   BacktestPerformance,
   SeriesPoint,
 } from "../../api/generated/m17.schemas";
 import { BacktestPerformanceChart } from "./BacktestPerformanceChart";
+import { renderWithMantine as render } from "../../test/render";
+
+vi.mock("echarts-for-react/lib/core", () => ({
+  default: ({ option }: { option: { series: { name: string }[] } }) => (
+    <div aria-label="回测绩效图">
+      {option.series.map((series) => series.name).join("、")}
+    </div>
+  ),
+}));
 
 const point = (
   date: string,
@@ -17,7 +27,8 @@ const point = (
 afterEach(cleanup);
 
 describe("BacktestPerformanceChart", () => {
-  it("keeps null dates and their status and reason visible across performance series", () => {
+  it("keeps null dates and their status and reason visible across performance series", async () => {
+    const user = userEvent.setup();
     const performance: BacktestPerformance = {
       segment: "FULL",
       series: {
@@ -41,15 +52,20 @@ describe("BacktestPerformanceChart", () => {
     };
 
     render(<BacktestPerformanceChart performance={performance} />);
+    await user.click(screen.getByText("查看图表数值"));
 
-    const unavailable = screen.getByRole("region", { name: "不可用绩效点位" });
+    const cumulative = screen.getByRole("region", {
+      name: "累计收益数值表",
+    });
+    expect(within(cumulative).getByText("NAV_MISSING")).toBeVisible();
+    expect(within(cumulative).getByText("UNAVAILABLE")).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "滚动 Sharpe" }));
+    const rollingSharpe = screen.getByRole("region", {
+      name: "滚动 Sharpe数值表",
+    });
     expect(
-      within(unavailable).getByText(/组合累计收益.*2026-06-30.*NAV_MISSING/),
-    ).toBeVisible();
-    expect(
-      within(unavailable).getByText(
-        /滚动夏普.*2026-06-28.*INSUFFICIENT_SAMPLE/,
-      ),
+      within(rollingSharpe).getByText("INSUFFICIENT_SAMPLE"),
     ).toBeVisible();
   });
 });

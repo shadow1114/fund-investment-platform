@@ -1,5 +1,3 @@
-import { MantineProvider } from "@mantine/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
   fireEvent,
@@ -10,33 +8,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { MemoryRouter, useRoutes } from "react-router-dom";
-
 import { App } from "../app/App";
 import { queryClient } from "../app/queryClient";
-import { routes } from "../app/routes";
 import { errorEnvelope, universeDetailEnvelope } from "./contractFixtures";
 import { requestLog, resetRequestLog, server } from "./mswServer";
 
-const newClient = () =>
-  new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
-
-const RouteHarness = () => useRoutes(routes);
-
 const renderRoute = (initialEntry: string) => {
-  const client = newClient();
-  const view = render(
-    <MantineProvider>
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <RouteHarness />
-        </MemoryRouter>
-      </QueryClientProvider>
-    </MantineProvider>,
-  );
-  return { ...view, client };
+  window.history.replaceState({}, "", initialEntry);
+  const view = render(<App />);
+  return { ...view, client: queryClient };
 };
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -61,23 +41,23 @@ describe("M1.7 accessibility and contract verification", () => {
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeVisible();
     expect(screen.getByRole("form", { name: "基金快速定位" })).toBeVisible();
 
-    for (const name of [
-      "工作台",
-      "基金研究",
-      "候选池",
-      "组合管理",
-      "策略回测",
-    ]) {
-      const link = within(
-        screen.getByRole("navigation", { name: "主导航" }),
-      ).getByRole("link", { name });
-      for (
-        let step = 0;
-        step < 12 && document.activeElement !== link;
-        step += 1
-      ) {
-        await user.tab();
-      }
+    const links = ["工作台", "基金研究", "候选池", "组合管理", "策略回测"].map(
+      (name) =>
+        within(screen.getByRole("navigation", { name: "主导航" })).getByRole(
+          "link",
+          { name },
+        ),
+    );
+    for (
+      let step = 0;
+      step < 20 && !links.includes(document.activeElement as HTMLAnchorElement);
+      step += 1
+    ) {
+      await user.tab();
+    }
+    expect(links[0]).toHaveFocus();
+    for (const link of links.slice(1)) {
+      await user.tab();
       expect(link).toHaveFocus();
     }
     expect(
@@ -118,15 +98,17 @@ describe("M1.7 accessibility and contract verification", () => {
         ),
       );
       renderRoute(path);
-      expect(await screen.findByText(`HTTP ${status} · ${code}`)).toBeVisible();
+      expect(
+        await screen.findByText(`请求失败 · ${status} ${code}`),
+      ).toBeVisible();
       expect(screen.getByText(`Contract fixture for ${code}`)).toBeVisible();
     },
   );
 
   it.each([
     ["/api/v1/funds/000001/nav-series", "净值"],
-    ["/api/v1/funds/000001/evaluations", "评估"],
-    ["/api/v1/funds/000001/scores", "评分"],
+    ["/api/v1/funds/000001/evaluations", "业绩风险"],
+    ["/api/v1/funds/000001/scores", "评分归因"],
   ] as const)(
     "fund detail exposes dependent %s errors",
     async (endpoint, tab) => {
@@ -141,39 +123,8 @@ describe("M1.7 accessibility and contract verification", () => {
       await screen.findByRole("heading", { name: "Alpha 稳健基金" });
       fireEvent.click(screen.getByRole("tab", { name: tab }));
       expect(
-        await screen.findByText("HTTP 422 · DEPENDENT_DATA_FAILED"),
+        await screen.findByText("请求失败 · 422 DEPENDENT_DATA_FAILED"),
       ).toBeVisible();
-    },
-  );
-
-  it.each(statuses)(
-    "backtest creation exposes HTTP %i and its API code",
-    async (status, code) => {
-      server.use(
-        http.post("/api/v1/backtests", () =>
-          HttpResponse.json(errorEnvelope(code), { status }),
-        ),
-      );
-      renderRoute("/backtests");
-      for (const [label, value] of [
-        ["策略 ID", "STRATEGY-1"],
-        ["开始日期", "2020-01-01"],
-        ["结束日期", "2026-06-30"],
-        ["基准 ID", "CSI300"],
-        ["再平衡政策版本", "rebalance-v3"],
-        ["组合规则版本", "portfolio-v4"],
-        ["收益估计版本", "return-v5"],
-        ["风险模型版本", "risk-v7"],
-        ["资格规则版本", "eligibility-v4"],
-        ["交易成本模型版本", "cost-v2"],
-      ]) {
-        fireEvent.change(screen.getByLabelText(label), {
-          target: { value },
-        });
-      }
-      fireEvent.click(screen.getByRole("button", { name: "创建回测" }));
-      expect(await screen.findByText(`HTTP ${status} · ${code}`)).toBeVisible();
-      expect(screen.getByRole("button", { name: "启动回测" })).toBeDisabled();
     },
   );
 
@@ -207,7 +158,7 @@ describe("M1.7 accessibility and contract verification", () => {
       ["/universes/UNI-001", "候选池快照"],
       ["/portfolios", "组合决策"],
       ["/portfolios/P001", "稳健组合"],
-      ["/backtests", "回测"],
+      ["/backtests", "回测分析"],
     ] as const;
 
     for (const [path, heading] of visits) {

@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { LivePortfolioPanel } from "./LivePortfolioPanel";
 import { RebalancingPanel } from "./RebalancingPanel";
+import { renderWithMantine as render } from "../../test/render";
 
 const livePortfolioData = {
   portfolio_id: "P001",
@@ -155,67 +155,43 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("LivePortfolioPanel", () => {
-  it("renders three-state portfolio details, positions and drift", async () => {
+  it("explains why live positions are unavailable without a verified source", async () => {
     renderWithClient(<LivePortfolioPanel portfolioId="P001" />);
 
+    expect(await screen.findByLabelText("实盘持仓与三态监控")).toBeVisible();
+    expect(screen.getByText("实盘数据源不可交付")).toBeVisible();
     expect(
-      await screen.findByText("实盘三态持仓监控（Stage ⑨ Live Portfolio）"),
-    ).toBeVisible();
-    expect(screen.getByText("状态：ACTIVE")).toBeVisible();
-    expect(screen.getByText("✅ 无在途挂单")).toBeVisible();
-
-    // Check table rows
-    expect(screen.getByText("000001")).toBeVisible();
-    expect(screen.getByText("000002")).toBeVisible();
-    expect(screen.getByText("60.00%")).toBeVisible();
-    expect(screen.getByText("55.00%")).toBeVisible();
+      screen.getByRole("region", {
+        name: "Target、Pending、Actual 持仓数据状态",
+      }),
+    ).toHaveTextContent("Target 目标仓位");
+    expect(screen.getByText("无经核验的账户持仓来源")).toBeVisible();
   });
 
-  it("submits execution report fill simulation", async () => {
-    const user = userEvent.setup();
+  it("keeps execution reports disabled until a durable ledger is available", async () => {
     renderWithClient(<LivePortfolioPanel portfolioId="P001" />);
 
-    await screen.findByText("实盘三态持仓监控（Stage ⑨ Live Portfolio）");
+    await screen.findByLabelText("实盘持仓与三态监控");
 
-    await user.type(screen.getByLabelText("基金代码："), "000001");
-    await user.click(screen.getByRole("button", { name: "推送成交" }));
-
-    await waitFor(() => expect(capturedReports).toHaveLength(1));
-    expect(capturedReports[0]).toMatchObject({
-      fund_id: "000001",
-      direction: "BUY",
-      requested_shares: 10000,
-      filled_shares: 10000,
-      status: "FILLED",
-    });
+    expect(
+      screen.getByRole("button", { name: "成交回报暂不可提交" }),
+    ).toBeDisabled();
+    expect(capturedReports).toHaveLength(0);
   });
 });
 
 describe("RebalancingPanel", () => {
-  it("renders historical events and evaluates rebalancing proposals", async () => {
-    const user = userEvent.setup();
+  it("explains unavailable rebalancing inputs and does not create a proposal", async () => {
     renderWithClient(<RebalancingPanel portfolioId="P001" />);
 
+    expect(await screen.findByLabelText("动态再平衡与调仓评估")).toBeVisible();
+    expect(screen.getByText("再平衡服务未接入真实数据")).toBeVisible();
     expect(
-      await screen.findByText("动态再平衡与调仓引擎（Stage ⑩ Rebalancing）"),
-    ).toBeVisible();
-    expect(await screen.findByText(/REB-PREV-01|2026-03-15/)).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "发起再平衡评估" }));
-
-    await waitFor(() => expect(capturedEvaluations).toHaveLength(1));
-    expect(capturedEvaluations[0]).toMatchObject({
-      decision_at: "2026-03-31",
-      fund_drift_threshold: 0.03,
-      min_trade_threshold: 0.005,
-    });
-
-    expect(
-      await screen.findByText("✅ 建议执行调仓（RECOMMENDED）"),
+      screen.getByText("持久化实际仓位、真实估值日期、已应用规则版本"),
     ).toBeVisible();
     expect(
-      screen.getByText("建议调仓买卖交易清单（Rebalancing Trades）"),
-    ).toBeVisible();
-    expect(screen.getByText("买入加仓")).toBeVisible();
+      screen.queryByRole("button", { name: "发起再平衡评估" }),
+    ).not.toBeInTheDocument();
+    expect(capturedEvaluations).toHaveLength(0);
   });
 });

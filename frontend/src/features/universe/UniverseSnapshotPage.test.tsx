@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { UniverseSnapshotPage } from "../../pages/UniverseSnapshotPage";
+import { renderWithMantine as render } from "../../test/render";
 
 const requests: URL[] = [];
 
@@ -151,16 +152,19 @@ describe("UniverseSnapshotPage", () => {
     renderPage("/universes/UNI-ELIGIBILITY-1");
 
     expect(
-      await screen.findByRole("heading", { name: "候选池快照" }),
+      await screen.findByRole("heading", {
+        name: "候选池快照 UNI-ELIGIBILITY-1",
+      }),
     ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "已入选（1）" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "已排除（1）" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "已入选（1）" })).toBeVisible();
     expect(screen.getByText("000001")).toBeVisible();
-    expect(screen.getByText("000002")).toBeVisible();
-    expect(screen.getByText("SELECTED")).toBeVisible();
-    expect(screen.getByText("REJECTED")).toBeVisible();
-
+    expect(screen.getByText("已入选")).toBeVisible();
     expect(screen.getAllByText("不可用（ELIGIBILITY_ONLY）")).toHaveLength(3);
+
+    await user.click(screen.getByRole("tab", { name: "已排除（1）" }));
+    expect(screen.getByText("000002")).toBeVisible();
+    expect(screen.getByText("已排除")).toBeVisible();
+
     expect(screen.getAllByText("不可用（FAILED_ELIGIBILITY）")).toHaveLength(3);
 
     await user.click(
@@ -168,15 +172,17 @@ describe("UniverseSnapshotPage", () => {
     );
     expect(screen.getByText("minimum_aum")).toBeVisible();
     expect(screen.getByText("minimum_track_record_years")).toBeVisible();
-    expect(screen.getByText("差额：-2000000")).toBeVisible();
-    expect(screen.getByText("差额：-2.2")).toBeVisible();
+    expect(screen.getByText("-2000000")).toBeVisible();
+    expect(screen.getByText("-2.2")).toBeVisible();
 
     expect(screen.getByText("资格规则版本：eligibility-v4")).toBeVisible();
     expect(
       screen.getByText("评分策略版本：未使用（仅资格筛选）"),
     ).toBeVisible();
     expect(screen.getByText("点时数据：是")).toBeVisible();
-    expect(screen.getByText("factor_version: factor-v8")).toBeVisible();
+    await user.click(screen.getByText("查看来源版本"));
+    expect(screen.getByText("factor_version")).toBeVisible();
+    expect(screen.getByText("factor-v8")).toBeVisible();
   });
 
   it("sends the frozen list filters and links to the returned snapshot", async () => {
@@ -187,8 +193,8 @@ describe("UniverseSnapshotPage", () => {
     expect(screen.getByRole("textbox", { name: "策略 ID" })).toHaveValue(
       "low-volatility",
     );
-    expect(screen.getByLabelText("决策时间")).toHaveAttribute("type", "date");
-    expect(screen.getByLabelText("决策时间")).toHaveValue("2026-09-16");
+    expect(screen.getByLabelText("决策日期")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("决策日期")).toHaveValue("2026-09-16");
     expect(screen.getByRole("textbox", { name: "资格规则版本" })).toHaveValue(
       "eligibility-v4",
     );
@@ -200,7 +206,10 @@ describe("UniverseSnapshotPage", () => {
       eligibility_rules_version: "eligibility-v4",
     });
     expect(
-      await screen.findByRole("link", { name: "查看快照 UNI-ELIGIBILITY-1" }),
-    ).toHaveAttribute("href", "/universes/UNI-ELIGIBILITY-1");
+      await screen.findByRole("link", { name: "UNI-ELIGIBILITY-1" }),
+    ).toHaveAttribute(
+      "href",
+      expect.stringContaining("/universes/UNI-ELIGIBILITY-1?return_to="),
+    );
   });
 });

@@ -1,11 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +13,7 @@ import { ProvenanceBar } from "./ProvenanceBar";
 import { ScoreExplainChain } from "./ScoreExplainChain";
 import { WeightExplainChain } from "./WeightExplainChain";
 import { DecisionReviewPanel } from "../features/portfolio/DecisionReviewPanel";
+import { renderWithMantine as render } from "../test/render";
 
 const getOperationMock = vi.hoisted(() => vi.fn());
 
@@ -103,8 +98,11 @@ describe("cross-page semantics", () => {
     );
 
     expect(screen.getByText("点时数据：是")).toBeVisible();
-    expect(screen.getByText("scoring_policy_version: score-v3")).toBeVisible();
-    expect(screen.getByText("data_version: dv-9")).toBeVisible();
+    screen.getByText("查看来源版本").click();
+    expect(screen.getByText("scoring_policy_version")).toBeVisible();
+    expect(screen.getByText("score-v3")).toBeVisible();
+    expect(screen.getByText("data_version")).toBeVisible();
+    expect(screen.getByText("dv-9")).toBeVisible();
     expect(screen.getByText("精确 7")).toBeVisible();
     expect(screen.getByText("派生 2")).toBeVisible();
     expect(screen.getByText("推断 1")).toBeVisible();
@@ -113,7 +111,7 @@ describe("cross-page semantics", () => {
   it("reports missing provenance fields as a contract error", () => {
     render(<ProvenanceBar meta={{}} />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("数据溯源契约错误");
+    expect(screen.getByRole("alert")).toHaveTextContent("来源契约不完整");
     expect(screen.getByText("点时数据：未知")).toBeVisible();
   });
 
@@ -148,7 +146,9 @@ describe("cross-page semantics", () => {
 
     expect(await screen.findByText("运行中")).toBeVisible();
     expect(await screen.findByText("已完成")).toBeVisible();
-    expect(screen.getByText("/api/v1/backtests/BT-1/status")).toBeVisible();
+    expect(
+      screen.getByText("结果资源：/api/v1/backtests/BT-1/status"),
+    ).toBeVisible();
     await waitFor(() => expect(getOperationMock).toHaveBeenCalledTimes(2));
   });
 
@@ -170,7 +170,7 @@ describe("cross-page semantics", () => {
     withQueryClient(<OperationProgress operationId="OP-ERR" />);
 
     expect(
-      await screen.findByText("HTTP 422 · INVALID_OPERATION"),
+      await screen.findByText("请求失败 · 422 INVALID_OPERATION"),
     ).toBeVisible();
     expect(screen.getByText("Operation cannot be read")).toBeVisible();
   });
@@ -188,7 +188,7 @@ describe("cross-page semantics", () => {
 
     withQueryClient(<OperationProgress operationId="OP-2" />);
 
-    expect(await screen.findByText("已阻塞")).toBeVisible();
+    expect(await screen.findByText("已阻断")).toBeVisible();
     expect(screen.getByText("RULE_CONFLICT：Rules conflict")).toBeVisible();
     await waitFor(() => expect(getOperationMock).toHaveBeenCalledTimes(1));
   });
@@ -206,7 +206,9 @@ describe("cross-page semantics", () => {
       />,
     );
 
-    expect(screen.getByText("HTTP 422 · INVALID_CONFIGURATION")).toBeVisible();
+    expect(
+      screen.getByText("请求失败 · 422 INVALID_CONFIGURATION"),
+    ).toBeVisible();
     expect(screen.getByText("Configuration is invalid")).toBeVisible();
   });
 

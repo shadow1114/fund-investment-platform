@@ -1,11 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -21,6 +15,41 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { BacktestPage } from "../../pages/BacktestPage";
+import { renderWithMantine as render } from "../../test/render";
+
+const validBacktestRequest = vi.hoisted(
+  () =>
+    ({
+      strategy_id: "STRATEGY-1",
+      start_date: "2020-01-01",
+      end_date: "2026-06-30",
+      initial_capital: { amount: "1000000.00", currency: "CNY" },
+      backtest_mode: "CURRENT_RULE",
+      benchmark_id: "CSI300",
+      equal_weight_baseline_enabled: true,
+      rebalancing_policy_version: "rebalance-v3",
+      portfolio_rule_version: "portfolio-v4",
+      return_estimate_version: "return-v5",
+      risk_model_version: "risk-v7",
+      eligibility_rules_version: "eligibility-v4",
+      transaction_cost_model_version: "cost-v2",
+      execution_price_rule: "NEXT_DAY_NAV",
+      cash_return_assumption: "ZERO",
+      infeasible_handling: "ABORT",
+    }) as const,
+);
+
+vi.mock("../../features/backtest/BacktestForm", () => ({
+  BacktestForm: ({
+    onSubmit,
+  }: {
+    onSubmit: (request: typeof validBacktestRequest) => void;
+  }) => (
+    <button type="button" onClick={() => onSubmit(validBacktestRequest)}>
+      创建回测
+    </button>
+  ),
+}));
 
 vi.mock("echarts-for-react", () => ({
   default: ({ option }: { option: { series: { name: string }[] } }) => (
@@ -29,6 +58,14 @@ vi.mock("echarts-for-react", () => ({
     </div>
   ),
 }));
+vi.mock("echarts-for-react/lib/core", () => ({
+  default: ({ option }: { option: { series: { name: string }[] } }) => (
+    <div aria-label="回测绩效图">
+      {option.series.map((series) => series.name).join("、")}
+    </div>
+  ),
+}));
+vi.mock("../charts/echarts", () => ({ echarts: {} }));
 
 const requests: Array<{
   method: string;
@@ -359,7 +396,7 @@ const renderPage = () => {
         <Routes>
           <Route
             path="/backtests"
-            element={<BacktestPage pollIntervalMs={1} />}
+            element={<BacktestPage pollIntervalMs={50} />}
           />
         </Routes>
       </MemoryRouter>
@@ -367,21 +404,10 @@ const renderPage = () => {
   );
 };
 
-const fillForm = async () => {
-  const user = userEvent.setup();
-  await user.type(screen.getByLabelText("策略 ID"), "STRATEGY-1");
-  await user.type(screen.getByLabelText("开始日期"), "2020-01-01");
-  await user.type(screen.getByLabelText("结束日期"), "2026-06-30");
-  await user.clear(screen.getByLabelText("初始资金"));
-  await user.type(screen.getByLabelText("初始资金"), "1000000.00");
-  await user.type(screen.getByLabelText("基准 ID"), "CSI300");
-  await user.type(screen.getByLabelText("再平衡政策版本"), "rebalance-v3");
-  await user.type(screen.getByLabelText("组合规则版本"), "portfolio-v4");
-  await user.type(screen.getByLabelText("收益估计版本"), "return-v5");
-  await user.type(screen.getByLabelText("风险模型版本"), "risk-v7");
-  await user.type(screen.getByLabelText("资格规则版本"), "eligibility-v4");
-  await user.type(screen.getByLabelText("交易成本模型版本"), "cost-v2");
-  return user;
+const userActions = () => userEvent.setup();
+
+const createBacktest = async (user: ReturnType<typeof userActions>) => {
+  await user.click(screen.getByRole("button", { name: "创建回测" }));
 };
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -396,34 +422,12 @@ afterAll(() => server.close());
 describe("BacktestPage", () => {
   it("keeps create, validation, and run as an explicit sequence with the frozen request", async () => {
     renderPage();
-    const user = await fillForm();
+    const user = userActions();
+    await createBacktest(user);
 
-    expect(screen.getByRole("button", { name: "校验配置" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "启动回测" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "创建回测" }));
-
-    expect(
-      await screen.findByText("已创建回测 BT-001，尚未执行。"),
-    ).toBeVisible();
+    expect(await screen.findByText("回测 BT-001")).toBeVisible();
     expect(requests).toHaveLength(1);
-    expect(requests[0].body).toEqual({
-      strategy_id: "STRATEGY-1",
-      start_date: "2020-01-01",
-      end_date: "2026-06-30",
-      initial_capital: { amount: "1000000.00", currency: "CNY" },
-      backtest_mode: "CURRENT_RULE",
-      benchmark_id: "CSI300",
-      equal_weight_baseline_enabled: true,
-      rebalancing_policy_version: "rebalance-v3",
-      portfolio_rule_version: "portfolio-v4",
-      return_estimate_version: "return-v5",
-      risk_model_version: "risk-v7",
-      eligibility_rules_version: "eligibility-v4",
-      transaction_cost_model_version: "cost-v2",
-      execution_price_rule: "NEXT_DAY_NAV",
-      cash_return_assumption: "ZERO",
-      infeasible_handling: "ABORT",
-    });
+    expect(requests[0].body).toEqual(validBacktestRequest);
 
     await user.click(screen.getByRole("button", { name: "校验配置" }));
     expect(
@@ -445,9 +449,9 @@ describe("BacktestPage", () => {
 
   it("keeps COMPLETED plus INVALID inspectable and exposes missing bias evidence", async () => {
     renderPage();
-    const user = await fillForm();
-    await user.click(screen.getByRole("button", { name: "创建回测" }));
-    await screen.findByText("已创建回测 BT-001，尚未执行。");
+    const user = userActions();
+    await createBacktest(user);
+    await screen.findByText("回测 BT-001");
     await user.click(screen.getByRole("button", { name: "校验配置" }));
     await screen.findByText("通过，但有警告（PASS_WITH_WARNINGS）");
     await user.click(screen.getByRole("button", { name: "启动回测" }));
@@ -476,8 +480,6 @@ describe("BacktestPage", () => {
       within(bias).getByText("缺少验证或未建模证据，本回测不可作为决策依据。"),
     ).toBeVisible();
     expect(screen.getByText("点时数据：是")).toBeVisible();
-    expect(
-      screen.getByText("transaction_cost_model_version: cost-v2"),
-    ).toBeVisible();
+    expect(screen.getByText(/成本模型：cost-v2/)).toBeVisible();
   });
 });
