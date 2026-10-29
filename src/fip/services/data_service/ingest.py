@@ -2,6 +2,7 @@ import datetime as dt
 import hashlib
 import io
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -29,6 +30,8 @@ from fip.services.data_service.grouping import split_share_class_name
 from fip.services.data_service.models.fund import (
     Fund,
     FundBasicInfoHistory,
+    FundManager,
+    FundManagerAssignment,
     FundShareClass,
     ProviderFundIdentity,
 )
@@ -95,6 +98,85 @@ class _MergedEvent:
 
 
 _INGEST_DATASET_CODES = ("fund_nav", "fund_distribution", "fund_split")
+
+
+_MANAGER_NAME_SEPARATORS = re.compile(r"[、，,；;\n]+")
+_NO_MANAGER_VALUES = frozenset({"-", "--", "—", "暂无", "无", "未披露", "未知"})
+
+
+def _parse_manager_names(value: object) -> list[str] | None:
+    """Parse a provider's current manager field, preserving unknown as unknown."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    if value.strip() in _NO_MANAGER_VALUES:
+        return None
+    names = [name.strip() for name in _MANAGER_NAME_SEPARATORS.split(value) if name.strip()]
+    names = list(dict.fromkeys(name for name in names if name not in _NO_MANAGER_VALUES))
+    return names or None
+
+
+def _manager_code(manager_name: str) -> str:
+    """Create a stable local key when the provider supplies no manager identifier."""
+    digest = hashlib.sha256(manager_name.casefold().encode("utf-8")).hexdigest()
+    return f"AKS-{digest[:28]}"
+
+
+def _sync_fund_manager_assignments(
+    session: Session,
+    fund_id: int,
+    manager_value: object,
+    observed_at: dt.datetime,
+) -> None:
+    """Maintain inferred manager intervals from the current overview observation."""
+    names = _parse_manager_names(manager_value)
+    if names is None:
+        return
+
+    observed_on = observed_at.date()
+    current_rows = session.execute(
+        select(FundManagerAssignment, FundManager)
+        .join(FundManager, FundManager.id == FundManagerAssignment.manager_id)
+        .where(
+            FundManagerAssignment.fund_id == fund_id,
+            FundManagerAssignment.valid_to.is_(None),
+        )
+        .with_for_update()
+    ).all()
+    current = {manager.manager_name: assignment for assignment, manager in current_rows}
+    incoming_names = set(names)
+
+    for name, assignment in current.items():
+        if name in incoming_names:
+            continue
+        if assignment.valid_from < observed_on:
+            assignment.valid_to = observed_on
+        else:
+            # Date-granularity intervals cannot represent a same-day zero-length
+            # tenure; keep the final observation for that date.
+            session.delete(assignment)
+
+    for name in names:
+        if name in current:
+            continue
+        code = _manager_code(name)
+        manager = session.scalar(select(FundManager).where(FundManager.manager_code == code))
+        if manager is None:
+            manager = FundManager(manager_code=code, manager_name=name[:64])
+            session.add(manager)
+            session.flush()
+        session.add(
+            FundManagerAssignment(
+                fund_id=fund_id,
+                manager_id=manager.id,
+                valid_from=observed_on,
+                valid_to=None,
+                available_at=observed_at,
+                availability_quality="INFERRED",
+                published_at=None,
+                provider_available_at=None,
+                ingested_at=observed_at,
+            )
+        )
 
 
 class IngestService:
@@ -556,7 +638,6 @@ class IngestService:
             "投资范围": "investment_scope",
             "投资策略": "investment_strategy",
             "跟踪标的": "tracking_target",
-            "基金经理": "manager_name",
             "基金规模": "aum",
         }
         normalized_fields = {
@@ -564,6 +645,9 @@ class IngestService:
             for name, value in raw_fields.items()
             if name in normalized_names and value is not None
         }
+        manager_value = raw_fields.get("基金经理人") or raw_fields.get("基金经理")
+        if manager_value is not None:
+            normalized_fields["manager_name"] = manager_value
         content_hash = hashlib.sha256(
             json.dumps(
                 {"raw_fields": raw_fields, "normalized_fields": normalized_fields},
@@ -595,6 +679,12 @@ class IngestService:
                 )
             )
             self._session.flush()
+        _sync_fund_manager_assignments(
+            self._session,
+            fund_id,
+            manager_value,
+            record.ingested_at,
+        )
         fields: dict[str, str] = {}
         aliases = {
             "基金类型": "formal_type",
