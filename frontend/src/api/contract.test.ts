@@ -65,6 +65,7 @@ const frozenPaths = [
   "/api/v1/funds/{fund_id}/nav-series",
   "/api/v1/funds/{fund_id}/evaluations",
   "/api/v1/funds/{fund_id}/scores",
+  "/api/v1/funds/{fund_id}/factor-analysis",
   "/api/v1/fund-universes",
   "/api/v1/fund-universes/{universe_id}",
   "/api/v1/portfolios",

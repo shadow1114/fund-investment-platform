@@ -44,6 +44,15 @@ def test_development_headers_create_principal():
     assert principal == Principal("USR-1", ("reviewer",), True, True)
 
 
-def test_full_universe_capability_defaults_to_false_even_for_development_admin():
+def test_development_default_principal_has_maximum_permissions():
+    principal = resolve_principal(_request({}, environment="development"))
+    assert principal.roles == ("Administrator",)
+    assert principal.can_review_decisions is True
+    assert principal.can_review_classifications is True
+    assert principal.can_manage_data_ingestion is True
+    assert principal.can_manage_full_universe_ingestion is True
+
+
+def test_development_admin_has_full_universe_permission():
     principal = resolve_principal(_request({"X-Roles": "admin"}, environment="development"))
-    assert principal.can_manage_full_universe_ingestion is False
+    assert principal.can_manage_full_universe_ingestion is True

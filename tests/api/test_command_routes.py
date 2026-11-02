@@ -30,6 +30,7 @@ def test_override_review_requires_reviewer_and_reason() -> None:
     denied = client.post(
         "/api/v1/decisions/D-1/review",
         json={"decision_status": "OVERRIDDEN"},
+        headers={"X-Roles": "Researcher"},
     )
     assert denied.status_code == 403
     assert denied.json()["error"]["code"] == "FORBIDDEN"

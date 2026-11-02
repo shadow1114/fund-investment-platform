@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from math import sqrt
+from math import prod, sqrt
 from statistics import mean, stdev
 
 from fip.strategy_library.factor_types import (
@@ -21,6 +21,27 @@ def align_return_series(
         (x.value, bench[x.effective_at], rf.get(x.effective_at, 0.0))
         for x in fund
         if x.effective_at in bench and (not risk_free or x.effective_at in rf)
+    )
+
+
+def excess_return(
+    fund_returns: Sequence[ReturnObservation],
+    benchmark_returns: Sequence[ReturnObservation],
+    *,
+    minimum_observations: int = 1,
+) -> FactorResult:
+    rows = align_return_series(fund_returns, benchmark_returns)
+    if len(rows) < minimum_observations:
+        return unavailable("F-REL-001", "INSUFFICIENT_PAIRED_OBSERVATIONS", len(rows))
+    if not rows:
+        return unavailable("F-REL-001", "BENCHMARK_UNAVAILABLE")
+    fund, benchmark, _rf = map(list, zip(*rows, strict=True))
+    return FactorResult(
+        "F-REL-001",
+        prod(1 + value for value in fund) - prod(1 + value for value in benchmark),
+        FactorStatus.AVAILABLE,
+        None,
+        len(rows),
     )
 
 

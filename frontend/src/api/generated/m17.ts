@@ -20,6 +20,7 @@ import type {
   ErrorResponseResponse,
   FundBasicInfoHistoryListResponseResponse,
   FundEvaluationResponseResponse,
+  FundFactorAnalysisResponseResponse,
   FundIngestionBatchRequest,
   FundIngestionHistoryEnvelope,
   FundIngestionItemsEnvelope,
@@ -38,6 +39,7 @@ import type {
   GetClassificationReviewParams,
   GetFundBasicInfoHistoryParams,
   GetFundEvaluationsParams,
+  GetFundFactorAnalysisParams,
   GetFundNavSeriesParams,
   GetFundParams,
   GetFundScoresParams,
@@ -869,6 +871,61 @@ export const getFundEvaluations = async (
 ): Promise<getFundEvaluationsResponse> => {
   return apiFetch<getFundEvaluationsResponse>(
     getGetFundEvaluationsUrl(fundId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export type getFundFactorAnalysisResponse200 = {
+  data: FundFactorAnalysisResponseResponse;
+  status: 200;
+};
+
+export type getFundFactorAnalysisResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type getFundFactorAnalysisResponseSuccess =
+  getFundFactorAnalysisResponse200 & {
+    headers: Headers;
+  };
+export type getFundFactorAnalysisResponseError =
+  getFundFactorAnalysisResponseDefault & {
+    headers: Headers;
+  };
+
+export type getFundFactorAnalysisResponse =
+  getFundFactorAnalysisResponseSuccess | getFundFactorAnalysisResponseError;
+
+export const getGetFundFactorAnalysisUrl = (
+  fundId: string,
+  params?: GetFundFactorAnalysisParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/funds/${fundId}/factor-analysis?${stringifiedParams}`
+    : `/api/v1/funds/${fundId}/factor-analysis`;
+};
+
+export const getFundFactorAnalysis = async (
+  fundId: string,
+  params?: GetFundFactorAnalysisParams,
+  options?: RequestInit,
+): Promise<getFundFactorAnalysisResponse> => {
+  return apiFetch<getFundFactorAnalysisResponse>(
+    getGetFundFactorAnalysisUrl(fundId, params),
     {
       ...options,
       method: "GET",

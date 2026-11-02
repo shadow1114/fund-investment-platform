@@ -104,6 +104,19 @@ class _SeededFundRepository(FundRepository):
             "meta": {"scoring_policy_version": "score-v4"},
         }
 
+    def read_live_factor_analysis(self, identifier: str, **filters: object) -> Mapping[str, object]:
+        assert identifier == "fund-1"
+        assert filters == {"evaluation_period": "5Y", "as_of_date": "2025-01-31"}
+        return {
+            "data": {
+                "fund_id": identifier,
+                "evaluation_period": "5Y",
+                "as_of_date": "2025-01-31",
+                "factor_categories": [],
+            },
+            "meta": {"calculation_mode": "ON_DEMAND"},
+        }
+
 
 def _client(repository: FundRepository) -> TestClient:
     app = create_app()
@@ -202,6 +215,17 @@ def test_fund_detail_and_related_reads_delegate_to_seeded_repository() -> None:
     }
     assert evaluation.json()["meta"]["factor_version"] == "factor-v3"
     assert scores.json()["meta"]["scoring_policy_version"] == "score-v4"
+
+
+def test_live_factor_analysis_accepts_period_and_returns_uncached_factor_payload() -> None:
+    response = _client(_SeededFundRepository()).get(
+        "/api/v1/funds/fund-1/factor-analysis",
+        params={"as_of_date": "2025-01-31", "evaluation_period": "5Y"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["evaluation_period"] == "5Y"
+    assert response.json()["meta"]["calculation_mode"] == "ON_DEMAND"
 
 
 def test_fund_routes_reject_invalid_dates_and_enums_and_not_found_ids() -> None:

@@ -5,6 +5,7 @@ from enum import StrEnum
 
 class FactorStatus(StrEnum):
     AVAILABLE = "AVAILABLE"
+    WARNING = "WARNING"
     UNAVAILABLE = "UNAVAILABLE"
     INVALID = "INVALID"
 
@@ -16,6 +17,7 @@ class FactorResult:
     status: FactorStatus
     reason: str | None
     observations: int
+    series: tuple[tuple[dt.date, float | None], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,13 @@ import {
 } from "../../test/contractFixtures";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -40,6 +46,7 @@ const baseMeta = {
   is_point_in_time: true,
   availability_quality_distribution: { EXACT: 1, DERIVED: 0, INFERRED: 1 },
 };
+const factorPeriodsRequested: string[] = [];
 
 const server = setupServer(
   http.get("/api/v1/session", () => HttpResponse.json(sessionEnvelope)),
@@ -195,6 +202,44 @@ const server = setupServer(
       error: null,
     }),
   ),
+  http.get("/api/v1/funds/000001/factor-analysis", ({ request }) => {
+    const period =
+      new URL(request.url).searchParams.get("evaluation_period") ?? "1Y";
+    factorPeriodsRequested.push(period);
+    return HttpResponse.json({
+      data: {
+        fund_id: "000001",
+        evaluation_period: period,
+        as_of_date: "2026-09-16",
+        factor_categories: [
+          {
+            category: "RET",
+            name: "收益表现",
+            factors: [
+              {
+                factor_id: "F-RET-001",
+                name: "年化收益率",
+                category: "RET",
+                direction: "HIGHER_IS_BETTER",
+                raw_value: 0.1,
+                normalized_value: null,
+                status: "VALID",
+                reason_code: null,
+                observations: 250,
+                series: [],
+              },
+            ],
+          },
+        ],
+      },
+      meta: {
+        ...baseMeta,
+        calculation_mode: "ON_DEMAND",
+        factor_count: 26,
+      },
+      error: null,
+    });
+  }),
 );
 
 const renderPage = () => {
@@ -218,6 +263,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  factorPeriodsRequested.length = 0;
 });
 afterAll(() => server.close());
 
@@ -230,6 +276,19 @@ describe("FundDetailPage", () => {
       .click(screen.getByRole("button", { name: /五维分类与证据/ }));
     await screen.findByText("分类：UNKNOWN（暂无可见修订）");
     expect(screen.queryByText("打开分类复核工作区")).not.toBeInTheDocument();
+  });
+  it("loads categorized factors on demand and recalculates after period selection", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("tab", { name: "因子分析" }));
+    const panel = await screen.findByRole("tabpanel", { name: "因子分析" });
+    expect(
+      within(panel).getByRole("heading", { name: "收益表现" }),
+    ).toBeVisible();
+    expect(within(panel).getByText("10.00%", { exact: true })).toBeVisible();
+    expect(factorPeriodsRequested).toContain("1Y");
+    await user.click(within(panel).getByRole("button", { name: "近5年" }));
+    await waitFor(() => expect(factorPeriodsRequested).toContain("5Y"));
   });
   it("shows NAV null semantics and PIT provenance without inventing zero", async () => {
     renderPage();
@@ -273,7 +332,7 @@ describe("FundDetailPage", () => {
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
     const nav = screen.getByRole("tab", { name: "净值" });
     const evaluation = screen.getByRole("tab", { name: "业绩风险" });
-    const score = screen.getByRole("tab", { name: "评分归因" });
+    const factorTab = screen.getByRole("tab", { name: "因子分析" });
     expect(nav).toHaveAttribute("tabindex", "0");
     expect(evaluation).toHaveAttribute("tabindex", "-1");
     nav.focus();
@@ -281,7 +340,7 @@ describe("FundDetailPage", () => {
     expect(evaluation).toHaveFocus();
     expect(evaluation).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
-    expect(score).toHaveFocus();
+    expect(factorTab).toHaveFocus();
     await user.keyboard("{Home}");
     expect(nav).toHaveFocus();
   });

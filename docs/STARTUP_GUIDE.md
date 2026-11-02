@@ -130,7 +130,7 @@ make worker-dev
 # 或: PYTHONPATH=src .venv/bin/python -m fip.platform.jobs.worker
 ```
 
-数据抓取中心的单只和多只抓取要求当前 session 有 `can_manage_data_ingestion`；“基金库全量/筛选全量”、以及相应的取消和失败重试还要求 `can_manage_full_universe_ingestion`。该能力默认拒绝，必须由受信任的身份/权限配置显式授予；不要通过浏览器可编辑身份头或前端状态赋权。API 会继续校验 operation 归属和 actor。Worker 使用已配置的真实数据源映射；无映射项会记录为不可抓取/失败明细，不会被当作成功或零值。AKShare NAV 不支持日期范围参数，页面不会提供虚假的日期筛选。
+本地开发模式默认以 `Administrator` 身份运行，具备数据审核、抓取及全量抓取权限，便于完整验收工作流。此默认身份仅用于绑定在 loopback 的本地开发服务；部署生产环境时，必须由可信身份提供方授予权限，开发身份头不会用于生产认证。API 仍会校验 operation 归属和 actor。Worker 使用已配置的真实数据源映射；无映射项会记录为不可抓取/失败明细，不会被当作成功或零值。AKShare NAV 不支持日期范围参数，页面不会提供虚假的日期筛选。
 
 ### 步骤 5：启动前端开发服务器
 新开一个终端窗口，进入 `frontend` 目录：

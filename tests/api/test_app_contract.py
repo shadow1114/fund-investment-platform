@@ -15,11 +15,12 @@ def _frozen_spec() -> dict[str, object]:
 def test_app_exposes_every_frozen_path_and_method() -> None:
     app = create_app()
     expected = _frozen_spec()["paths"]
-    actual = {
-        route.path: {method.lower() for method in route.methods or set()}
-        for route in app.routes
-        if route.path.startswith("/api/v1/")
-    }
+    actual: dict[str, set[str]] = {}
+    for route in app.routes:
+        if route.path.startswith("/api/v1/"):
+            actual.setdefault(route.path, set()).update(
+                method.lower() for method in route.methods or set()
+            )
     assert actual == {
         path: set(methods)
         for path, methods in expected.items()  # type: ignore[union-attr]
@@ -33,5 +34,5 @@ def test_session_returns_frozen_success_envelope() -> None:
     assert set(body) == {"data", "meta", "error"}
     assert body["error"] is None
     assert {"user_id", "roles", "capabilities"} <= set(body["data"])
-    assert body["data"]["capabilities"]["can_review_decisions"] is False
+    assert body["data"]["capabilities"]["can_review_decisions"] is True
     assert body["meta"]["api_version"] == "v1"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
@@ -276,6 +276,27 @@ def get_evaluations(
         fund_id, evaluation_period=evaluation_period, as_of_date=as_of_date
     )
     return success(result.data, request_id=_request_id(request), **result.meta)
+
+
+@router.get(
+    "/funds/{fund_id}/factor-analysis",
+    operation_id="getFundFactorAnalysis",
+    response_model=ReadEnvelopeModel,
+)
+def get_fund_factor_analysis(
+    fund_id: str,
+    request: Request,
+    evaluation_period: Literal["1M", "6M", "1Y", "3Y", "5Y"] = "1Y",
+    as_of_date: date | None = None,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    result = repository.funds.read_live_factor_analysis(
+        fund_id,
+        evaluation_period=evaluation_period,
+        as_of_date=as_of_date.isoformat() if as_of_date else None,
+    )
+    meta = cast(Mapping[str, Any], result.get("meta", {}))
+    return success(result["data"], request_id=_request_id(request), **meta)
 
 
 @router.get(

@@ -98,7 +98,8 @@ def test_catalog_exposes_one_current_classification_policy(offline):
 
 
 @pytest.mark.parametrize(
-    "query", ["enum_version=CURRENT", "rule_version=CURRENT&enum_version=CURRENT", "rule_version=old"]
+    "query",
+    ["enum_version=CURRENT", "rule_version=CURRENT&enum_version=CURRENT", "rule_version=old"],
 )
 def test_catalog_rejects_unsupported_version_pairs(offline, query):
     assert offline[0].get("/api/v1/fund-classifications/catalog?" + query).status_code == 422
@@ -295,7 +296,7 @@ def test_review_http_keeps_capability_cas_and_independent_tag_decisions(offline)
     revision, case = changed_classification_case(session)
     url = f"/api/v1/classification-reviews/{case.id}/review"
     body = review_body(revision)
-    assert client.post(url, json=body).status_code == 403
+    assert client.post(url, json=body, headers={"X-Roles": "Researcher"}).status_code == 403
     before = client.get(f"/api/v1/classification-reviews/{case.id}").json()["data"]
     assert before["baseline"]["scheme"] == "FIP_CLASSIFICATION_V1"
     assert before["incoming"]["scheme"] == "FIP_CLASSIFICATION"

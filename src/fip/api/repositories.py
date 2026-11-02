@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import calendar
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
+from pathlib import Path
 from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from fip.api.errors import InvalidQueryError, NotFoundError
-from fip.platform.decision_data.pit import resolve_visible_until
+from fip.platform.decision_data.pit import RiskFreeRatePoint, resolve_visible_until
 from fip.services.data_service.models.fund import (
     Fund,
     FundManagerAssignment,
@@ -23,6 +26,9 @@ from fip.services.data_service.repositories.benchmark import SqlBenchmarkPitRepo
 from fip.services.data_service.repositories.classification import SqlClassificationPitRepository
 from fip.services.data_service.repositories.fee import SqlFeePitRepository
 from fip.services.data_service.repositories.nav import SqlNavPitRepository
+from fip.services.data_service.repositories.risk_free_rate import SqlRiskFreeRatePitRepository
+from fip.services.factor_service.calculation import _returns_from_levels
+from fip.services.factor_service.live_analysis import FACTOR_CATALOG, calculate_period_factor_values
 from fip.services.factor_service.models import FactorRun, FactorValue
 from fip.services.fund_service.models import (
     FundEvaluation,
@@ -42,6 +48,54 @@ from fip.services.portfolio_service.models import (
     OptimizationRecord,
     PortfolioRecord,
 )
+from fip.strategy_library.factor_types import ReturnObservation
+from fip.strategy_library.rates import TenorRate, interpolate_rate
+
+_TENOR_DAYS = {
+    "ON": 1,
+    "1W": 7,
+    "1M": 30,
+    "3M": 90,
+    "6M": 180,
+    "1Y": 365,
+    "2Y": 730,
+    "3Y": 1095,
+    "5Y": 1825,
+    "7Y": 2555,
+    "10Y": 3650,
+    "30Y": 10950,
+}
+_TARGET_TENOR_DAYS = {tenor: _TENOR_DAYS[tenor] for tenor in ("1M", "6M", "1Y", "3Y", "5Y")}
+
+
+def _resolve_risk_free_curve(
+    points: tuple[RiskFreeRatePoint, ...], target_tenor: str, currency: str
+) -> tuple[tuple[date, Decimal, str], ...]:
+    target_days = _TARGET_TENOR_DAYS[target_tenor]
+    by_date: dict[date, list[RiskFreeRatePoint]] = {}
+    for point in points:
+        if point.tenor in _TENOR_DAYS:
+            by_date.setdefault(point.effective_at, []).append(point)
+
+    resolved: list[tuple[date, Decimal, str]] = []
+    for effective_at, curve in sorted(by_date.items()):
+        exact = next((point for point in curve if _TENOR_DAYS[point.tenor] == target_days), None)
+        if exact is not None:
+            resolved.append((effective_at, exact.rate, "EXACT"))
+            continue
+        lower = [point for point in curve if _TENOR_DAYS[point.tenor] < target_days]
+        upper = [point for point in curve if _TENOR_DAYS[point.tenor] > target_days]
+        if not lower or not upper:
+            continue
+        lower_point = max(lower, key=lambda point: _TENOR_DAYS[point.tenor])
+        upper_point = min(upper, key=lambda point: _TENOR_DAYS[point.tenor])
+        rate = interpolate_rate(
+            TenorRate(currency, _TENOR_DAYS[lower_point.tenor], lower_point.rate),
+            TenorRate(currency, _TENOR_DAYS[upper_point.tenor], upper_point.rate),
+            target_days,
+        )
+        resolved.append((effective_at, rate, "INTERPOLATED"))
+    return tuple(resolved)
 
 
 class RepositoryAdapter:
@@ -250,6 +304,159 @@ class FundRepository(RepositoryAdapter):
             },
         }
 
+    def read_live_factor_analysis(
+        self,
+        identifier: str,
+        *,
+        evaluation_period: str,
+        as_of_date: str | None,
+    ) -> Mapping[str, object]:
+        """Calculate display factors from PIT inputs without persisting factor values."""
+        from fip.platform.decision_data.context import RuntimeMode
+        from fip.services.factor_service.policy import load_evaluation_policy
+
+        periods_months = {"1M": 1, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60}
+        months = periods_months[evaluation_period]
+        view_date = _query_date(as_of_date) or date.today()
+        year, month_index = divmod(view_date.year * 12 + view_date.month - 1 - months, 12)
+        target_month = month_index + 1
+        start = date(
+            year, target_month, min(view_date.day, calendar.monthrange(year, target_month)[1])
+        )
+        visible_until = resolve_visible_until(view_date)
+        session = self._session()
+        fund, share_class = self._required_share_class(identifier)
+
+        # Read one prior week so the return at the selected period's first date has
+        # a valid preceding NAV. Adjusted NAV itself is recalculated under PIT.
+        load_from = start - timedelta(days=7)
+        nav_quality: str | None = None
+        try:
+            nav_points = SqlNavPitRepository(session, visible_until).adjusted_nav_series(
+                share_class.id, load_from, view_date
+            )
+        except AdjustedNavUnavailable:
+            nav_points = []
+            nav_quality = "ADJUSTED_NAV_UNAVAILABLE"
+        fund_returns = tuple(
+            point
+            for point in _returns_from_levels(
+                tuple((item.effective_at, item.adjusted_nav) for item in nav_points)
+            )
+            if point.effective_at > start
+        )
+
+        classification = SqlClassificationPitRepository(session, visible_until).current(fund.id)
+        classification_code = classification.classification_code if classification else "UNKNOWN"
+        benchmark_repository = SqlBenchmarkPitRepository(session, visible_until)
+        benchmark_resolution = benchmark_repository.resolve(share_class.id, classification_code)
+        benchmark_returns: tuple[ReturnObservation, ...] = ()
+        if benchmark_resolution.status == "AVAILABLE":
+            benchmark_levels = benchmark_repository.composite_series(
+                benchmark_resolution, load_from, view_date
+            )
+            benchmark_returns = tuple(
+                point
+                for point in _returns_from_levels(
+                    tuple((day, value) for day, value, _quality in benchmark_levels)
+                )
+                if point.effective_at > start
+            )
+
+        # Resolve the selected currency curve exactly, then interpolate between
+        # adjacent tenors when the policy tenor is absent on a curve date.
+        risk_free_curve = SqlRiskFreeRatePitRepository(session, visible_until).curve_series(
+            share_class.base_currency, start, view_date
+        )
+        resolved_rates = _resolve_risk_free_curve(
+            risk_free_curve, evaluation_period, share_class.base_currency
+        )
+        latest_rate = float(resolved_rates[-1][1]) if resolved_rates else None
+        rates_by_date = {effective_at: float(rate) for effective_at, rate, _ in resolved_rates}
+        risk_free_quality = (
+            "INTERPOLATED"
+            if any(quality == "INTERPOLATED" for _, _, quality in resolved_rates)
+            else "EXACT"
+            if resolved_rates
+            else "UNAVAILABLE"
+        )
+        risk_free_returns: list[ReturnObservation] = []
+        rate_dates = sorted(rates_by_date)
+        active_rate: float | None = None
+        cursor = 0
+        for point in fund_returns:
+            while cursor < len(rate_dates) and rate_dates[cursor] <= point.effective_at:
+                active_rate = rates_by_date[rate_dates[cursor]]
+                cursor += 1
+            if active_rate is not None:
+                risk_free_returns.append(ReturnObservation(point.effective_at, active_rate / 252))
+
+        policy_path = Path(__file__).parents[3] / "config/policy/evaluation/v1.yaml"
+        evaluation_policy = load_evaluation_policy(policy_path, RuntimeMode.LIVE)
+        results = calculate_period_factor_values(
+            fund_returns=fund_returns,
+            benchmark_returns=benchmark_returns,
+            risk_free_returns=risk_free_returns,
+            annualized_risk_free=latest_rate,
+            annualized_mar=float(evaluation_policy.mar),
+            annualization=252,
+            minimum_observations=max(2, round(months * 21 * 0.9)),
+        )
+        if nav_quality:
+            for item in results:
+                item["raw_value"] = None
+                item["status"] = "UNAVAILABLE"
+                item["reason_code"] = nav_quality
+        categories = [
+            {
+                "category": category,
+                "name": category_name,
+                "factors": [item for item in results if item["category"] == category],
+            }
+            for category, category_name in (
+                ("RET", "收益表现"),
+                ("RISK", "风险指标"),
+                ("RAP", "风险调整收益"),
+                ("STAB", "稳定性"),
+                ("REL", "相对表现"),
+            )
+        ]
+        return {
+            "data": {
+                "fund_id": identifier,
+                "evaluation_period": evaluation_period,
+                "as_of_date": view_date.isoformat(),
+                "factor_categories": categories,
+            },
+            "meta": {
+                "as_of_date": view_date.isoformat(),
+                "data_version": "on-demand-factor-analysis",
+                "calculation_mode": "ON_DEMAND",
+                "is_point_in_time": True,
+                "availability_quality_distribution": {
+                    quality: sum(1 for item in nav_points if item.availability_quality == quality)
+                    / max(len(nav_points), 1)
+                    for quality in ("EXACT", "DERIVED", "INFERRED")
+                },
+                "versions": {
+                    "factor_catalog": "v1",
+                    "evaluation_policy": evaluation_policy.version,
+                    "benchmark_mapping": benchmark_resolution.mapping_version or "UNKNOWN",
+                },
+                "factor_count": len(FACTOR_CATALOG),
+                "nav_versions": [
+                    {"effective_at": item.effective_at.isoformat(), "version": item.version}
+                    for item in nav_points
+                ],
+                "nav_status": nav_quality or "AVAILABLE",
+                "benchmark_status": benchmark_resolution.status,
+                "benchmark_mapping_version": benchmark_resolution.mapping_version or "UNKNOWN",
+                "risk_free_tenor": evaluation_period,
+                "risk_free_status": "AVAILABLE" if resolved_rates else "UNAVAILABLE",
+                "risk_free_quality": risk_free_quality,
+            },
+        }
+
     def read_evaluation(
         self, identifier: str, *, evaluation_period: str | None, as_of_date: str | None
     ) -> Mapping[str, object]:
@@ -393,7 +600,8 @@ class FundRepository(RepositoryAdapter):
             "fund_name": fund.product_name,
             "share_class": share_class.share_class_code,
             "classification": SqlClassificationPitRepository(
-                self._session(), visible_until).snapshot(fund.id),
+                self._session(), visible_until
+            ).snapshot(fund.id),
             "fund_classification": classification.classification_code
             if classification
             else "UNKNOWN",

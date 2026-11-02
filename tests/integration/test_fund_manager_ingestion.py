@@ -24,7 +24,7 @@ FUND_LIST = pd.DataFrame(
 )
 
 
-def test_basic_info_ingest_persists_manager_history_and_tracks_changes(db_session):
+def test_basic_info_ingest_does_not_persist_manager_data_or_assignments(db_session):
     observed_at = [FIXED_NOW]
     current_managers: list[str | None] = ["张三、李四"]
     manager_field = ["基金经理人"]
@@ -50,42 +50,26 @@ def test_basic_info_ingest_persists_manager_history_and_tracks_changes(db_sessio
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
 
     history = db_session.query(FundBasicInfoHistory).filter_by(fund_id=fund_id).one()
-    assert history.raw_fields["基金经理人"] == "张三、李四"
-    assert history.normalized_fields["manager_name"] == "张三、李四"
-    managers = db_session.query(FundManager).order_by(FundManager.manager_name).all()
-    assert [manager.manager_name for manager in managers] == ["张三", "李四"]
-    assignments = (
-        db_session.query(FundManagerAssignment)
-        .join(FundManager, FundManager.id == FundManagerAssignment.manager_id)
-        .order_by(FundManager.manager_name)
-        .all()
-    )
-    assert [assignment.valid_from for assignment in assignments] == [FIXED_NOW.date()] * 2
-    assert all(assignment.valid_to is None for assignment in assignments)
-    assert all(assignment.available_at == FIXED_NOW for assignment in assignments)
-    assert all(assignment.availability_quality == "INFERRED" for assignment in assignments)
+    assert "基金经理人" not in history.raw_fields
+    assert "基金经理" not in history.raw_fields
+    assert "manager_name" not in history.normalized_fields
+    assert db_session.query(FundManager).count() == 0
+    assert db_session.query(FundManagerAssignment).count() == 0
 
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
-    assert db_session.query(FundManager).count() == 2
-    assert db_session.query(FundManagerAssignment).count() == 2
+    assert db_session.query(FundManager).count() == 0
+    assert db_session.query(FundManagerAssignment).count() == 0
 
     observed_at[0] += dt.timedelta(days=3)
     current_managers[0] = "张三、王五"
     manager_field[0] = "基金经理"
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
 
-    assignments_by_name = {
-        manager.manager_name: assignment
-        for assignment, manager in db_session.query(FundManagerAssignment, FundManager)
-        .join(FundManager, FundManager.id == FundManagerAssignment.manager_id)
-        .all()
-    }
-    assert assignments_by_name["张三"].valid_to is None
-    assert assignments_by_name["李四"].valid_to == observed_at[0].date()
-    assert assignments_by_name["王五"].valid_from == observed_at[0].date()
-    assert assignments_by_name["王五"].valid_to is None
+    assert db_session.query(FundManager).count() == 0
+    assert db_session.query(FundManagerAssignment).count() == 0
 
     observed_at[0] += dt.timedelta(days=2)
     current_managers[0] = None
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
-    assert db_session.query(FundManagerAssignment).filter_by(valid_to=None).count() == 2
+    assert db_session.query(FundManager).count() == 0
+    assert db_session.query(FundManagerAssignment).count() == 0

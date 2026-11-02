@@ -27,13 +27,24 @@ def resolve_principal(request: Request) -> Principal:
             raise AuthenticationError("A verified identity is required")
         return verified
     user_id = request.headers.get("X-User-ID", "development-user")
-    raw_roles = request.headers.get("X-Roles", "Researcher")
+    default_role = "Administrator" if environment == "development" else "Researcher"
+    raw_roles = request.headers.get("X-Roles", default_role)
     roles = tuple(role.strip() for role in raw_roles.split(",") if role.strip())
     can_review = any(role.lower() in {"reviewer", "admin", "administrator"} for role in roles)
     can_manage_ingestion = any(
         role.lower() in {"operations", "admin", "administrator"} for role in roles
     )
-    return Principal(user_id, roles, can_review, can_review, can_manage_ingestion)
+    can_manage_full_universe = environment == "development" and any(
+        role.lower() in {"admin", "administrator"} for role in roles
+    )
+    return Principal(
+        user_id,
+        roles,
+        can_review,
+        can_review,
+        can_manage_ingestion,
+        can_manage_full_universe,
+    )
 
 
 def authenticate_request(request: Request) -> Principal:

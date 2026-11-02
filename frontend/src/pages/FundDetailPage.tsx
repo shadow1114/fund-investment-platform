@@ -15,11 +15,13 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import {
   getFund,
+  getFundFactorAnalysis,
   getFundEvaluations,
   getFundNavSeries,
   getFundScores,
 } from "../api/generated/m17";
 import type {
+  FundFactorAnalysisEvaluationPeriod,
   FundEvaluationMeta,
   FundScoreMeta,
   NavSeriesMeta,
@@ -35,6 +37,7 @@ import { ClassificationView } from "../features/classifications/ClassificationVi
 import { ClassificationHistory } from "../features/classifications/ClassificationHistory";
 import { getSessionQueryOptions } from "../api/queries";
 import { FundIngestionPanel } from "../features/funds/FundIngestionPanel";
+import { FactorAnalysisPanel } from "../features/funds/FactorAnalysisPanel";
 
 const FundNavChart = lazy(() =>
   import("../features/funds/FundNavChart").then((module) => ({
@@ -42,7 +45,14 @@ const FundNavChart = lazy(() =>
   })),
 );
 
-type Tab = "nav" | "evaluation" | "score";
+type Tab = "nav" | "evaluation" | "score" | "factors";
+const factorPeriods: FundFactorAnalysisEvaluationPeriod[] = [
+  "1M",
+  "6M",
+  "1Y",
+  "3Y",
+  "5Y",
+];
 const validReturnTo = (candidate: string | null, asOfDate?: string) => {
   if (
     candidate === "/funds" ||
@@ -73,7 +83,16 @@ export const FundDetailPage = () => {
   const returnTo = validReturnTo(search.get("return_to"), asOfDate);
   const rawTab = search.get("tab");
   const tab: Tab =
-    rawTab === "evaluation" || rawTab === "score" ? rawTab : "nav";
+    rawTab === "evaluation" || rawTab === "score" || rawTab === "factors"
+      ? rawTab
+      : "nav";
+  const rawFactorPeriod = search.get("factor_period");
+  const factorPeriod: FundFactorAnalysisEvaluationPeriod =
+    factorPeriods.includes(
+      rawFactorPeriod as FundFactorAnalysisEvaluationPeriod,
+    )
+      ? (rawFactorPeriod as FundFactorAnalysisEvaluationPeriod)
+      : "1Y";
   const changeTab = (value: string | null) => {
     const next = new URLSearchParams(search);
     if (value && value !== "nav") next.set("tab", value);
@@ -134,6 +153,20 @@ export const FundDetailPage = () => {
       };
     },
   });
+  const factorAnalysis = useQuery({
+    queryKey: ["fund-factor-analysis", fundId, factorPeriod, asOfDate],
+    enabled: Boolean(fundId) && tab === "factors",
+    queryFn: async () => {
+      const response = await getFundFactorAnalysis(fundId, {
+        evaluation_period: factorPeriod,
+        as_of_date: asOfDate,
+      });
+      return {
+        data: unwrapResponse(response),
+        meta: response.data.meta as ResponseMeta,
+      };
+    },
+  });
 
   if (!fundId) return <ErrorState error={new Error("缺少基金 ID")} />;
   if (fund.isPending) return <Text role="status">正在加载基金详情…</Text>;
@@ -143,7 +176,13 @@ export const FundDetailPage = () => {
     );
 
   const tabQuery =
-    tab === "nav" ? nav : tab === "evaluation" ? evaluation : score;
+    tab === "nav"
+      ? nav
+      : tab === "evaluation"
+        ? evaluation
+        : tab === "score"
+          ? score
+          : factorAnalysis;
   const fundData = fund.data.data;
 
   return (
@@ -232,6 +271,7 @@ export const FundDetailPage = () => {
           <Tabs.Tab value="nav">净值</Tabs.Tab>
           <Tabs.Tab value="evaluation">业绩风险</Tabs.Tab>
           <Tabs.Tab value="score">评分归因</Tabs.Tab>
+          <Tabs.Tab value="factors">因子分析</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="nav" pt="md">
           {nav.isPending && <Text role="status">正在加载复权净值…</Text>}
@@ -286,6 +326,32 @@ export const FundDetailPage = () => {
             <Stack gap="md">
               <ProvenanceBar meta={provenanceMeta(score.data.meta)} />
               <ScoreMetrics score={score.data.data} meta={score.data.meta} />
+            </Stack>
+          )}
+        </Tabs.Panel>
+        <Tabs.Panel value="factors" pt="md">
+          <FactorAnalysisPanel
+            analysis={factorAnalysis.data?.data}
+            period={factorPeriod}
+            onPeriodChange={(nextPeriod) => {
+              const next = new URLSearchParams(search);
+              next.set("tab", "factors");
+              next.set("factor_period", nextPeriod);
+              setSearch(next);
+            }}
+          />
+          {factorAnalysis.isPending && (
+            <Text role="status">正在实时计算因子…</Text>
+          )}
+          {factorAnalysis.isError && (
+            <ErrorState
+              error={factorAnalysis.error}
+              onRetry={() => void factorAnalysis.refetch()}
+            />
+          )}
+          {factorAnalysis.data && (
+            <Stack gap="md">
+              <ProvenanceBar meta={provenanceMeta(factorAnalysis.data.meta)} />
             </Stack>
           )}
         </Tabs.Panel>

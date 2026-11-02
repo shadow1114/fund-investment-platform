@@ -217,7 +217,7 @@ fi
 
 if [[ "$START_FRONTEND" == true ]]; then
   printf '\n%b▶ 正在启动前端 Vite (http://127.0.0.1:5173)...%b\n' "$CYAN" "$RESET"
-  frontend/node_modules/.bin/vite --host 127.0.0.1 --port 5173 &
+  frontend/node_modules/.bin/vite "$REPO_ROOT/frontend" --host 127.0.0.1 --port 5173 &
   FRONTEND_PID=$!
   wait_for_http \
     "http://127.0.0.1:5173/home" \

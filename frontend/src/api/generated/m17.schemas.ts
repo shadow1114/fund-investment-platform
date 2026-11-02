@@ -709,6 +709,98 @@ export interface FundEvaluation {
   factor_results: FactorResult[];
 }
 
+export type LiveFactorResultCategory =
+  (typeof LiveFactorResultCategory)[keyof typeof LiveFactorResultCategory];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const LiveFactorResultCategory = {
+  RET: "RET",
+  RISK: "RISK",
+  RAP: "RAP",
+  STAB: "STAB",
+  REL: "REL",
+} as const;
+
+export type LiveFactorResultRawValue = number | null;
+
+export type LiveFactorResultNormalizedValue = number | null;
+
+export type LiveFactorResultStatus =
+  (typeof LiveFactorResultStatus)[keyof typeof LiveFactorResultStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const LiveFactorResultStatus = {
+  VALID: "VALID",
+  WARNING: "WARNING",
+  UNAVAILABLE: "UNAVAILABLE",
+  INVALID: "INVALID",
+} as const;
+
+export type LiveFactorResultReasonCode = string | null;
+
+export type LiveFactorResultSeriesItemValue = number | null;
+
+export type LiveFactorResultSeriesItem = {
+  date: string;
+  value: LiveFactorResultSeriesItemValue;
+};
+
+export interface LiveFactorResult {
+  factor_id: string;
+  name: string;
+  category: LiveFactorResultCategory;
+  direction: string;
+  raw_value: LiveFactorResultRawValue;
+  normalized_value: LiveFactorResultNormalizedValue;
+  status: LiveFactorResultStatus;
+  reason_code: LiveFactorResultReasonCode;
+  observations: number;
+  series: LiveFactorResultSeriesItem[];
+}
+
+export type FactorCategoryCategory =
+  (typeof FactorCategoryCategory)[keyof typeof FactorCategoryCategory];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FactorCategoryCategory = {
+  RET: "RET",
+  RISK: "RISK",
+  RAP: "RAP",
+  STAB: "STAB",
+  REL: "REL",
+} as const;
+
+export interface FactorCategory {
+  category: FactorCategoryCategory;
+  name: string;
+  factors: LiveFactorResult[];
+}
+
+export type FundFactorAnalysisEvaluationPeriod =
+  (typeof FundFactorAnalysisEvaluationPeriod)[keyof typeof FundFactorAnalysisEvaluationPeriod];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundFactorAnalysisEvaluationPeriod = {
+  "1M": "1M",
+  "6M": "6M",
+  "1Y": "1Y",
+  "3Y": "3Y",
+  "5Y": "5Y",
+} as const;
+
+export interface FundFactorAnalysis {
+  fund_id: string;
+  evaluation_period: FundFactorAnalysisEvaluationPeriod;
+  as_of_date: string;
+  factor_categories: FactorCategory[];
+}
+
+export interface FundFactorAnalysisEnvelope {
+  data: FundFactorAnalysis;
+  meta: ResponseMeta;
+  error: EmptyError;
+}
+
 export type FundEvaluationMetaAllOf = {
   is_point_in_time: boolean;
   peer_group_id: string;
@@ -2362,6 +2454,11 @@ export type NavSeriesResponseResponse = NavSeriesEnvelope;
 export type FundEvaluationResponseResponse = FundEvaluationEnvelope;
 
 /**
+ * On-demand fund factor analysis. Results are computed from point-in-time inputs and are not persisted.
+ */
+export type FundFactorAnalysisResponseResponse = FundFactorAnalysisEnvelope;
+
+/**
  * Fund score.
  */
 export type FundScoreResponseResponse = FundScoreEnvelope;
@@ -2652,6 +2749,23 @@ export type GetFundEvaluationsParams = {
   evaluation_period?: EvaluationPeriodParameter;
   as_of_date?: AsOfDateParameter;
 };
+
+export type GetFundFactorAnalysisParams = {
+  evaluation_period?: GetFundFactorAnalysisEvaluationPeriod;
+  as_of_date?: AsOfDateParameter;
+};
+
+export type GetFundFactorAnalysisEvaluationPeriod =
+  (typeof GetFundFactorAnalysisEvaluationPeriod)[keyof typeof GetFundFactorAnalysisEvaluationPeriod];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const GetFundFactorAnalysisEvaluationPeriod = {
+  "1M": "1M",
+  "6M": "6M",
+  "1Y": "1Y",
+  "3Y": "3Y",
+  "5Y": "5Y",
+} as const;
 
 export type GetFundScoresParams = {
   evaluation_period?: EvaluationPeriodParameter;

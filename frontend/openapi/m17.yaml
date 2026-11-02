@@ -375,6 +375,23 @@ paths:
           $ref: "#/components/responses/FundEvaluationResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
+  /api/v1/funds/{fund_id}/factor-analysis:
+    get:
+      operationId: getFundFactorAnalysis
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+        - name: evaluation_period
+          in: query
+          schema:
+            type: string
+            enum: [1M, 6M, 1Y, 3Y, 5Y]
+            default: 1Y
+        - $ref: "#/components/parameters/AsOfDate"
+      responses:
+        "200":
+          $ref: "#/components/responses/FundFactorAnalysisResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
   /api/v1/funds/{fund_id}/scores:
     get:
       operationId: getFundScores
@@ -927,6 +944,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/FundEvaluationEnvelope"
+    FundFactorAnalysisResponse:
+      description: On-demand fund factor analysis. Results are computed from point-in-time inputs and are not persisted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundFactorAnalysisEnvelope"
     FundScoreResponse:
       description: Fund score.
       content:
@@ -1976,6 +1999,65 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FactorResult"
+    LiveFactorResult:
+      type: object
+      required:
+        [
+          factor_id,
+          name,
+          category,
+          direction,
+          raw_value,
+          normalized_value,
+          status,
+          reason_code,
+          observations,
+          series,
+        ]
+      properties:
+        factor_id: { type: string }
+        name: { type: string }
+        category: { type: string, enum: [RET, RISK, RAP, STAB, REL] }
+        direction: { type: string }
+        raw_value: { type: [number, "null"] }
+        normalized_value: { type: [number, "null"] }
+        status: { type: string, enum: [VALID, WARNING, UNAVAILABLE, INVALID] }
+        reason_code: { type: [string, "null"] }
+        observations: { type: integer }
+        series:
+          type: array
+          items:
+            type: object
+            required: [date, value]
+            properties:
+              date: { type: string, format: date }
+              value: { type: [number, "null"] }
+    FactorCategory:
+      type: object
+      required: [category, name, factors]
+      properties:
+        category: { type: string, enum: [RET, RISK, RAP, STAB, REL] }
+        name: { type: string }
+        factors:
+          type: array
+          items: { $ref: "#/components/schemas/LiveFactorResult" }
+    FundFactorAnalysis:
+      type: object
+      required: [fund_id, evaluation_period, as_of_date, factor_categories]
+      properties:
+        fund_id: { type: string }
+        evaluation_period: { type: string, enum: [1M, 6M, 1Y, 3Y, 5Y] }
+        as_of_date: { type: string, format: date }
+        factor_categories:
+          type: array
+          items: { $ref: "#/components/schemas/FactorCategory" }
+    FundFactorAnalysisEnvelope:
+      type: object
+      required: [data, meta, error]
+      properties:
+        data: { $ref: "#/components/schemas/FundFactorAnalysis" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        error: { $ref: "#/components/schemas/EmptyError" }
     FundEvaluationMeta:
       required:
         - is_point_in_time

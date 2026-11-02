@@ -326,7 +326,9 @@ class ReadPayloadModel(BaseModel):
     management_company_id: str | None = None
     manager_id: str | None = None
     evaluation_period: str | None = None
+    as_of_date: str | None = None
     factor_results: list[dict[str, object]] | None = None
+    factor_categories: list[dict[str, object]] | None = None
     sub_scores: dict[str, object] | None = None
     attribution: list[dict[str, object]] | None = None
     total_score: float | None = None
