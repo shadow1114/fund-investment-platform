@@ -21,10 +21,12 @@ import {
   getUniverse,
   listFunds,
   listFundIngestions,
+  listFundManagementCompanies,
   listPortfolios,
   listUniverses,
 } from "./generated/m17";
 import type {
+  FundListMeta,
   ListFundIngestionHistoryParams,
   ListFundIngestionItemsParams,
   GetBacktestPerformanceParams,
@@ -33,6 +35,7 @@ import type {
   GetFundParams,
   GetFundScoresParams,
   ListFundsParams,
+  ListFundManagementCompaniesParams,
   ListPortfoliosParams,
   ListUniversesParams,
 } from "./generated/m17.schemas";
@@ -42,6 +45,11 @@ export const queryKeys = {
   all: ["api"] as const,
   session: ["api", "session"] as const,
   funds: (params?: ListFundsParams) => ["api", "funds", params] as const,
+  fundPages: (params: ListFundsParams, revision = 0) =>
+    ["api", "funds", "grid", params, revision] as const,
+  fundManagementCompanies: (params?: ListFundManagementCompaniesParams) =>
+    ["api", "fund-management-companies", params] as const,
+  fundDataRevision: ["api", "fund-data-revision"] as const,
   fund: (fundId: string, params?: GetFundParams) =>
     ["api", "funds", fundId, params] as const,
   fundNavSeries: (fundId: string, params?: GetFundNavSeriesParams) =>
@@ -127,9 +135,43 @@ export const listFundsQueryOptions = (params?: ListFundsParams) =>
           "is_point_in_time",
           "pagination",
           "availability_quality_distribution",
+          "subscription_status_source",
         ],
       }),
   });
+
+export const fundPageQueryOptions = (params: ListFundsParams, revision = 0) =>
+  queryOptions({
+    queryKey: queryKeys.fundPages(params, revision),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const response = await listFunds(params);
+      const rows = unwrapResponse(response, {
+        requiredMeta: [
+          "as_of_date",
+          "data_version",
+          "versions",
+          "is_point_in_time",
+          "pagination",
+          "availability_quality_distribution",
+          "subscription_status_source",
+        ],
+      });
+      return {
+        rows,
+        meta: response.data.meta as FundListMeta,
+      };
+    },
+  });
+
+export const listFundManagementCompaniesQueryOptions = (asOfDate?: string) => {
+  const params = asOfDate ? { as_of_date: asOfDate } : undefined;
+  return queryOptions({
+    queryKey: queryKeys.fundManagementCompanies(params),
+    queryFn: async () =>
+      unwrapResponse(await listFundManagementCompanies(params)),
+  });
+};
 
 export const getFundQueryOptions = (fundId: string, params?: GetFundParams) =>
   queryOptions({
@@ -299,9 +341,16 @@ export const getLatestIngestionQueryOptions = (completedOnly = false) =>
     refetchInterval: 2500,
   });
 
-export const invalidateIngestionFundData = (client: QueryClient) =>
-  Promise.all([
+export const invalidateIngestionFundData = (client: QueryClient) => {
+  client.setQueryData<number>(
+    queryKeys.fundDataRevision,
+    (revision) => (revision ?? 0) + 1,
+  );
+  return Promise.all([
     client.invalidateQueries({ queryKey: ["api", "funds"] }),
+    client.invalidateQueries({
+      queryKey: ["api", "fund-management-companies"],
+    }),
     ...[
       "fund-research",
       "fund-detail",
@@ -310,3 +359,4 @@ export const invalidateIngestionFundData = (client: QueryClient) =>
       "fund-score",
     ].map((prefix) => client.invalidateQueries({ queryKey: [prefix] })),
   ]);
+};

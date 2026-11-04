@@ -1,3 +1,5 @@
+import type { ColDef } from "ag-grid-community";
+import { ResearchDataTable } from "../../components/ResearchDataTable";
 import {
   Alert,
   Button,
@@ -6,7 +8,6 @@ import {
   NumberInput,
   Paper,
   Stack,
-  Table,
   Text,
   Textarea,
 } from "@mantine/core";
@@ -55,6 +56,59 @@ export const DecisionReviewPanel = ({
         0,
       ),
     [weights],
+  );
+  const columns = useMemo<ColDef<Weight>[]>(
+    () => [
+      { field: "fund_id", headerName: "基金", lockVisible: true },
+      {
+        colId: "original",
+        headerName: "原建议权重",
+        valueGetter: ({ data }) =>
+          decision.proposed_weights.find(
+            (item) => item.fund_id === data?.fund_id,
+          )?.weight,
+        valueFormatter: ({ value }) =>
+          value == null ? "未提供" : `${(value * 100).toFixed(2)}%`,
+      },
+      {
+        field: "weight",
+        headerName: "覆盖权重",
+        minWidth: 230,
+        cellRenderer: ({ data: weight }: { data: Weight }) => (
+          <NumberInput
+            aria-label={`${weight.fund_id} 覆盖权重`}
+            min={0}
+            max={1}
+            step={0.01}
+            decimalScale={6}
+            value={weight.weight}
+            onChange={(value) =>
+              setWeights((current) =>
+                current.map((item) =>
+                  item.fund_id === weight.fund_id
+                    ? { ...item, weight: Number(value) || 0 }
+                    : item,
+                ),
+              )
+            }
+            suffix="（小数）"
+          />
+        ),
+      },
+      {
+        colId: "difference",
+        headerName: "差异",
+        valueGetter: ({ data }) => {
+          const original = decision.proposed_weights.find(
+            (item) => item.fund_id === data?.fund_id,
+          )?.weight;
+          return original == null || !data ? null : data.weight - original;
+        },
+        valueFormatter: ({ value }) =>
+          value == null ? "未提供" : `${(value * 100).toFixed(2)} 个百分点`,
+      },
+    ],
+    [decision.proposed_weights],
   );
   const editable = decision.decision_status === "PROPOSED";
   useEffect(() => {
@@ -122,58 +176,17 @@ export const DecisionReviewPanel = ({
               aria-label="可编辑覆盖权重"
               tabIndex={0}
             >
-              <Table withTableBorder withColumnBorders striped>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>基金</Table.Th>
-                    <Table.Th>原建议权重</Table.Th>
-                    <Table.Th>覆盖权重</Table.Th>
-                    <Table.Th>差异</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {weights.map((weight, index) => {
-                    const original = decision.proposed_weights.find(
-                      (item) => item.fund_id === weight.fund_id,
-                    )?.weight;
-                    return (
-                      <Table.Tr key={weight.fund_id}>
-                        <Table.Th scope="row">{weight.fund_id}</Table.Th>
-                        <Table.Td>
-                          {original == null
-                            ? "未提供"
-                            : `${(original * 100).toFixed(2)}%`}
-                        </Table.Td>
-                        <Table.Td>
-                          <NumberInput
-                            aria-label={`${weight.fund_id} 覆盖权重`}
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            decimalScale={6}
-                            value={weight.weight}
-                            onChange={(value) =>
-                              setWeights((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? { ...item, weight: Number(value) || 0 }
-                                    : item,
-                                ),
-                              )
-                            }
-                            suffix="（小数）"
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          {original == null
-                            ? "未提供"
-                            : `${((weight.weight - original) * 100).toFixed(2)} 个百分点`}
-                        </Table.Td>
-                      </Table.Tr>
-                    );
-                  })}
-                </Table.Tbody>
-              </Table>
+              <ResearchDataTable<Weight>
+                caption="决策覆盖权重"
+                layoutKey="decision-weight-overrides"
+                rowData={weights}
+                getRowId={({ data }) => data.fund_id}
+                pagination
+                paginationPageSize={20}
+                paginationPageSizeSelector={[20, 50, 100]}
+                columnDefs={columns}
+                requiredColumnIds={["fund_id", "weight"]}
+              />
             </div>
             <Text size="sm" c={Math.abs(sum - 1) <= 0.0001 ? "green" : "red"}>
               覆盖权重合计：{(sum * 100).toFixed(2)}%（提交要求约为 100%）

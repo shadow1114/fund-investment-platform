@@ -4,7 +4,7 @@ import {
 } from "../../test/classificationFixtures";
 import { sessionEnvelope } from "../../test/contractFixtures";
 import { QueryClient } from "@tanstack/react-query";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ChangeEvent } from "react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -21,6 +21,17 @@ import {
 import { renderWorkbench } from "../../test/render";
 
 import { FundResearchPage } from "../../pages/FundResearchPage";
+import {
+  createFundPageDatasource,
+  FUND_PAGE_SIZES,
+  type FundPageResult,
+  mapGridRequestToFundParams,
+} from "./FundTable";
+import { emptyFundFilters } from "./FundFilters";
+import {
+  fundPageQueryOptions,
+  invalidateIngestionFundData,
+} from "../../api/queries";
 
 vi.mock("@mantine/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@mantine/core")>();
@@ -93,11 +104,13 @@ vi.mock("@mantine/core", async (importOriginal) => {
     "aria-label": ariaLabel,
     value,
     onChange,
+    error,
   }: {
     label: string;
     "aria-label"?: string;
     value: string;
     onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+    error?: string;
   }) => (
     <label>
       {label}
@@ -106,6 +119,7 @@ vi.mock("@mantine/core", async (importOriginal) => {
         value={value}
         onChange={onChange}
       />
+      {error && <span>{error}</span>}
     </label>
   );
   const NativeTagsInput = ({
@@ -140,6 +154,7 @@ vi.mock("@mantine/core", async (importOriginal) => {
 });
 
 const requests: URL[] = [];
+const companyRequests: URL[] = [];
 
 const listEnvelope = {
   data: [
@@ -152,6 +167,11 @@ const listEnvelope = {
       inception_date: "2020-01-02",
       lifecycle_status: "NORMAL",
       investment_eligibility: "FULLY_ELIGIBLE",
+      share_class_id: "101",
+      fund_code: "000001",
+      company_name: "永赢基金",
+      sub_status: "开放",
+      manager_ids: [],
     },
   ],
   meta: {
@@ -167,6 +187,20 @@ const listEnvelope = {
       total_pages: 3,
     },
     availability_quality_distribution: { EXACT: 18, DERIVED: 2, INFERRED: 1 },
+    subscription_status_source: "PLACEHOLDER",
+  },
+  error: null,
+};
+
+const companyOptionsEnvelope = {
+  data: [{ company_name: "永赢基金" }, { company_name: "易方达基金" }],
+  meta: {
+    request_id: "REQ-COMPANIES",
+    as_of_date: "2026-09-16",
+    data_version: "companies-v1",
+    versions: {},
+    is_point_in_time: false,
+    availability_quality_distribution: { EXACT: 0, DERIVED: 0, INFERRED: 0 },
   },
   error: null,
 };
@@ -176,6 +210,10 @@ const server = setupServer(
   http.get("/api/v1/fund-classifications/catalog", () =>
     HttpResponse.json(classificationCatalog),
   ),
+  http.get("/api/v1/fund-management-companies", ({ request }) => {
+    companyRequests.push(new URL(request.url));
+    return HttpResponse.json(companyOptionsEnvelope);
+  }),
   http.get("/api/v1/funds/:fundId/classification-history", () =>
     HttpResponse.json(emptyClassificationHistory),
   ),
@@ -201,179 +239,313 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   requests.length = 0;
+  companyRequests.length = 0;
   localStorage.clear();
 });
 afterAll(() => server.close());
 
 describe("FundResearchPage", () => {
-  it("saves applied filters, restores them through the URL after remount, and deletes the view", async () => {
-    const user = userEvent.setup();
-    const first = renderPage(
-      "/funds?fund_name=Alpha&asset_class=EQUITY&as_of_date=2026-09-16&page=3&token=secret",
+  it("starts at the query panel and keeps only the grid in the lower region", async () => {
+    renderPage("/funds");
+    const page = screen.getByTestId("fund-research-page");
+    const workspace = page.querySelector(
+      "section[aria-label='基金查询条件']",
+    )?.parentElement;
+    const results = page.querySelector("section[aria-label='基金研究结果区']");
+
+    expect(workspace?.firstElementChild).toBe(
+      page.querySelector("section[aria-label='基金查询条件']"),
     );
-    await screen.findByText("Alpha 稳健基金");
-    await user.type(screen.getByLabelText("视图名称"), "稳健筛选");
-    await user.click(screen.getByRole("button", { name: "保存当前视图" }));
-    const stored = localStorage.getItem("fip:fund-views:v1");
-    expect(stored).not.toContain("secret");
-    expect(stored).not.toContain("token");
-    await user.type(screen.getByLabelText("视图名称"), "稳健筛选");
-    await user.click(screen.getByRole("button", { name: "保存当前视图" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("视图名称已存在");
-    first.unmount();
-    renderPage("/funds?fund_name=Other&page=2");
-    await user.click(
-      await screen.findByRole("button", { name: "应用视图 稳健筛选" }),
-    );
-    await waitFor(() =>
-      expect(requests.at(-1)?.searchParams.get("fund_name")).toBe("Alpha"),
-    );
-    expect(requests.at(-1)?.searchParams.get("asset_class")).toBe("EQUITY");
-    expect(requests.at(-1)?.searchParams.get("as_of_date")).toBe("2026-09-16");
-    expect(requests.at(-1)?.searchParams.get("page")).toBe("1");
-    expect(screen.getByLabelText("基金名称")).toHaveValue("Alpha");
-    await user.click(screen.getByRole("button", { name: "删除视图 稳健筛选" }));
+    expect(page.querySelector("h1")).toBeNull();
+    expect(page).not.toHaveTextContent("使用当前可见数据");
+    expect(page).not.toHaveTextContent("只符合条件");
+    expect(results?.children).toHaveLength(1);
+    expect(results?.querySelector('[role="grid"]')).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "列设置" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "表格密度" })).toBeNull();
     expect(
-      screen.queryByRole("button", { name: "应用视图 稳健筛选" }),
-    ).not.toBeInTheDocument();
-    expect(localStorage.getItem("fip:fund-views:v1")).not.toContain("稳健筛选");
+      screen.getByRole("button", { name: "收起查询条件" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByRole("button", { name: "保存当前视图" })).toBeNull();
+    await waitFor(() => {
+      expect(requests).toHaveLength(1);
+      expect(companyRequests).toHaveLength(1);
+    });
   });
-  it("reports blocked storage without pretending a view was saved", async () => {
-    const original = Storage.prototype.setItem;
-    const spy = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation(function (this: Storage, key, value) {
-        if (key === "fip:fund-views:v1") throw new Error("blocked");
-        return original.call(this, key, value);
-      });
-    try {
-      const user = userEvent.setup();
-      renderPage("/funds");
-      await user.type(screen.getByLabelText("视图名称"), "受限视图");
-      await user.click(screen.getByRole("button", { name: "保存当前视图" }));
-      expect(screen.getByRole("alert")).toHaveTextContent("无法保存视图");
+
+  it("removes query notes for placeholder status and unavailable company options", async () => {
+    server.use(
+      http.get("/api/v1/fund-management-companies", () =>
+        HttpResponse.json(
+          {
+            data: null,
+            meta: {},
+            error: { code: "COMPANIES_UNAVAILABLE", message: "unavailable" },
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+    renderPage("/funds");
+    await screen.findByRole("grid", { name: "基金研究结果" });
+
+    expect(screen.queryByText(/申购状态目前固定显示/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/管理公司列表暂不可用/)).not.toBeInTheDocument();
+  });
+
+  it("collapses and expands the query panel with one accessible chevron button", async () => {
+    const user = userEvent.setup();
+    renderPage("/funds");
+    const queryPanel = screen.getByRole("region", { name: "基金查询条件" });
+
+    const collapse = screen.getByRole("button", { name: "收起查询条件" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    expect(collapse.querySelector("svg")).toBeInTheDocument();
+    await user.click(collapse);
+    expect(queryPanel).not.toBeVisible();
+
+    const expand = screen.getByRole("button", { name: "展开查询条件" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(expand.querySelector("svg")).toBeInTheDocument();
+    await user.click(expand);
+    expect(queryPanel).toBeVisible();
+  });
+
+  it("refreshes the visible list and company options after ingestion completes", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    renderWorkbench(<FundResearchPage />, {
+      route: "/funds",
+      queryClient: client,
+    });
+    await waitFor(() => {
+      expect(requests).toHaveLength(1);
+      expect(companyRequests).toHaveLength(1);
+    });
+
+    await invalidateIngestionFundData(client);
+
+    await waitFor(() => {
+      expect(requests).toHaveLength(2);
+      expect(companyRequests).toHaveLength(2);
+    });
+    client.clear();
+  });
+
+  it("ignores a late successful response from a retired fund datasource", async () => {
+    let resolvePage!: (value: FundPageResult) => void;
+    const loadPage = vi.fn(
+      () => new Promise<FundPageResult>((resolve) => (resolvePage = resolve)),
+    );
+    const successCallback = vi.fn();
+    const failCallback = vi.fn();
+    const datasource = createFundPageDatasource({
+      params: { page: 1, page_size: 20 },
+      currentPageSize: 20,
+      initialPageAppliedRef: { current: true },
+      initialTargetPageRef: { current: 1 },
+      pageRef: { current: { page: 1, pageSize: 20 } },
+      loadPage,
+    });
+
+    const pending = datasource.getRows({
+      startRow: 0,
+      endRow: 20,
+      sortModel: [],
+      filterModel: {},
+      context: undefined,
+      api: { paginationGoToPage: vi.fn() } as never,
+      successCallback,
+      failCallback,
+    });
+    datasource.destroy?.();
+    resolvePage({
+      rows: [],
+      meta: { pagination: { total_pages: 1, total_items: 0 } },
+    } as unknown as FundPageResult);
+    await pending;
+
+    expect(successCallback).not.toHaveBeenCalled();
+    expect(failCallback).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late failure from a retired fund datasource", async () => {
+    const failCallback = vi.fn();
+    const datasource = createFundPageDatasource({
+      params: { page: 1, page_size: 20 },
+      currentPageSize: 20,
+      initialPageAppliedRef: { current: true },
+      initialTargetPageRef: { current: 1 },
+      pageRef: { current: { page: 1, pageSize: 20 } },
+      loadPage: () => Promise.reject(new Error("stale failure")),
+    });
+
+    const pending = datasource.getRows({
+      startRow: 0,
+      endRow: 20,
+      sortModel: [],
+      filterModel: {},
+      context: undefined,
+      api: { paginationGoToPage: vi.fn() } as never,
+      successCallback: vi.fn(),
+      failCallback,
+    });
+    datasource.destroy?.();
+    await pending;
+
+    expect(failCallback).not.toHaveBeenCalled();
+  });
+  it("maps an AG Grid block to a keyed server page and reads total count from metadata", async () => {
+    const pageParams = mapGridRequestToFundParams(
+      { fund_name: "Alpha", company_name: "永赢基金", page: 3, page_size: 50 },
+      {
+        startRow: 100,
+        endRow: 150,
+        sortModel: [{ colId: "fund_code", sort: "desc" }],
+      },
+    );
+    expect(pageParams).toMatchObject({
+      fund_name: "Alpha",
+      company_name: "永赢基金",
+      page: 3,
+      page_size: 50,
+      sort: "fund_code",
+      order: "desc",
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const result = await client.fetchQuery(fundPageQueryOptions(pageParams));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].searchParams.get("page")).toBe("3");
+    expect(requests[0].searchParams.get("page_size")).toBe("50");
+    expect(requests[0].searchParams.get("sort")).toBe("fund_code");
+    expect(result.meta.pagination.total_items).toBe(21);
+    expect(result.rows[0].share_class_id).toBe("101");
+    for (const sort of [
+      "fund_code",
+      "fund_name",
+      "company_name",
+      "sub_status",
+    ] as const) {
       expect(
-        screen.queryByRole("button", { name: "应用视图 受限视图" }),
-      ).not.toBeInTheDocument();
-    } finally {
-      spy.mockRestore();
+        mapGridRequestToFundParams(
+          {},
+          {
+            startRow: 20,
+            endRow: 40,
+            sortModel: [{ colId: sort, sort: "asc" }],
+          },
+        ),
+      ).toMatchObject({ page: 2, page_size: 20, sort, order: "asc" });
     }
   });
-  it("shows readable lifecycle and investment eligibility statuses in results", async () => {
+  it("keeps selection and ingestion actions hidden without permission", async () => {
     renderPage("/funds");
-    await screen.findByText("Alpha 稳健基金");
-    const table = screen.getByRole("table", { name: "基金研究结果" });
+    await screen.findByRole("grid", { name: "基金研究结果" });
     expect(
-      within(table).getByRole("checkbox", { name: "选择 Alpha 稳健基金" }),
-    ).toBeVisible();
-    expect(within(table).getByText("正常")).toBeVisible();
-    expect(within(table).getByText("可新建仓")).toBeVisible();
-    await userEvent
-      .setup()
-      .click(
-        within(table).getByRole("checkbox", { name: "选择 Alpha 稳健基金" }),
-      );
-    expect(screen.getByText(/已选择本页 1 只/)).toBeVisible();
+      screen.queryByRole("checkbox", { name: /选择/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "将所选基金加入数据抓取" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "生命周期状态" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "投资资格" }),
+    ).not.toBeInTheDocument();
   });
-  it("passes frozen filters through unchanged and renders PIT provenance", async () => {
+
+  it("does not expose a misleading select-all control for an infinite grid", async () => {
+    renderPage("/funds");
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    expect(
+      screen.queryByRole("checkbox", { name: "选择本页基金" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses only the grid page-size choices 20, 50, and 200", async () => {
+    renderPage("/funds");
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    expect(FUND_PAGE_SIZES).toEqual([20, 50, 200]);
+  });
+  it("passes frozen filters through unchanged without adding result decorations", async () => {
     renderPage(
       "/funds?fund_name=Alpha&fund_type=EQUITY%2CBOND&lifecycle_status=NORMAL&investment_eligibility=FULLY_ELIGIBLE&as_of_date=2026-09-16&page=2&page_size=10&sort=fund_name&order=asc",
     );
 
-    expect(await screen.findByText("Alpha 稳健基金")).toBeVisible();
-    await waitFor(() => expect(requests).toHaveLength(1));
-    const query = requests[0].searchParams;
-    expect(Object.fromEntries(query)).toEqual({
-      fund_name: "Alpha",
-      fund_type: "EQUITY,BOND",
-      lifecycle_status: "NORMAL",
-      investment_eligibility: "FULLY_ELIGIBLE",
-      as_of_date: "2026-09-16",
-      page: "2",
-      page_size: "10",
-      sort: "fund_name",
-      order: "asc",
-    });
-    expect(screen.getByText("点时数据：是")).toBeVisible();
-    await userEvent.setup().click(screen.getByText("查看来源版本"));
-    expect(screen.getByText("classification_version")).toBeVisible();
-    expect(screen.getByText("class-v3")).toBeVisible();
-    expect(screen.getByText("精确 18")).toBeVisible();
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(
-      screen.getByRole("link", { name: "Alpha 稳健基金" }),
-    ).toHaveAttribute("href", expect.stringContaining("as_of_date=2026-09-16"));
+      requests.some(
+        (request) =>
+          request.searchParams.get("fund_name") === "Alpha" &&
+          request.searchParams.get("as_of_date") === "2026-09-16" &&
+          request.searchParams.get("page_size") === "20",
+      ),
+    ).toBe(true);
+    const results = screen.getByRole("region", { name: "基金研究结果区" });
+    expect(results.children).toHaveLength(1);
+    expect(results).not.toHaveTextContent("点时数据");
+    expect(results).not.toHaveTextContent("查看来源版本");
+    expect(
+      requests.some(
+        (request) => request.searchParams.get("as_of_date") === "2026-09-16",
+      ),
+    ).toBe(true);
   });
 
-  it("applies only active classification filters while preserving the legacy URL state", async () => {
-    const user = userEvent.setup();
+  it("passes supported asset class and legacy dimensions through to the API", async () => {
     renderPage(
-      "/funds?asset_class=EQUITY,BOND&strategy=ACTIVE&geography=CN,US&product_structure=ETF&market_attributes=QDII&classification_status=CONFLICT",
+      "/funds?asset_class=EQUITY&geography=CN&product_structure=ETF&market_attributes=QDII",
     );
-    await screen.findByText("Alpha 稳健基金");
-    expect(requests[0].searchParams.get("asset_class")).toBe("EQUITY,BOND");
-    expect(requests[0].searchParams.get("geography")).toBeNull();
-    expect(requests[0].searchParams.get("product_structure")).toBeNull();
-    expect(requests[0].searchParams.get("market_attributes")).toBeNull();
-    await user.deselectOptions(
-      screen.getByRole("listbox", { name: "资产类别" }),
-      ["EQUITY"],
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    const request = requests.find(
+      (item) => item.searchParams.get("asset_class") === "EQUITY",
     );
-    await user.selectOptions(
-      await screen.findByRole("listbox", { name: "资产类别" }),
-      ["BOND"],
-    );
-    await user.click(screen.getByRole("button", { name: "查询基金" }));
-    await waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests[1].searchParams.get("asset_class")).toBe("BOND");
-    expect(requests[1].searchParams.get("classification_status")).toBe(
-      "CONFLICT",
-    );
+    expect(request).toBeDefined();
+    expect(request?.searchParams.get("geography")).toBe("CN");
+    expect(request?.searchParams.get("product_structure")).toBe("ETF");
+    expect(request?.searchParams.get("market_attributes")).toBe("QDII");
   });
 
   it("uses server pagination metadata and preserves filters on the next page", async () => {
-    const user = userEvent.setup();
     renderPage("/funds?fund_name=Alpha&page=2&page_size=10");
-
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    expect(FUND_PAGE_SIZES).toContain(20);
     expect(
-      await screen.findByText(
-        (_, element) =>
-          element?.tagName === "P" &&
-          (element.textContent?.includes("第 2 / 3 页 · 共 21 只基金") ??
-            false),
+      mapGridRequestToFundParams(
+        { fund_name: "Alpha", page: 2, page_size: 20 },
+        { startRow: 40, endRow: 60, sortModel: [] },
       ),
-    ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "下一页" }));
-
-    await waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests[1].searchParams.get("page")).toBe("3");
-    expect(requests[1].searchParams.get("fund_name")).toBe("Alpha");
+    ).toMatchObject({ page: 3, fund_name: "Alpha", page_size: 20 });
   });
 
-  it("submits combined lifecycle and eligibility filters as comma-separated values", async () => {
+  it("applies the asset class filter while retaining old URL compatibility fields", async () => {
     const user = userEvent.setup();
-    renderPage("/funds");
-
-    await waitFor(() => expect(requests).toHaveLength(1));
-    await user.selectOptions(
-      screen.getByRole("listbox", { name: "生命周期状态" }),
-      ["NORMAL", "LIQUIDATED"],
+    renderPage(
+      "/funds?geography=CN&product_structure=ETF&market_attributes=QDII",
     );
-    await user.selectOptions(
-      screen.getByRole("listbox", { name: "投资资格" }),
-      ["FULLY_ELIGIBLE", "HOLD_ONLY"],
-    );
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    const category = screen.getByRole("combobox", { name: "基金类别" });
+    await user.selectOptions(category, "EQUITY");
     await user.click(screen.getByRole("button", { name: "查询基金" }));
-
-    await waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests[1].searchParams.get("lifecycle_status")).toBe(
-      "NORMAL,LIQUIDATED",
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) => request.searchParams.get("asset_class") === "EQUITY",
+        ),
+      ).toBe(true),
     );
-    expect(requests[1].searchParams.get("investment_eligibility")).toBe(
-      "FULLY_ELIGIBLE,HOLD_ONLY",
-    );
+    expect(requests.at(-1)?.searchParams.get("geography")).toBe("CN");
+    expect(requests.at(-1)?.searchParams.get("product_structure")).toBe("ETF");
+    expect(requests.at(-1)?.searchParams.get("market_attributes")).toBe("QDII");
   });
 
-  it("renders empty and API error states explicitly", async () => {
+  it("keeps empty and API error responses within the grid region", async () => {
     server.use(
       http.get("/api/v1/funds", () =>
         HttpResponse.json({
@@ -392,7 +564,9 @@ describe("FundResearchPage", () => {
       ),
     );
     const first = renderPage("/funds");
-    expect(await screen.findByText("没有符合条件的基金")).toBeVisible();
+    expect(
+      await screen.findByRole("grid", { name: "基金研究结果" }),
+    ).toBeVisible();
     first.unmount();
 
     server.use(
@@ -412,9 +586,109 @@ describe("FundResearchPage", () => {
       ),
     );
     renderPage("/funds");
-    expect(await screen.findByText("Fund service unavailable")).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "请求失败 · 503 FUNDS_UNAVAILABLE",
+    expect(
+      await screen.findByRole("grid", { name: "基金研究结果" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "基金研究结果区" }).children,
+    ).toHaveLength(1);
+  });
+
+  it("loads company options independently from current research filters", async () => {
+    renderPage("/funds?fund_name=Alpha&asset_class=EQUITY&page=3&page_size=50");
+
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    await waitFor(() => expect(companyRequests).toHaveLength(1));
+    expect(companyRequests[0].searchParams.has("fund_name")).toBe(false);
+    expect(companyRequests[0].searchParams.has("fund_code")).toBe(false);
+    expect(companyRequests[0].searchParams.has("asset_class")).toBe(false);
+  });
+
+  it("submits all five research filters to the server and resets to page one", async () => {
+    const user = userEvent.setup();
+    renderPage("/funds?page=3&page_size=50");
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    const startRequestCount = requests.length;
+
+    fireEvent.change(screen.getByLabelText("基金名称"), {
+      target: { value: "Alpha" },
+    });
+    fireEvent.change(screen.getByLabelText("基金代码"), {
+      target: { value: "000001" },
+    });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "管理公司" }),
+      "永赢基金",
     );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "基金类别" }),
+      "EQUITY",
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "申购状态" }),
+      "开放",
+    );
+    await user.click(screen.getByRole("button", { name: "查询基金" }));
+
+    await waitFor(() =>
+      expect(requests.length).toBeGreaterThan(startRequestCount),
+    );
+    const submitted = requests.at(-1)!.searchParams;
+    expect(submitted.get("fund_name")).toBe("Alpha");
+    expect(submitted.get("fund_code")).toBe("000001");
+    expect(submitted.get("company_name")).toBe("永赢基金");
+    expect(submitted.get("asset_class")).toBe("EQUITY");
+    expect(submitted.get("sub_status")).toBe("开放");
+    expect(submitted.get("page")).toBe("1");
+    expect(submitted.get("page_size")).toBe("50");
+    expect(submitted.has("fund_type")).toBe(false);
+    expect(
+      screen.queryByText(/申购状态目前固定显示“开放”/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not request an invalid fund code and resets to the first page", async () => {
+    const user = userEvent.setup();
+    renderPage("/funds?page=3&page_size=50");
+    await screen.findByRole("grid", { name: "基金研究结果" });
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+
+    const codeInput = screen.getByLabelText("基金代码");
+    fireEvent.change(codeInput, { target: { value: "１２３４５６" } });
+    await user.click(screen.getByRole("button", { name: "查询基金" }));
+    expect(
+      await screen.findByText("基金代码必须为 6 位半角数字"),
+    ).toBeVisible();
+    expect(
+      requests.every(
+        (request) => request.searchParams.get("fund_code") !== "１２３４５６",
+      ),
+    ).toBe(true);
+
+    await user.clear(screen.getByLabelText("基金代码"));
+    await user.click(screen.getByRole("button", { name: "重置" }));
+    expect(screen.getByLabelText("基金名称")).toHaveValue("");
+    expect(emptyFundFilters().page_size).toBe("20");
+  });
+
+  it("reset clears unapplied text/code drafts and validation errors when the URL is already default", async () => {
+    const user = userEvent.setup();
+    renderPage("/funds?page=1&page_size=20&sort=fund_name&order=asc");
+    fireEvent.change(screen.getByLabelText("基金名称"), {
+      target: { value: "draft" },
+    });
+    fireEvent.change(screen.getByLabelText("基金代码"), {
+      target: { value: "１２３" },
+    });
+    await user.click(screen.getByRole("button", { name: "查询基金" }));
+    expect(screen.getByText("基金代码必须为 6 位半角数字")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "重置" }));
+    expect(screen.getByLabelText("基金名称")).toHaveValue("");
+    expect(screen.getByLabelText("基金代码")).toHaveValue("");
+    expect(
+      screen.queryByText("基金代码必须为 6 位半角数字"),
+    ).not.toBeInTheDocument();
   });
 });

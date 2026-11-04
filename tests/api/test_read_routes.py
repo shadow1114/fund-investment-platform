@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from fip.api.app import create_app
@@ -11,13 +12,14 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_empty_collections_are_successful_and_paginated() -> None:
-    response = _client().get("/api/v1/funds?page=2&page_size=10")
+@pytest.mark.parametrize("page_size", [20, 50, 200])
+def test_empty_collections_are_successful_and_paginated(page_size: int) -> None:
+    response = _client().get(f"/api/v1/funds?page=2&page_size={page_size}")
     assert response.status_code == 200
     assert response.json()["data"] == []
     assert response.json()["meta"]["pagination"] == {
         "page": 2,
-        "page_size": 10,
+        "page_size": page_size,
         "total_items": 0,
         "total_pages": 0,
     }

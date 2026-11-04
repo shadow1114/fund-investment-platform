@@ -64,6 +64,34 @@ def _nav_service(session: Session) -> IngestService:
     )
 
 
+def cmd_backfill_fund_company_names(args: argparse.Namespace) -> None:
+    """Backfill only from retained snapshots; dry-run unless --apply is explicit."""
+    from fip.services.data_service.company import backfill_fund_company_names
+
+    session = _session()
+    try:
+        report = backfill_fund_company_names(
+            session, dry_run=not args.apply, batch_size=args.batch_size
+        )
+        if args.apply:
+            session.commit()
+        else:
+            session.rollback()
+        print(
+            json.dumps(
+                {
+                    "dry_run": not args.apply,
+                    "scanned": report.scanned,
+                    "candidates": report.candidates,
+                    "updated": report.updated,
+                },
+                ensure_ascii=False,
+            )
+        )
+    finally:
+        session.close()
+
+
 def _resolve(session: Session, symbol: str) -> FundShareClass:
     """把 provider 的基金代码解析为份额类别，经 fund.provider_fund_identity。
 
@@ -527,7 +555,6 @@ def cmd_classification(args: argparse.Namespace) -> None:
         payloads = session.scalars(payload_query)
         seen: set[str] = set()
         processed = 0
-        from fip.services.data_service.classification import DIMENSIONS
         from fip.services.data_service.models.fund import Fund
 
         report_dimensions = ("asset_class", "strategy")
@@ -635,6 +662,14 @@ def main(argv: list[str] | None = None) -> int:
     p_pit.add_argument("--to", required=True, dest="date_to")
     p_pit.set_defaults(func=cmd_pit_nav)
 
+    p_company = sub.add_parser(
+        "backfill-fund-company-names",
+        help="从本地已留存基金基本信息快照回填公司名（默认只预演）",
+    )
+    p_company.add_argument("--apply", action="store_true", help="写入 company_name 投影")
+    p_company.add_argument("--batch-size", type=int, default=500)
+    p_company.set_defaults(func=cmd_backfill_fund_company_names)
+
     for command in (
         "classify-funds",
         "refresh-classification",
@@ -668,6 +703,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--limit must be positive")
     if getattr(args, "batch_size", 1) <= 0:
         parser.error("--batch-size must be positive")
+    if args.command == "backfill-fund-company-names" and args.batch_size > 5000:
+        parser.error("--batch-size cannot exceed 5000")
     if args.command == "classify-funds" and args.limit > 1000:
         parser.error("--limit cannot exceed 1000; classification replay must stay bounded")
     if args.command == "classify-funds" and args.batch_size > 100:

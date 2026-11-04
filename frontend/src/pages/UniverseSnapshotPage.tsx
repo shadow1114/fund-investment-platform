@@ -1,10 +1,6 @@
 import { Button, Group, Stack, Tabs, Text } from "@mantine/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import {
-  createColumnHelper,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
@@ -16,7 +12,7 @@ import type {
   UniverseSummary,
 } from "../api/generated/m17.schemas";
 import { unwrapResponse } from "../api/http";
-import { DataTable } from "../components/DataTable";
+import { ResearchDataTable } from "../components/ResearchDataTable";
 import { ErrorState } from "../components/ErrorState";
 import { PageHeader } from "../components/PageHeader";
 import { ProvenanceBar } from "../components/ProvenanceBar";
@@ -46,8 +42,6 @@ const provenanceMeta = (meta: ResponseMeta) => ({
   availability_quality_distribution: meta.availability_quality_distribution,
 });
 
-const snapshotColumn = createColumnHelper<UniverseSummary>();
-
 const UniverseList = () => {
   const [search, setSearch] = useSearchParams();
   const serializedSearch = search.toString();
@@ -67,34 +61,29 @@ const UniverseList = () => {
     },
     placeholderData: keepPreviousData,
   });
-  const columns = [
-    snapshotColumn.accessor("universe_id", {
-      header: "快照 ID",
-      cell: ({ getValue }) => (
+  const columns: ColDef<UniverseSummary>[] = [
+    {
+      field: "universe_id",
+      headerName: "快照 ID",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseSummary>) => (
         <Link
-          to={`/universes/${encodeURIComponent(getValue())}?return_to=${encodeURIComponent(`/universes?${serializedSearch}`)}`}
+          to={`/universes/${encodeURIComponent(value)}?return_to=${encodeURIComponent(`/universes?${serializedSearch}`)}`}
         >
-          {getValue()}
+          {value}
         </Link>
       ),
-      enableHiding: false,
-    }),
-    snapshotColumn.accessor("universe_strategy", {
-      header: "策略",
-      cell: ({ getValue }) =>
-        getValue() === "UNKNOWN" ? "未知策略" : `策略 ${getValue()}`,
-    }),
-    snapshotColumn.accessor("decision_at", { header: "决策日期" }),
-    snapshotColumn.accessor("member_count", { header: "成员数" }),
-    snapshotColumn.accessor("eligibility_rules_version", {
-      header: "资格规则版本",
-    }),
+      lockVisible: true,
+    },
+    {
+      field: "universe_strategy",
+      headerName: "策略",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseSummary>) =>
+        value === "UNKNOWN" ? "未知策略" : `策略 ${value}`,
+    },
+    { field: "decision_at", headerName: "决策日期" },
+    { field: "member_count", headerName: "成员数" },
+    { field: "eligibility_rules_version", headerName: "资格规则版本" },
   ];
-  const table = useReactTable({
-    data: query.data?.data ?? [],
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
 
   const applyFilters = (values: UniverseFilterValues) => {
     const next = new URLSearchParams();
@@ -138,8 +127,13 @@ const UniverseList = () => {
               条快照；列表为完整已返回集合。
             </Text>
           </Group>
-          <DataTable
-            table={table}
+          <ResearchDataTable
+            columnDefs={columns}
+            rowData={query.data.data}
+            getRowId={({ data }) => data.universe_id}
+            pagination
+            paginationPageSize={20}
+            paginationPageSizeSelector={[20, 50, 100]}
             caption="候选池快照列表"
             emptyMessage="没有符合条件的候选池快照。"
             layoutKey="universes"

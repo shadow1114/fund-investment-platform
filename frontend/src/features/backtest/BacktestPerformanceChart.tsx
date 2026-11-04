@@ -1,4 +1,5 @@
-import { Alert, Table, Tabs, Text } from "@mantine/core";
+import { ResearchDataTable } from "../../components/ResearchDataTable";
+import { Alert, Tabs, Text } from "@mantine/core";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -8,6 +9,8 @@ import type {
 } from "../../api/generated/m17.schemas";
 import { ChartFrame } from "../../components/ChartFrame";
 import { echarts } from "../charts/echarts";
+
+type entryRow = { name: string; point: SeriesPoint };
 
 type SeriesView =
   | "cumulative_return"
@@ -181,32 +184,67 @@ export const BacktestPerformanceChart = ({
               aria-label={`${viewLabels[view]}数值表`}
               tabIndex={0}
             >
-              <Table withTableBorder withColumnBorders striped>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th scope="col">序列</Table.Th>
-                    <Table.Th scope="col">日期</Table.Th>
-                    <Table.Th scope="col">数值</Table.Th>
-                    <Table.Th scope="col">状态</Table.Th>
-                    <Table.Th scope="col">原因</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {allPoints.map(({ name, point }) => (
-                    <Table.Tr key={`${name}-${point.date}`}>
-                      <Table.Td>{name}</Table.Td>
-                      <Table.Th scope="row">{point.date}</Table.Th>
-                      <Table.Td>
-                        {point.value_status === "VALID" && point.value !== null
-                          ? point.value
+              <ResearchDataTable
+                caption="回测绩效数值"
+                layoutKey="backtest-values"
+                rowData={allPoints}
+                getRowId={({ data }) => `${data.name}-${data.point.date}`}
+                columnDefs={[
+                  {
+                    field: "name",
+                    headerName: "序列",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: entry }: { data: entryRow }) => (
+                      <>{entry.name}</>
+                    ),
+                  },
+                  {
+                    field: "point.date",
+                    headerName: "日期",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: entry }: { data: entryRow }) => (
+                      <>{entry.point.date}</>
+                    ),
+                  },
+                  {
+                    field: "point.value",
+                    headerName: "数值",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: entry }: { data: entryRow }) => (
+                      <>
+                        {entry.point.value_status === "VALID" &&
+                        entry.point.value !== null
+                          ? entry.point.value
                           : "不可用"}
-                      </Table.Td>
-                      <Table.Td>{point.value_status}</Table.Td>
-                      <Table.Td>{point.value_reason ?? "—"}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
+                      </>
+                    ),
+                  },
+                  {
+                    field: "point.value_status",
+                    headerName: "状态",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: entry }: { data: entryRow }) => (
+                      <>{entry.point.value_status}</>
+                    ),
+                  },
+                  {
+                    field: "point.value_reason",
+                    headerName: "原因",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: entry }: { data: entryRow }) => (
+                      <>{entry.point.value_reason ?? "—"}</>
+                    ),
+                  },
+                ]}
+                pagination
+                paginationPageSize={20}
+                paginationPageSizeSelector={[20, 50, 100]}
+              />
             </div>
             {unavailable.length > 0 && (
               <Alert color="yellow" mt="sm">

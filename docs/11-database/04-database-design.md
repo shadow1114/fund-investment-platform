@@ -1,10 +1,10 @@
 # 物理数据库设计 · Physical Database Design
 
-> 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文定位：支撑层 · 物理模型
-> 本域上游：docs/11-database/01-postgresql.md（v1.0）、03-erd.md（v1.0）
-> 架构依赖：docs/02-architecture/06-technology-stack.md（v1.2）§4.6 Workload Matrix
+> 上游文档：docs/01-product/01-product-overview.md（v2.6）｜本文定位：支撑层 · 物理模型
+> 本域上游：docs/11-database/01-postgresql.md（v1.2）、03-erd.md（v1.3）
+> 架构依赖：docs/02-architecture/06-technology-stack.md（v1.5）§4.6 Workload Matrix
 >
-> **文档版本**：v1.10 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.12 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -231,6 +231,14 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 
 > **绝大多数下游表的外键指向 `fund_share_class`，而非 `fund`** —— 这是 §6.1 的直接后果。
 
+### 6.1.1 公司当前投影与来源历史（迁移 0040）
+
+`fund.fund.company_name VARCHAR(128) NULL` 是产品级可空当前投影，由 data-service 在基础信息抓取中同步读取基金详情“基金公司”字段，校验基金代码后规范化填充；“基金管理人”可能为自然人，禁止映射为公司。没有可信公司字段时保持原投影不变；它不是规范化公司外键，不为本字段创建新的公司实体或关系，ERD v1.3 无需变更。
+
+历史公司来自不可变 `fund_basic_info_history` 快照，继承该快照 `available_at` / `availability_quality`。当前列表/公司选项读当前投影；PIT 在每条可见快照内先取去空白后的 `normalized_fields.company_name`，缺失或为空串时只兼容同一条快照内的原始字段 `raw_fields["基金公司"]`。不从“基金管理人”或基金经理回退。排除不可用值后按 `available_at DESC, version DESC, id DESC` 选择最新可用的可见快照；字段回退不得跨快照拼接，不回退到当前列或未来快照，无可用可见快照时为 NULL。没有可靠供应商发布时间时使用抓取时间且标记 INFERRED。
+
+迁移 `0040_fund_company_name.py`（上游 0039）仅新增可空列，不含数据回填，downgrade 仅删除该列。回填工具 `backfill_fund_company_names` 只使用保留在本地的基本信息快照，按最新可用可信公司值补齐 NULL 投影，默认 dry-run，分批扫描，apply 时锁定基金行并不覆盖已填值；不改写快照、历史时点或分类。执行前需审阅 dry-run 并显式指定 CLI `--apply`；本次交付没有执行生产迁移或数据回填。
+
 ### 6.2 `provider_fund_identity`
 
 | 项 | 说明 |
@@ -245,6 +253,12 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 #### 6.2.1 为什么唯一键含 `valid_from`
 
 > **映射关系会变化**（`03-erd` §5.3.1）。同一 `(provider_id, provider_fund_id)` 在不同时期可能指向不同的 Share Class（Provider 重新分配 ID）。
+
+### 6.2.2 研究查询关联及 SQL 分页
+
+关联必须经份额映射：`fund.fund f LEFT JOIN fund.fund_share_class fsc ON f.id = fsc.fund_id LEFT JOIN fund.provider_fund_identity pfi ON fsc.id = pfi.share_class_id`。`pfi.provider_id` 指向供应商，不能与 `f.id` 相连。生产查询对指定 AKSHARE 供应商、合法六位字符串、可见时间和有效区间取唯一展示映射，支持历史重指派及多个供应商；没有有效映射的份额保留且代码为 NULL。
+
+SQL 先投影每份额唯一行，在 PostgreSQL 内完成筛选、COUNT、稳定排序和 LIMIT/OFFSET；请求会话使用 REPEATABLE READ 保证数据与计数一致，同主排序值追加产品公开 fund_id、内部份额主键升序且 NULLS LAST。总数独立于分页行，空集合/越界页仍返回准确总数。名称匹配按字面量绑定，避免通配符与 SQL 注入形态输入改变查询语义。公司选项是独立的全库去重排序读取，不从当前列表页推导。
 
 ### 6.3 `fund_manager_assignment`
 
@@ -1426,8 +1440,8 @@ PostgreSQL Architecture ACCEPTED
 
 | 关系 | 文档 |
 |---|---|
-| **本域上游** | `11-database/01-postgresql.md` v1.0（平台规范）、`03-erd.md` v1.0（实体与关系） |
-| **架构** | `02-architecture/06-technology-stack.md` v1.2 §4.6（Workload Matrix 与验证门槛）、`03-data-architecture.md` v1.1、`01-system-architecture.md` v2.3 §10 |
+| **本域上游** | `11-database/01-postgresql.md` v1.2（平台规范）、`03-erd.md` v1.3（实体与关系） |
+| **架构** | `02-architecture/06-technology-stack.md` v1.5 §4.6（Workload Matrix 与验证门槛）、`03-data-architecture.md` v1.2、`01-system-architecture.md` v2.4 §10 |
 | **业务语义来源** | `03-data`、`04-factor`、`05-fund-evaluation`、`06-portfolio`、`07-return-risk`、`08-backtest` |
 | **相关** | `10-api`（查询模式来源）、`12-operations`（备份、分区维护、监控） |
 
@@ -1437,6 +1451,8 @@ PostgreSQL Architecture ACCEPTED
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.11** | 2026-11-04 | 同步迁移 0040 可空公司投影、不可变快照/PIT 边界、只补空值的本地回填与正确份额映射关联、SQL 唯一计数及稳定分页。受影响下游：基金查询/公司选项 API、data-service 采集与回填、数据库迁移验收 | 产品 v2.6；数据域 v1.9；PostgreSQL 规范 v1.2；ERD v1.3（实体关系未变）；技术栈 v1.5 |
+| **v1.12** | 2026-11-05 | 将公司字段来源明确为基金详情“基金公司”，从公司当前投影、快照兼容字段及 PIT 原始值回退中排除“基金管理人” | 数据域 v2.0；基金 API v1.8；data-service 基本信息采集与公司选项查询 |
 | **v1.10** | 2026-09-14 | 同步迁移 0027 的 Plan-3 实际七表：更正 Method / Parameter 表名与版本闭包，移除未实现的矩阵成员明细表，记录 checksummed 下三角 JSONB、canonical float64 字符串、六态 Run、独立批准布尔、Validation 审计、事务边界、年化 Stage ⑥消费契约与 Plan-3B 延期 | `0027_plan3_estimation.py`、`2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.9** | 2026-08-27 | **第二批定案（7 项）**。`DBD-2` 条件性唯一约束采用**部分唯一索引**（PostgreSQL 原生，触发器方案无法被查询计划器利用、生成列方案的哨兵值会泄漏到查询条件）；`DBD-5` **建 `position_lot` 表**（`TC-3` 的赎回费阶梯依赖持有批次）；`DBD-6` `target_weights` **行式存储不用 JSONB**（「按基金查历史权重」需索引到基金维度）；`DBD-4` `selection_condition_result` 存全部条件并带 `condition_version`；`DBD-1`/`DBD-8`/`DBD-9` 保留期见 Policy C，回测主记录 10 年、逐期明细 2 年 + 归档。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.8** | 2026-08-27 | **Policy ⑦ 同步**。§20.2 补架构层已定案的完整验收条件表达式与「已定案 vs 待压测」对照；指出本域的分区、索引、W7 读取优化都是升级路径中第①步的具体内容，**须为框架服务而非等待压测结果**。详见 `TBD-resolution.md` Policy ⑦ | `02-architecture/06-technology-stack` v1.3 |

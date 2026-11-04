@@ -3,6 +3,10 @@ import {
   emptyClassificationHistory,
 } from "../../test/classificationFixtures";
 import {
+  fundDetailEnvelope,
+  fundNavEnvelope,
+  fundEvaluationEnvelope,
+  fundScoreEnvelope,
   fundBasicInfoHistoryEnvelope,
   fundIngestionListEnvelope,
   sessionEnvelope,
@@ -242,14 +246,14 @@ const server = setupServer(
   }),
 );
 
-const renderPage = () => {
+const renderPage = (entry = "/funds/000001?as_of_date=2026-09-16") => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <MantineProvider>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/funds/000001?as_of_date=2026-09-16"]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/funds/:fundId" element={<FundDetailPage />} />
           </Routes>
@@ -259,15 +263,137 @@ const renderPage = () => {
   );
 };
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: "error" });
+});
 afterEach(() => {
   cleanup();
   server.resetHandlers();
   factorPeriodsRequested.length = 0;
 });
-afterAll(() => server.close());
+afterAll(() => {
+  server.close();
+});
 
 describe("FundDetailPage", () => {
+  it("uses explicit share class identity for all research reads and product identity for history", async () => {
+    const requests: URL[] = [];
+    server.use(
+      http.get("/api/v1/funds/:id", ({ request, params }) => {
+        requests.push(new URL(request.url));
+        return HttpResponse.json({
+          ...fundDetailEnvelope,
+          data: {
+            ...fundDetailEnvelope.data,
+            share_class: params.id === "102" ? "C" : "A",
+          },
+        });
+      }),
+      ...[
+        ["nav-series", fundNavEnvelope],
+        ["evaluations", fundEvaluationEnvelope],
+        ["scores", fundScoreEnvelope],
+      ].map(([suffix, envelope]) =>
+        http.get(`/api/v1/funds/:id/${suffix}`, ({ request }) => {
+          requests.push(new URL(request.url));
+          return HttpResponse.json(envelope);
+        }),
+      ),
+      http.get("/api/v1/funds/:id/factor-analysis", ({ request }) => {
+        requests.push(new URL(request.url));
+        return HttpResponse.json({
+          data: {
+            fund_id: "000001",
+            evaluation_period: "5Y",
+            as_of_date: "2026-09-16",
+            factor_categories: [],
+          },
+          meta: baseMeta,
+          error: null,
+        });
+      }),
+      ...["basic-info-history", "ingestions", "classification-history"].map(
+        (suffix) =>
+          http.get(`/api/v1/funds/:id/${suffix}`, ({ request }) => {
+            requests.push(new URL(request.url));
+            return HttpResponse.json(
+              suffix === "basic-info-history"
+                ? fundBasicInfoHistoryEnvelope
+                : suffix === "ingestions"
+                  ? fundIngestionListEnvelope
+                  : emptyClassificationHistory,
+            );
+          }),
+      ),
+    );
+    renderPage(
+      "/funds/000001?share_class_id=102&as_of_date=2026-09-16&tab=factors&factor_period=5Y&return_to=%2Ffunds%3Fpage%3D3",
+    );
+    await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+    await screen.findByRole("tabpanel", { name: "因子分析" });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /五维分类与证据/ }));
+    await waitFor(() =>
+      expect(
+        requests.some((url) =>
+          url.pathname.endsWith("/classification-history"),
+        ),
+      ).toBe(true),
+    );
+    for (const suffix of [
+      "",
+      "/nav-series",
+      "/evaluations",
+      "/scores",
+      "/factor-analysis",
+    ]) {
+      const request = requests.find(
+        (url) => url.pathname === `/api/v1/funds/102${suffix}`,
+      );
+      expect(request, suffix || "detail").toBeDefined();
+      expect(request?.searchParams.get("as_of_date")).toBe("2026-09-16");
+    }
+    expect(
+      requests
+        .find((url) => url.pathname.endsWith("/factor-analysis"))
+        ?.searchParams.get("evaluation_period"),
+    ).toBe("5Y");
+    for (const suffix of [
+      "basic-info-history",
+      "ingestions",
+      "classification-history",
+    ]) {
+      expect(
+        requests.some(
+          (url) => url.pathname === `/api/v1/funds/000001/${suffix}`,
+        ),
+      ).toBe(true);
+    }
+    expect(screen.getByRole("link", { name: "返回基金研究" })).toHaveAttribute(
+      "href",
+      "/funds?page=3",
+    );
+  });
+
+  it.each([
+    "https://evil.test/funds",
+    "//evil.test/funds",
+    "/portfolios",
+    "/funds/../portfolios",
+  ])(
+    "rejects unsafe return_to %s on a legacy detail route",
+    async (candidate) => {
+      renderPage(
+        `/funds/000001?as_of_date=2026-09-16&return_to=${encodeURIComponent(candidate)}`,
+      );
+      await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+      expect(
+        screen.getByRole("link", { name: "返回基金研究" }),
+      ).toHaveAttribute("href", "/funds?as_of_date=2026-09-16");
+    },
+  );
+
   it("only offers classification review to authorized users", async () => {
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });

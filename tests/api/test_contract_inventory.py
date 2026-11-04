@@ -39,3 +39,51 @@ def test_shared_session_and_operation_components_remain_frozen() -> None:
     schemas = document["components"]["schemas"]
     assert schemas["SessionEnvelope"]["properties"]["data"]["$ref"].endswith("/Session")
     assert schemas["OperationEnvelope"]["properties"]["data"]["$ref"].endswith("/Operation")
+
+
+def test_fund_company_options_contract_and_fund_list_query_fields_are_registered() -> None:
+    document = yaml.safe_load(
+        (Path(__file__).parents[2] / "frontend/openapi/m17.yaml").read_text()
+    )
+    operation_ids = collect_operation_ids(document["paths"], include_shared=False)
+    assert "listFundManagementCompanies" in operation_ids
+    assert RESPONSE_COMPONENT_REGISTRY["listFundManagementCompanies"] == (
+        "FundManagementCompaniesEnvelope"
+    )
+
+    fund_list = document["paths"]["/api/v1/funds"]["get"]
+    parameters = {}
+    for item in fund_list["parameters"]:
+        if "$ref" in item:
+            component = item["$ref"].rsplit("/", 1)[-1]
+            item = document["components"]["parameters"][component]
+        parameters[item["name"]] = item
+    assert {"fund_code", "company_name", "sub_status", "asset_class", "page_size"} <= set(
+        parameters
+    )
+    assert parameters["sub_status"]["schema"]["enum"] == ["开放"]
+    assert parameters["sort"]["schema"]["enum"] == [
+        "fund_code",
+        "fund_name",
+        "company_name",
+        "sub_status",
+        "inception_date",
+        "aum",
+    ]
+
+    schemas = document["components"]["schemas"]
+    item = schemas["FundListItem"]
+    assert {
+        "share_class_id",
+        "sub_status",
+        "manager_ids",
+    } <= set(item["required"])
+    assert item["properties"]["company_name"]["type"] == ["string", "null"]
+    assert item["properties"]["fund_code"]["pattern"] == "^[0-9]{6}$"
+    assert item["properties"]["sub_status"]["enum"] == ["开放", "UNKNOWN"]
+    assert "subscription_status_source" in schemas["FundListMeta"]["required"]
+    company_envelope = schemas["FundManagementCompaniesEnvelope"]
+    assert (
+        company_envelope["properties"]["data"]["items"]["$ref"]
+        == "#/components/schemas/FundManagementCompany"
+    )

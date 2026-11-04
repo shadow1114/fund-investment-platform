@@ -40,6 +40,7 @@ class Fund(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     fund_code: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
     product_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    company_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     grouping_status: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

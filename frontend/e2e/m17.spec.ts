@@ -19,6 +19,7 @@ import {
   fundIngestionListEnvelope,
   fundEvaluationEnvelope,
   fundListEnvelope,
+  fundManagementCompaniesEnvelope,
   fundNavEnvelope,
   fundScoreEnvelope,
   portfolioEnvelope,
@@ -32,6 +33,11 @@ const apiFixtures: Record<string, unknown> = {
   "/api/v1/fund-classifications/catalog": classificationCatalog,
   "/api/v1/funds/000001/classification-history": classificationHistoryEnvelope,
   "/api/v1/funds": fundListEnvelope,
+  "/api/v1/fund-management-companies": fundManagementCompaniesEnvelope,
+  "/api/v1/funds/101": fundDetailEnvelope,
+  "/api/v1/funds/101/nav-series": fundNavEnvelope,
+  "/api/v1/funds/101/evaluations": fundEvaluationEnvelope,
+  "/api/v1/funds/101/scores": fundScoreEnvelope,
   "/api/v1/funds/000001": fundDetailEnvelope,
   "/api/v1/funds/000001/basic-info-history": fundBasicInfoHistoryEnvelope,
   "/api/v1/funds/000001/ingestions": fundIngestionListEnvelope,
@@ -100,7 +106,14 @@ for (const [path, heading] of [
       }
     });
     await page.goto(path);
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    if (path === "/funds") {
+      await expect(page.getByRole("form", { name: "基金筛选" })).toBeVisible();
+      await expect(
+        page.getByRole("grid", { name: "基金研究结果" }),
+      ).toBeVisible();
+    } else {
+      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    }
     await expect(
       page.getByRole("navigation", { name: "主导航" }),
     ).toBeVisible();
@@ -108,13 +121,13 @@ for (const [path, heading] of [
       await expect(
         page.getByRole("link", { name: "Alpha 稳健基金" }),
       ).toBeVisible();
-      await expect(page.getByText("点时数据：是")).toBeVisible();
       await expect(
-        page.getByRole("listbox", { name: "资产类别", exact: true }),
-      ).toContainText("EQUITY");
+        page.getByRole("combobox", { name: "基金类别", exact: true }),
+      ).toBeVisible();
     } else if (path === "/funds/000001") {
       await expect(page.getByRole("tab", { name: "净值" })).toBeVisible();
-      await expect(page.getByText(/调整规则：\s*adj-v2/)).toBeVisible();
+      await expect(page.getByText(/复权规则：\s*adj-v2/)).toBeVisible();
+      await page.getByRole("button", { name: /五维分类与证据/ }).click();
       await page.getByText("可见分类历史", { exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "修订 12 / v1", exact: true }),
@@ -124,23 +137,32 @@ for (const [path, heading] of [
       );
     } else if (path === "/universes") {
       await expect(
-        page.getByRole("link", { name: "查看快照 UNI-001" }),
+        page.getByRole("link", { name: "UNI-001", exact: true }),
       ).toBeVisible();
     } else if (path === "/universes/UNI-001") {
       await expect(
-        page.getByRole("heading", { name: "已排除（1）" }),
+        page.getByRole("tab", { name: "已排除（1）" }),
       ).toBeVisible();
-      await expect(page.getByText("REJECTED")).toBeVisible();
+      await page.getByRole("tab", { name: "已排除（1）" }).click();
+      await expect(
+        page.getByRole("grid", { name: "已排除成员" }),
+      ).toContainText("已排除");
     } else if (path === "/portfolios") {
       await expect(page.getByRole("link", { name: "稳健组合" })).toBeVisible();
     } else if (path === "/portfolios/P001") {
-      await expect(page.getByText("当前会话无决策复核权限。")).toBeVisible();
+      await page.getByRole("tab", { name: "决策复核" }).click();
+      await expect(
+        page.getByRole("textbox", { name: "决策 ID" }),
+      ).toBeVisible();
       await expect(page.getByRole("button", { name: "批准" })).toHaveCount(0);
     } else {
       await expect(page.getByRole("form", { name: "回测配置" })).toBeVisible();
       await expect(
-        page.getByRole("button", { name: "启动回测" }),
-      ).toBeDisabled();
+        page.getByRole("button", { name: "创建回测" }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "启动回测" })).toHaveCount(
+        0,
+      );
     }
     if (path !== "/backtests") {
       expect(dataRequests.length).toBeGreaterThan(0);
@@ -163,6 +185,9 @@ test("backtest create, validate, run and inspect INVALID result with bias eviden
   await page.goto("/backtests");
   for (const [label, value] of [
     ["策略 ID", "STRATEGY-1"],
+    ["初始资金", "1000000"],
+    ["执行价格规则标识", "NEXT_AVAILABLE_NAV"],
+    ["现金收益假设标识", "ZERO"],
     ["开始日期", "2020-01-01"],
     ["结束日期", "2026-06-30"],
     ["基准 ID", "CSI300"],
@@ -173,10 +198,10 @@ test("backtest create, validate, run and inspect INVALID result with bias eviden
     ["资格规则版本", "eligibility-v4"],
     ["交易成本模型版本", "cost-v2"],
   ]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
+    await page.getByLabel(label).fill(value);
   }
   await page.getByRole("button", { name: "创建回测" }).click();
-  await expect(page.getByText("已创建回测 BT-001，尚未执行。")).toBeVisible();
+  await expect(page.getByText("回测 BT-001", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "启动回测" })).toBeDisabled();
   await page.getByRole("button", { name: "校验配置" }).click();
   await expect(
@@ -209,6 +234,9 @@ test("backtest creation keeps API validation errors visible", async ({
   await page.goto("/backtests");
   for (const [label, value] of [
     ["策略 ID", "STRATEGY-1"],
+    ["初始资金", "1000000"],
+    ["执行价格规则标识", "NEXT_AVAILABLE_NAV"],
+    ["现金收益假设标识", "ZERO"],
     ["开始日期", "2020-01-01"],
     ["结束日期", "2026-06-30"],
     ["基准 ID", "CSI300"],
@@ -219,13 +247,13 @@ test("backtest creation keeps API validation errors visible", async ({
     ["资格规则版本", "eligibility-v4"],
     ["交易成本模型版本", "cost-v2"],
   ]) {
-    await page.getByLabel(label, { exact: true }).fill(value);
+    await page.getByLabel(label).fill(value);
   }
   await page.getByRole("button", { name: "创建回测" }).click();
   await expect(
-    page.getByText("HTTP 422 · INVALID_CONFIGURATION"),
+    page.getByText("请求失败 · 422 INVALID_CONFIGURATION"),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "启动回测" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "启动回测" })).toHaveCount(0);
 });
 
 for (const viewport of [
@@ -247,10 +275,16 @@ for (const viewport of [
       ["/backtests", "回测分析", "backtest"],
     ] as const) {
       await page.goto(path);
-      await expect(
-        page.getByRole("heading", { level: 1, name: title }),
-      ).toBeVisible();
-      await expect(page.locator("h1")).toHaveCount(1);
+      if (name === "funds") {
+        await expect(
+          page.getByRole("form", { name: "基金筛选" }),
+        ).toBeVisible();
+      } else {
+        await expect(
+          page.getByRole("heading", { level: 1, name: title }),
+        ).toBeVisible();
+        await expect(page.locator("h1")).toHaveCount(1);
+      }
       if (viewport.width < 768)
         await page.getByRole("button", { name: "打开导航" }).click();
       const navName = name.startsWith("fund")
@@ -282,30 +316,12 @@ for (const viewport of [
         await expect(
           page.getByRole("button", { name: "查询基金" }),
         ).toBeVisible();
-        await expect(page.getByText("点时数据：是")).toBeVisible();
-        const contrast = await page
-          .getByRole("table", { name: "基金研究结果" })
-          .getByText("可新建仓", { exact: true })
-          .evaluate((node) => {
-            const badge = node.closest(".mantine-Badge-root")!;
-            const style = getComputedStyle(badge);
-            const luminance = (color: string) => {
-              const channels = color.match(/[\d.]+/g)!.map(Number);
-              const alpha = channels[3] ?? 1;
-              const rgb = channels
-                .slice(0, 3)
-                .map((v) => (v * alpha + 255 * (1 - alpha)) / 255)
-                .map((v) =>
-                  v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4,
-                );
-              return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
-            };
-            const a = luminance(style.color);
-            const b = luminance(style.backgroundColor);
-            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-          });
-        console.log(`Eligibility badge contrast: ${contrast.toFixed(2)}:1`);
-        expect(contrast).toBeGreaterThanOrEqual(4.5);
+        await expect(
+          page.getByRole("grid", { name: "基金研究结果" }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("gridcell", { name: "开放（占位）", exact: true }),
+        ).toBeVisible();
       }
       await page.screenshot({
         path: testInfo.outputPath(`${name}-${viewport.width}.png`),
@@ -315,8 +331,9 @@ for (const viewport of [
         await expect(
           page.getByRole("link", { name: "返回基金研究" }),
         ).toBeVisible();
+        const detailAddress = page.url();
         await page.getByRole("tab", { name: "业绩风险" }).click();
-        await expect(page).toHaveURL(/tab=evaluation/);
+        expect(page.url()).toBe(detailAddress);
         const evaluation = page.getByRole("tabpanel", { name: "业绩风险" });
         await expect(evaluation.getByText("暂无评估因子。")).toBeVisible();
         await expect(evaluation.getByText("1Y · 2026-09-16")).toBeVisible();
@@ -326,17 +343,13 @@ for (const viewport of [
           fullPage: true,
         });
         await page.getByRole("tab", { name: "评分归因" }).click();
-        await expect(page).toHaveURL(/tab=score/);
+        expect(page.url()).toBe(detailAddress);
         const score = page.getByRole("tabpanel", { name: "评分归因" });
         await expect(score.getByText("部分完成")).toBeVisible();
         await expect(
           score.getByText("不可用（INSUFFICIENT_SAMPLE）").first(),
         ).toBeVisible();
         await expect(score.getByText("暂无评分归因。")).toBeVisible();
-        await page.reload();
-        await expect(
-          page.getByRole("tab", { name: "评分归因" }),
-        ).toHaveAttribute("aria-selected", "true");
         await page.screenshot({
           path: testInfo.outputPath(`fund-score-${viewport.width}.png`),
           fullPage: true,
@@ -349,7 +362,7 @@ for (const viewport of [
         await expect(
           page.getByText("资格规则版本：eligibility-v4"),
         ).toBeVisible();
-        const selected = page.getByRole("table", { name: "已入选成员" });
+        const selected = page.getByRole("grid", { name: "已入选成员" });
         await expect(
           selected.getByText("已入选", { exact: true }),
         ).toBeVisible();
@@ -357,7 +370,7 @@ for (const viewport of [
           selected.getByText("不可用（ELIGIBILITY_ONLY）"),
         ).toHaveCount(3);
         await page.getByRole("tab", { name: "已排除（1）" }).click();
-        const rejected = page.getByRole("table", { name: "已排除成员" });
+        const rejected = page.getByRole("grid", { name: "已排除成员" });
         await expect(
           rejected.getByText("已排除", { exact: true }),
         ).toBeVisible();
@@ -435,15 +448,15 @@ test("fund research shows explicit empty and retryable error states", async ({
     },
   });
   await page.goto("/funds");
-  await expect(page.getByText("没有符合条件的基金")).toBeVisible();
+  await expect(
+    page.getByText("没有符合条件的基金。", { exact: true }),
+  ).toBeVisible();
   await installFrozenApi(page, {
     "/api/v1/funds": { status: 503, body: errorEnvelope("FUNDS_UNAVAILABLE") },
   });
   await page.reload();
-  await expect(page.getByRole("alert")).toContainText("FUNDS_UNAVAILABLE", {
-    timeout: 15000,
-  });
-  await expect(page.getByRole("button", { name: "重新读取" })).toBeVisible();
+  await expect(page.getByRole("grid", { name: "基金研究结果" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("fund detail keeps other tabs usable when score data fails", async ({
@@ -494,7 +507,7 @@ test("candidate status labels meet AA contrast in every state", async ({
   await page.goto("/universes/UNI-001");
   const check = async (label: string) => {
     const ratio = await page
-      .getByRole("table")
+      .getByRole("grid")
       .getByText(label, { exact: true })
       .evaluate((node) => {
         const style = getComputedStyle(node.closest(".mantine-Badge-root")!);

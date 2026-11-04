@@ -46,7 +46,7 @@ describe("Customer workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "工作台" }),
     ).toBeVisible();
-    expect(window.location.pathname).toBe("/home");
+    expect(window.location.pathname).toBe(path);
     const nav = within(screen.getByRole("navigation", { name: "主导航" }));
     expect(nav.getByRole("link", { name: "工作台" })).toHaveAttribute(
       "aria-current",
@@ -150,6 +150,7 @@ describe("Customer workspace", () => {
   });
   it("searches funds and submits encoded fund_name", async () => {
     visit();
+    const address = window.location.pathname + window.location.search;
     fireEvent.change(screen.getByRole("combobox", { name: "基金快速定位" }), {
       target: { value: "华夏" },
     });
@@ -167,9 +168,7 @@ describe("Customer workspace", () => {
       ),
     ).toBe(true);
     fireEvent.submit(screen.getByRole("form", { name: "基金快速定位" }));
-    expect(window.location.pathname + window.location.search).toBe(
-      "/funds?fund_name=%E5%8D%8E%E5%A4%8F",
-    );
+    expect(window.location.pathname + window.location.search).toBe(address);
   });
   it("toggles navigation and closes the drawer after navigation", () => {
     visit();
@@ -185,6 +184,13 @@ describe("Customer workspace", () => {
         { name: "基金研究" },
       ),
     );
+    expect(window.location.pathname + window.location.search).toBe("/");
+    expect(
+      within(screen.getByRole("navigation", { name: "主导航" })).getByRole(
+        "link",
+        { name: "基金研究" },
+      ),
+    ).toHaveAttribute("aria-current", "page");
     expect(
       screen.getByRole("button", { name: "打开导航", hidden: true }),
     ).toHaveAttribute("aria-expanded", "false");

@@ -19,7 +19,16 @@ const renderRoute = (initialEntry: string) => {
   return { ...view, client: queryClient };
 };
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+const originalQueryDefaults = queryClient.getDefaultOptions();
+beforeAll(() => {
+  // Keep production retry behavior, but avoid wall-clock backoff exceeding
+  // Testing Library's deadline in the frozen-error contract cases.
+  queryClient.setDefaultOptions({
+    ...originalQueryDefaults,
+    queries: { ...originalQueryDefaults.queries, retryDelay: 0 },
+  });
+  server.listen({ onUnhandledRequest: "error" });
+});
 afterEach(() => {
   cleanup();
   queryClient.clear();
@@ -27,7 +36,10 @@ afterEach(() => {
   resetRequestLog();
   window.history.replaceState({}, "", "/");
 });
-afterAll(() => server.close());
+afterAll(() => {
+  server.close();
+  queryClient.setDefaultOptions(originalQueryDefaults);
+});
 
 describe("M1.7 accessibility and contract verification", () => {
   it("reaches every named primary navigation link with the keyboard", async () => {
@@ -142,10 +154,10 @@ describe("M1.7 accessibility and contract verification", () => {
     );
     renderRoute("/universes/UNI-001");
 
-    expect(await screen.findByText("UNKNOWN")).toBeVisible();
-    expect(screen.getAllByText("不可用（ELIGIBILITY_ONLY）")).not.toHaveLength(
-      0,
-    );
+    expect(await screen.findByText(/未知策略/)).toBeVisible();
+    expect(
+      await screen.findAllByText("不可用（ELIGIBILITY_ONLY）"),
+    ).not.toHaveLength(0);
     expect(screen.getByText("点时数据：是")).toBeVisible();
     expect(screen.queryByText("0")).not.toBeInTheDocument();
   });

@@ -116,9 +116,16 @@ export const PageLayout = ({ children }: { children: ReactNode }) => {
           session.data.capabilities.can_manage_data_ingestion === true
         }
       />
-      <a href="#main-content" className={styles.skipLink}>
+      <Link
+        to="#main-content"
+        className={styles.skipLink}
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+      >
         跳至主要内容
-      </a>
+      </Link>
       <AppShell.Header className={styles.header}>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap" gap="sm">
           <Group gap="sm" wrap="nowrap">
@@ -222,7 +229,11 @@ export const PageLayout = ({ children }: { children: ReactNode }) => {
         {navigation()}
       </Drawer>
       <AppShell.Main component="div">
-        <main id="main-content" tabIndex={-1} className={styles.content}>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={`${styles.content} ${location.pathname === "/funds" ? styles.researchContent : ""}`}
+        >
           {children}
         </main>
       </AppShell.Main>

@@ -1,4 +1,17 @@
+import { transferableAbortController } from "node:util";
 import "@testing-library/jest-dom/vitest";
+
+// jsdom's AbortSignal is rejected by Node fetch. Queries must retain real
+// cancellation while component tests use Node's fetch/MSW transport.
+Object.defineProperty(globalThis, "AbortController", {
+  writable: true,
+  configurable: true,
+  value: class {
+    constructor() {
+      return transferableAbortController();
+    }
+  },
+});
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,

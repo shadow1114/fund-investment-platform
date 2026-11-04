@@ -1,17 +1,13 @@
-import {
-  Button,
-  Group,
-  Paper,
-  SimpleGrid,
-  Stack,
-  Table,
-  Text,
-} from "@mantine/core";
+import { ResearchDataTable } from "../../components/ResearchDataTable";
+import { Button, Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
 
 import type {
   FundFactorAnalysis,
   FundFactorAnalysisEvaluationPeriod,
 } from "../../api/generated/m17.schemas";
+
+type factorRow =
+  FundFactorAnalysis["factor_categories"][number]["factors"][number];
 
 const periods: { value: FundFactorAnalysisEvaluationPeriod; label: string }[] =
   [
@@ -113,47 +109,66 @@ export const FactorAnalysisPanel = ({
                   {category.factors.length} 项
                 </Text>
               </Group>
-              <Table.ScrollContainer minWidth={540}>
-                <Table striped highlightOnHover withTableBorder>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>因子</Table.Th>
-                      <Table.Th>数值</Table.Th>
-                      <Table.Th>方向</Table.Th>
-                      <Table.Th>状态</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {category.factors.map((factor) => (
-                      <Table.Tr key={factor.factor_id}>
-                        <Table.Th scope="row">
-                          <Text size="sm">{factor.name}</Text>
+              <ResearchDataTable
+                caption={`${category.name}因子指标`}
+                layoutKey={`factor-category-${category.category}`}
+                rowData={category.factors}
+                getRowId={({ data }) => data.factor_id}
+                columnDefs={[
+                  {
+                    field: "name",
+                    headerName: "因子",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: factor }: { data: factorRow }) => (
+                      <>
+                        <Text size="sm">{factor.name}</Text>
+                        <Text size="xs" c="dimmed">
+                          {factor.factor_id}
+                        </Text>
+                        {factor.series.length > 0 && (
                           <Text size="xs" c="dimmed">
-                            {factor.factor_id}
+                            滚动序列 {factor.series.length} 点
+                            {factor.series.at(-1)?.value !== null &&
+                              factor.series.at(-1)?.value !== undefined &&
+                              ` · 最新 ${formatValue(factor.factor_id, factor.series.at(-1)!.value)}`}
                           </Text>
-                          {factor.series.length > 0 && (
-                            <Text size="xs" c="dimmed">
-                              滚动序列 {factor.series.length} 点
-                              {factor.series.at(-1)?.value !== null &&
-                                factor.series.at(-1)?.value !== undefined &&
-                                ` · 最新 ${formatValue(factor.factor_id, factor.series.at(-1)!.value)}`}
-                            </Text>
-                          )}
-                        </Table.Th>
-                        <Table.Td>
-                          {formatValue(factor.factor_id, factor.raw_value)}
-                        </Table.Td>
-                        <Table.Td>
-                          {directionLabels[factor.direction] ?? "—"}
-                        </Table.Td>
-                        <Table.Td>
-                          {statusLabel(factor.status, factor.reason_code)}
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </Table.ScrollContainer>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    field: "raw_value",
+                    headerName: "数值",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: factor }: { data: factorRow }) => (
+                      <>{formatValue(factor.factor_id, factor.raw_value)}</>
+                    ),
+                  },
+                  {
+                    field: "direction",
+                    headerName: "方向",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: factor }: { data: factorRow }) => (
+                      <>{directionLabels[factor.direction] ?? "—"}</>
+                    ),
+                  },
+                  {
+                    field: "status",
+                    headerName: "状态",
+                    autoHeight: true,
+                    wrapText: true,
+                    cellRenderer: ({ data: factor }: { data: factorRow }) => (
+                      <>{statusLabel(factor.status, factor.reason_code)}</>
+                    ),
+                  },
+                ]}
+                pagination
+                paginationPageSize={20}
+                paginationPageSizeSelector={[20, 50, 100]}
+              />
             </Stack>
           </Paper>
         ))}

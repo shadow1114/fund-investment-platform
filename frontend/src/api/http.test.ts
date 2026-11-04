@@ -70,6 +70,16 @@ describe("API response handling", () => {
     expect(data).toEqual({ optimization_status: "UNKNOWN" });
   });
 
+  it("normalizes an unknown fund subscription status to UNKNOWN", () => {
+    const data = unwrapResponse({
+      status: 200,
+      data: { data: { sub_status: "CLOSED" }, meta: {}, error: null },
+      headers: new Headers(),
+    });
+
+    expect(data).toEqual({ sub_status: "UNKNOWN" });
+  });
+
   it("does not accept a value merely because it belongs to another enum", () => {
     const data = unwrapResponse({
       status: 200,
@@ -167,5 +177,19 @@ describe("API response handling", () => {
           "Response metadata is missing: pagination, versions, is_point_in_time",
       }),
     );
+  });
+
+  it("normalizes an unknown placeholder subscription status", () => {
+    const data = unwrapResponse({
+      status: 200,
+      data: {
+        data: [{ fund_id: "F-001", sub_status: "SUSPENDED" }],
+        meta: { subscription_status_source: "PLACEHOLDER" },
+        error: null,
+      },
+      headers: new Headers(),
+    });
+
+    expect(data).toEqual([{ fund_id: "F-001", sub_status: "UNKNOWN" }]);
   });
 });

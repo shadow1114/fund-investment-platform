@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, useRoutes } from "react-router-dom";
+import { MemoryRouter, useRoutes } from "react-router-dom";
 
 import { PageLayout } from "../components/PageLayout";
 import { queryClient } from "./queryClient";
@@ -12,9 +12,15 @@ const RoutedApp = () => <PageLayout>{useRoutes(routes)}</PageLayout>;
 export const App = () => (
   <MantineProvider theme={theme} defaultColorScheme="light">
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <MemoryRouter
+        initialEntries={[
+          window.location.pathname +
+            window.location.search +
+            window.location.hash,
+        ]}
+      >
         <RoutedApp />
-      </BrowserRouter>
+      </MemoryRouter>
     </QueryClientProvider>
   </MantineProvider>
 );

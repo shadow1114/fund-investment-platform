@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
-from fastapi.utils import create_model_field
+from fastapi.utils import create_cloned_field, create_model_field
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
@@ -38,7 +38,8 @@ from fip.api.schemas import (
     FundIngestionPreviewModel,
     FundIngestionSubmissionModel,
     FundIngestionTaskModel,
-    FundListPayloadModel,
+    FundListEnvelopeModel,
+    FundManagementCompaniesEnvelopeModel,
     FundPayloadModel,
     NavSeriesPayloadModel,
     OptimizationPayloadModel,
@@ -204,7 +205,8 @@ def create_app(
             "listFundIngestions": list[FundIngestionTaskModel],
             "getFundIngestion": FundIngestionTaskModel,
             "getFundBasicInfoHistory": list[FundBasicInfoHistoryModel],
-            "listFunds": list[FundListPayloadModel],
+            "listFunds": FundListEnvelopeModel,
+            "listFundManagementCompanies": FundManagementCompaniesEnvelopeModel,
             "getFund": FundPayloadModel,
             "getFundNavSeries": NavSeriesPayloadModel,
             "getFundEvaluations": EvaluationPayloadModel,
@@ -229,11 +231,16 @@ def create_app(
             operation_id = getattr(route, "operation_id", None)
             if isinstance(route, APIRoute) and operation_id in models:
                 model_type: Any = models[operation_id]
-                envelope = TypedEnvelope[model_type]
+                envelope = (
+                    model_type
+                    if operation_id in {"listFunds", "listFundManagementCompanies"}
+                    else TypedEnvelope[model_type]
+                )
                 route.response_model = envelope
                 route.response_field = create_model_field(
                     name=f"Response_{route.unique_id}", type_=envelope, mode="serialization"
                 )
+                route.secure_cloned_response_field = create_cloned_field(route.response_field)
 
     def openapi() -> dict[str, Any]:
         if app.openapi_schema is None:

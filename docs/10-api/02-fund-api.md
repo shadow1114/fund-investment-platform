@@ -1,10 +1,10 @@
 # 基金 API · Fund API
 
-> 上游文档：docs/01-product/01-product-overview.md（v2.5）｜本文暴露的域：**③ Fund Score · ④ Fund Universe**
-> 业务语义来源：docs/05-fund-evaluation/（v1.0，全 5 份）、docs/03-data/（v1.0–v2.2）
+> 上游文档：docs/01-product/01-product-overview.md（v2.6）｜本文暴露的域：**③ Fund Score · ④ Fund Universe**
+> 业务语义来源：docs/05-fund-evaluation/（01 v1.3、02 v1.4、03/04 v1.2、05 v1.1）、docs/03-data/02-data-domain-model.md（v2.0）
 > 本域上游：docs/10-api/01-api-overview.md（v1.3）
 >
-> **文档版本**：v1.6 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.8 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -49,7 +49,8 @@
 
 ```
 同一基金的 A / C / I 类份额费率不同 → 净值序列不同 → 评价结果不同
-    → API 的 fund_id 指向 Share Class，不是"基金产品"
+    → 列表行身份与份额资源请求使用 share_class_id
+    → 响应 fund_id 是产品公开 ID，供产品级抓取/历史使用（见 §4.2）
 ```
 
 > **若未来需要产品级聚合视图，须作为新概念回上游登记**，不得在 API 层临时合并。
@@ -61,6 +62,7 @@
 | # | Endpoint | Method | 能力 |
 |---|---|---|---|
 | 3.1 | `/api/v1/funds` | GET | 基金检索 |
+| 3.1a | `/api/v1/fund-management-companies` | GET | 独立管理公司选项 |
 | 3.2 | `/api/v1/funds/{fund_id}` | GET | 基金详情 |
 | 3.3 | `/api/v1/funds/{fund_id}/nav-series` | GET | 净值序列 |
 | 3.4 | `/api/v1/funds/{fund_id}/evaluations` | GET | 评价结果 |
@@ -83,22 +85,31 @@
 
 **Authorization**：`Researcher` 及以上。
 
-**Query Parameters**
+**Query Parameters**（冻结结构以 `frontend/openapi/m17.yaml` 为准）
 
-| 参数 | 类型 | 说明 |
+| 参数 | 类型 | 当前实现语义 |
 |---|---|---|
-| `fund_name` | string | 模糊匹配 |
-| `fund_type` | enum, multi | 沿用 `03-data` 的 `Fund Classification` 取值 |
-| `management_company_id` | string | 管理人 |
-| `manager_id` | string | 基金经理 |
-| **`lifecycle_status`** | enum, multi | `NORMAL` / `SUSPENDED_SUBSCRIPTION` / `LIQUIDATED` / `MERGED` / `TRANSFORMED` |
-| **`investment_eligibility`** | enum, multi | `FULLY_ELIGIBLE` / `HOLD_ONLY` / `LIMITED` / `EXIT_ONLY` / `NOT_TRADABLE` |
-| `inception_date_from` / `_to` | date | 成立日范围 |
-| `aum_min` / `aum_max` | number | 规模范围 |
-| `as_of_date` | date | **PIT 语义**（`01` §11.2） |
-| `page` / `page_size` / `sort` / `order` | — | `01` §7、§8 |
+| `fund_name` | string | 去首尾空白、不区分大小写的字面量子串；`%`、`_`、引号均不是查询表达式 |
+| `fund_code` | string | 恰好六位 ASCII 数字，保留前导零；匹配查询时点有效且可见的 AKSHARE 份额映射，非法值返回 422 |
+| `company_name` | string | 去首尾空白后精确匹配管理公司展示名；当前列或 PIT 快照，见下文 |
+| `asset_class` | enum, multi | `EQUITY / BOND / MIXED / MONEY_MARKET / FOF / REIT / COMMODITY / OTHER / UNKNOWN`；值来自当前分类目录 |
+| `sub_status` | enum | 仅支持 `开放`；其他值 422。这是占位字段，不是真实申购可用性 |
+| `fund_type` | string, multi | 保留旧单码兼容筛选，不替代 `asset_class`；与其他筛选同时应用 |
+| `strategy` / `strategy_tags` / `geography` / `product_structure` / `market_attributes` / `classification_status` | string, multi | 兼容现有分类筛选，按当前目录校验；多值允许重复参数或逗号分隔。暂停维度不可误判为已确认，`UNKNOWN` 不混同 `CANDIDATE / CONFLICT / PAUSED` |
+| `management_company_id` | string | 当前数据无规范化公司 ID；传入时明确 422，不从公司名称伪造标识 |
+| `manager_id` | string | 经理标识兼容筛选 |
+| `lifecycle_status` / `investment_eligibility` | enum, multi | 独立生命周期与可投资性筛选；不受占位 `sub_status` 改写 |
+| `inception_date_from` / `inception_date_to` | date | 成立日闭区间；起日大于止日 422 |
+| `aum_min` / `aum_max` | number | 当前缺少可靠规模来源，传入时明确 422；不静默忽略 |
+| `as_of_date` | date | 不传为当前视图；传入按可见修订/区间与来源快照解析 PIT，不借用未来映射或当前公司名 |
+| `page` / `page_size` | integer | 一基页码，默认 1 / 20；路由结构上限 500，实际还受全局请求上限约束（默认 200）；研究 UI 固定提供 20 / 50 / 200（200 已允许） |
+| `sort` / `order` | enum | `fund_code / fund_name / company_name / sub_status / inception_date / aum`；默认基金名称升序；`asc / desc` |
 
-**Sortable Fields**：`inception_date`、`aum`、`fund_name`
+PostgreSQL 在同一一致性快照内完成筛选、每份额唯一计数、排序与 `LIMIT/OFFSET`，不取全库后切片。主排序空值置后，同值追加产品公开 `fund_id` 升序、内部份额主键升序，以保证分页稳定。空集合及越界页返回 `data: []` 并保留真实总数；空集合 `total_pages: 0`。无有效供应商映射时 `fund_code: null`，不丢失份额；一个产品多份额及同名产品仍各有稳定 `share_class_id`。
+
+`company_name` 是产品当前展示投影，不是公司实体 ID：当前查询取 `fund.fund.company_name`。基本信息抓取从基金详情源的“基金公司”字段取值，并校验来源基金代码与请求代码一致；不得从“基金管理人”或“基金经理”字段推断。PIT 查询在每条当时可见的不可变 Basic Info History 快照内，优先取去空白后的 `normalized_fields.company_name`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；两个字段的回退不跨快照拼接，绝不回退到当前投影或未来快照。没有可用可见快照时返回 null。
+
+当前列表响应的 `management_company_id` 固定为 null：尚无规范化管理公司 ID，不能由 `company_name` 推造；传入该 ID 筛选仍明确返回 422。
 
 **这是 Filtering，不是 Eligibility Rules** ⚠️
 
@@ -110,11 +121,15 @@
 {
   "data": [
     {
-      "fund_id": "...",
+      "fund_id": "000001",
+      "share_class_id": "101",
+      "fund_code": "000001",
+      "company_name": "示例基金管理有限公司",
+      "sub_status": "开放",
       "fund_name": "...",
       "share_class": "A",
-      "fund_classification": "EQUITY_ACTIVE",
-      "management_company_id": "...",
+      "fund_classification": "ACTIVE_EQUITY",
+      "management_company_id": null,
       "inception_date": "2018-03-15",
       "lifecycle_status": "NORMAL",
       "investment_eligibility": "FULLY_ELIGIBLE"
@@ -124,6 +139,7 @@
     "as_of_date": "2026-08-24",
     "is_point_in_time": true,
     "data_version": "...",
+    "subscription_status_source": "PLACEHOLDER",
     "pagination": { "page": 1, "page_size": 50, "total_items": 1240, "total_pages": 25 }
   },
   "error": null
@@ -132,9 +148,15 @@
 
 ---
 
+### 4.1.1 GET /fund-management-companies — 独立公司选项
+
+只读端点；可选 `as_of_date` 与列表相同。返回全库范围去空、去重、按名称升序的 `data: [{"company_name": "…"}]` 及标准 meta/error，不跟随基金列表当前页或其他筛选缩小。PIT 同样读取当时可见快照，没有历史来源时不使用当前投影兜底。
+
 ### 4.2 GET /funds/{fund_id} — 基金详情
 
 **Purpose**：获取单只基金的静态属性与当前状态。
+
+路径占位名虽保留 `{fund_id}` 兼容，研究列表的行身份是 `share_class_id`；详情、NAV、评价、评分与因子分析请求使用该份额身份。独立页面 `/funds/{产品公开 fund_id}?share_class_id=...` 优先使用 query 中的份额 ID 定位。产品公开 `fund_id` 继续用于产品级抓取及基本信息历史；内部产品主键、内部份额 ID、六位展示/供应商代码不互换。旧产品公开 ID 详情路径仍兼容，但不能用于区分同产品 A/C 份额。
 
 **Query Parameters**
 
@@ -984,7 +1006,7 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 | # | 事项 | 影响 | 责任方 |
 |---|---|---|---|
 | FA-1 | **未纳入 M1.7 消费范围的本域端点最终路径与参数名** | 契约 | 接口评审 |
-| FA-2 | `fund_name` 模糊匹配的规则（前缀 / 全文 / 拼音） | 检索体验 | 产品 |
+| FA-2 | 当前为不区分大小写的字面量子串；拼音/全文检索尚未实现 | 检索体验扩展 | 产品 |
 | FA-3 | 是否需要产品级（跨 Share Class）聚合视图 | 粒度扩展 | 产品 + 投研 |
 | FA-4 | Universe 的资源级可见性规则（= `TBD-API-7`） | 授权 | 产品 + 治理 |
 | FA-5 | 批量查询（一次取多只基金的多个指标）的端点形态 | 性能 | 接口评审 |
@@ -995,9 +1017,9 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 
 | 关系 | 文档 |
 |---|---|
-| **本域总纲** | `10-api/01-api-overview.md` v1.0 |
-| **业务语义来源** | `05-fund-evaluation/`（全 5 份 v1.0）、`03-data/`（v1.0–v2.2） |
-| **上游约束** | `01-product/01-product-overview.md` v2.5（§4.2 ③、④、§5.2、§7）、`02-business-requirements.md` v2.3（§16.3.1、§17.5、§18） |
+| **本域总纲** | `10-api/01-api-overview.md` v1.3 |
+| **业务语义来源** | `05-fund-evaluation/`（评价语义）、`03-data/02-data-domain-model.md` v1.9（份额身份与公司来源） |
+| **上游约束** | `01-product/01-product-overview.md` v2.6（§4.2 ③、④、§5.2、§7）、`02-business-requirements.md` v2.8（§16.3.1、§17.5、§18） |
 | **相关 API** | `03-factor-api`（因子明细）、`04-portfolio-api`（消费 Universe） |
 
 ---
@@ -1006,6 +1028,8 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
+| **v1.7** | 2026-11-04 | 同步份额行身份、六位代码、公司来源/独立选项、SQL 稳定分页与占位申购状态；保留旧筛选与资源路径兼容。受影响下游：冻结 OpenAPI/严格响应模型、Orval 客户端、基金研究/详情/抓取入口 | 产品 v2.6；数据域 v1.9；API 总纲 v1.3；M1.7 契约 v1.2；`frontend/openapi/m17.yaml` |
+| **v1.8** | 2026-11-05 | 明确基金公司列只由已核对身份的“基金公司”字段提供；PIT 原始值回退同样限定为该字段，不再把“基金管理人”作为公司 | 数据域 v2.0；物理设计 v1.12；研究页公司列、公司筛选与独立公司选项 |
 | **v1.6** | 2026-09-16 | 冻结 M1.7 基金检索/详情、净值、评价/评分与候选池端点路径；保留未纳入前端范围的路径待定 | `06-m17-frontend-contracts.md` |
 | **v1.5** | 2026-09-08 | `weight_source` 第一版枚举改为 `PROFILE_FIXED_V1`；保留 `VALIDATION_PENDING`，明确 OOS 检验决定使用资格而非权重 | Plan-2 设计 v1.0、`05-fund-evaluation/02` v1.3 |
 | **v1.4** | 2026-08-27 | **Policy ⑥ 同步（后由 2026-09-08 决策替代权重来源）**。§4.5 归因新增 `weight_source` 与 `effectiveness_verdict`，示例补一条 `EXCLUDED` 因子；新增 §4.5.3 —— `INVALID` 因子须在归因中留痕，`EXCLUDED`（因子无效，全体一致）与 `UNAVAILABLE`（该基金缺数据）是不同状态；新增 §4.5.4 —— 检验未产出时 `score_status = VALIDATION_PENDING` 且不返回分数。M1 当前 `weight_source` 固定为 `PROFILE_FIXED_V1`。 | `05-fund-evaluation/02` v1.1 |

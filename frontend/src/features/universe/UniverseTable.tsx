@@ -1,13 +1,9 @@
 import { Badge } from "@mantine/core";
-import {
-  createColumnHelper,
-  getCoreRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { Link } from "react-router-dom";
 
 import type { UniverseMember } from "../../api/generated/m17.schemas";
-import { DataTable } from "../../components/DataTable";
+import { ResearchDataTable } from "../../components/ResearchDataTable";
 import { MetricValue } from "../../components/MetricValue";
 import { statusTextColors } from "../../components/StatusBadge";
 import { ConditionList } from "./ConditionList";
@@ -18,31 +14,31 @@ type Props = {
   decisionAt: string;
 };
 
-const column = createColumnHelper<UniverseMember>();
-
 export const UniverseTable = ({ members, label, decisionAt }: Props) => {
-  const columns = [
-    column.accessor("fund_id", {
-      header: "基金代码",
-      cell: ({ getValue }) => (
+  const columns: ColDef<UniverseMember>[] = [
+    {
+      field: "fund_id",
+      headerName: "基金代码",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseMember>) => (
         <Link
-          to={`/funds/${encodeURIComponent(getValue())}?as_of_date=${encodeURIComponent(decisionAt)}`}
+          to={`/funds/${encodeURIComponent(value)}?as_of_date=${encodeURIComponent(decisionAt)}`}
         >
-          {getValue()}
+          {value}
         </Link>
       ),
-      enableHiding: false,
-    }),
-    column.accessor("selection_status", {
-      header: "选择状态",
-      cell: ({ getValue }) => {
-        const status = getValue();
-        const labels = {
+      lockVisible: true,
+    },
+    {
+      field: "selection_status",
+      headerName: "选择状态",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseMember>) => {
+        const status = value;
+        const labels: Record<string, string> = {
           SELECTED: "已入选",
           REJECTED: "已排除",
           UNKNOWN: "未知状态",
         };
-        const colors = {
+        const colors: Record<string, string> = {
           SELECTED: "green",
           REJECTED: "gray",
           UNKNOWN: "yellow",
@@ -57,78 +53,88 @@ export const UniverseTable = ({ members, label, decisionAt }: Props) => {
           </Badge>
         );
       },
-    }),
-    column.accessor("investment_eligibility", {
-      header: "投资资格",
-      cell: ({ getValue }) => getValue() ?? "未提供",
-    }),
-    column.accessor("total_score", {
-      header: "总分",
-      cell: ({ row }) => (
+    },
+    {
+      field: "investment_eligibility",
+      headerName: "投资资格",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseMember>) =>
+        value ?? "未提供",
+    },
+    {
+      field: "total_score",
+      headerName: "总分",
+      cellRenderer: ({ data }: ICellRendererParams<UniverseMember>) => (
         <MetricValue
-          value={row.original.total_score}
-          status={row.original.total_score_status}
-          reason={row.original.total_score_reason}
+          value={data!.total_score}
+          status={data!.total_score_status}
+          reason={data!.total_score_reason}
         />
       ),
-    }),
-    column.accessor("rank", {
-      header: "排名",
-      cell: ({ row }) => (
+    },
+    {
+      field: "rank",
+      headerName: "排名",
+      cellRenderer: ({ data }: ICellRendererParams<UniverseMember>) => (
         <MetricValue
-          value={row.original.rank}
-          status={row.original.rank_status}
-          reason={row.original.rank_reason}
+          value={data!.rank}
+          status={data!.rank_status}
+          reason={data!.rank_reason}
         />
       ),
-    }),
-    column.accessor("percentile", {
-      header: "百分位",
-      cell: ({ row }) => (
+    },
+    {
+      field: "percentile",
+      headerName: "百分位",
+      cellRenderer: ({ data }: ICellRendererParams<UniverseMember>) => (
         <MetricValue
-          value={row.original.percentile}
-          status={row.original.percentile_status}
-          reason={row.original.percentile_reason}
+          value={data!.percentile}
+          status={data!.percentile_status}
+          reason={data!.percentile_reason}
           format="percent"
         />
       ),
-    }),
-    column.accessor("fund_tier", {
-      header: "层级",
-      cell: ({ getValue }) => getValue() ?? "不可用",
-    }),
-    column.display({
-      id: "conditions",
-      header: "筛选证据",
-      cell: ({ row }) => (
+    },
+    {
+      field: "fund_tier",
+      headerName: "层级",
+      cellRenderer: ({ value }: ICellRendererParams<UniverseMember>) =>
+        value ?? "不可用",
+    },
+    {
+      colId: "conditions",
+      autoHeight: true,
+      wrapText: true,
+      minWidth: 320,
+      headerName: "筛选证据",
+      cellRenderer: ({ data }: ICellRendererParams<UniverseMember>) => (
         <>
           <ConditionList
-            fundId={row.original.fund_id}
+            fundId={data!.fund_id}
             kind="passed"
-            conditions={row.original.passed_conditions}
+            conditions={data!.passed_conditions}
           />
           <ConditionList
-            fundId={row.original.fund_id}
+            fundId={data!.fund_id}
             kind="failed"
-            conditions={row.original.failed_conditions}
+            conditions={data!.failed_conditions}
           />
-          {row.original.selection_status === "REJECTED" &&
-            row.original.failed_conditions.length === 0 && (
+          {data!.selection_status === "REJECTED" &&
+            data!.failed_conditions.length === 0 && (
               <p>接口未返回具体排除原因。</p>
             )}
         </>
       ),
-    }),
+    },
   ];
-  const table = useReactTable({
-    data: members,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
 
   return (
-    <DataTable
-      table={table}
+    <ResearchDataTable
+      columnDefs={columns}
+      rowData={members}
+      getRowId={({ data }) => data.fund_id}
+      pagination
+      paginationPageSize={20}
+      paginationPageSizeSelector={[20, 50, 100]}
       caption={label}
       emptyMessage={`${label}：无成员`}
       layoutKey={`universe-${label}`}

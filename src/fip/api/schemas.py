@@ -368,6 +368,21 @@ class ReadEnvelopeModel(SuccessEnvelopeModel):
     """Strict envelope used by all frozen read endpoints."""
 
 
+class FundReadPayloadModel(ReadPayloadModel):
+    """Fund detail projection keeps provider identity fields out of common reads."""
+
+    share_class_id: str | None = None
+    fund_code: str | None = None
+    company_name: str | None = None
+    sub_status: str | None = None
+
+
+class FundReadEnvelopeModel(StrictModel):
+    data: FundReadPayloadModel
+    meta: ResponseMetaModel
+    error: None = None
+
+
 class SessionPayloadModel(ReadPayloadModel):
     pass
 
@@ -513,8 +528,63 @@ class FundScoreModel(StrictModel):
     score_status: Literal["COMPLETED", "PARTIAL", "VALIDATION_PENDING", "FAILED", "UNKNOWN"]
 
 
-class FundListPayloadModel(FundSummaryModel):
-    pass
+class FundListPayloadModel(StrictModel):
+    classification: ClassificationPayloadModel | None = None
+    fund_id: str
+    fund_name: str
+    share_class: str
+    fund_classification: str
+    management_company_id: str | None = None
+    inception_date: str | None
+    lifecycle_status: Literal[
+        "NORMAL", "SUSPENDED_SUBSCRIPTION", "LIQUIDATED", "MERGED", "TRANSFORMED", "UNKNOWN"
+    ]
+    investment_eligibility: Literal[
+        "FULLY_ELIGIBLE", "HOLD_ONLY", "LIMITED", "EXIT_ONLY", "NOT_TRADABLE", "UNKNOWN"
+    ]
+    share_class_id: str
+    fund_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
+    company_name: str | None = None
+    sub_status: Literal["开放", "UNKNOWN"]
+    manager_ids: list[str]
+
+
+class FundListMetaModel(ResponseMetaModel):
+    model_config = ConfigDict(extra="forbid")
+
+    as_of_date: str
+    data_version: str
+    versions: dict[str, str]
+    is_point_in_time: bool
+    availability_quality_distribution: dict[str, float]
+    pagination: PaginationModel
+    subscription_status_source: Literal["PLACEHOLDER"]
+
+
+class FundListEnvelopeModel(StrictModel):
+    data: list[FundListPayloadModel]
+    meta: FundListMetaModel
+    error: None = None
+
+
+class FundManagementCompanyPayloadModel(StrictModel):
+    company_name: str
+
+
+class FundManagementCompaniesMetaModel(ResponseMetaModel):
+    model_config = ConfigDict(extra="forbid")
+
+    as_of_date: str
+    data_version: str
+    versions: dict[str, str]
+    is_point_in_time: bool
+    availability_quality_distribution: dict[str, float]
+
+
+class FundManagementCompaniesEnvelopeModel(StrictModel):
+    data: list[FundManagementCompanyPayloadModel]
+    meta: FundManagementCompaniesMetaModel
+    error: None = None
 
 
 class FundPayloadModel(FundModel):

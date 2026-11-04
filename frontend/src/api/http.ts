@@ -122,6 +122,7 @@ const enumValuesByField: Readonly<Record<string, ReadonlySet<string>>> = {
   thresholds_status: values("CALIBRATED", "PENDING_CALIBRATION", "UNKNOWN"),
   segment: values("FULL", "IN_SAMPLE", "OUT_OF_SAMPLE", "UNKNOWN"),
   nav_type: values("ADJUSTED", "RAW", "UNKNOWN"),
+  sub_status: values("开放", "UNKNOWN"),
   included_in_nav: values("TRUE", "FALSE", "UNKNOWN"),
 };
 

@@ -1,4 +1,5 @@
 export const responseMeta = {
+  generated_at: "2026-11-03T00:00:00Z",
   request_id: "REQ-M17-SMOKE",
   as_of_date: "2026-09-16",
   data_version: "market-v12",
@@ -24,17 +25,26 @@ export const errorEnvelope = (code: string) => ({
   },
 });
 
+const fundSummary = {
+  fund_id: "000001",
+  fund_name: "Alpha 稳健基金",
+  share_class: "A",
+  fund_classification: "EQUITY",
+  management_company_id: "MC-1",
+  inception_date: "2020-01-02",
+  lifecycle_status: "NORMAL",
+  investment_eligibility: "FULLY_ELIGIBLE",
+};
+
 export const fundListEnvelope = {
   data: [
     {
-      fund_id: "000001",
-      fund_name: "Alpha 稳健基金",
-      share_class: "A",
-      fund_classification: "EQUITY",
-      management_company_id: "MC-1",
-      inception_date: "2020-01-02",
-      lifecycle_status: "NORMAL",
-      investment_eligibility: "FULLY_ELIGIBLE",
+      ...fundSummary,
+      share_class_id: "101",
+      fund_code: "000001",
+      company_name: "Alpha 基金管理有限公司",
+      sub_status: "开放",
+      manager_ids: ["M-1"],
     },
   ],
   meta: {
@@ -45,13 +55,20 @@ export const fundListEnvelope = {
       total_items: 1,
       total_pages: 1,
     },
+    subscription_status_source: "PLACEHOLDER",
   },
+  error: null,
+};
+
+export const fundManagementCompaniesEnvelope = {
+  data: [{ company_name: "Alpha 基金管理有限公司" }],
+  meta: responseMeta,
   error: null,
 };
 
 export const fundDetailEnvelope = {
   data: {
-    ...fundListEnvelope.data[0],
+    ...fundSummary,
     classification_version: "class-v3",
     manager_ids: ["M-1"],
     benchmark: {

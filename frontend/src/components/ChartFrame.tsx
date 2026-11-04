@@ -1,6 +1,6 @@
 import { Paper, Stack, Text, Title } from "@mantine/core";
 import { useResizeObserver } from "@mantine/hooks";
-import { useEffect, type ReactNode, type RefObject } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import styles from "./Workbench.module.css";
 
@@ -33,10 +33,7 @@ export const ChartFrame = ({
             {description}
           </Text>
         </div>
-        <div
-          ref={ref as RefObject<HTMLDivElement>}
-          className={styles.chartContainer}
-        >
+        <div ref={ref} className={styles.chartContainer}>
           {chart}
         </div>
         {table && (

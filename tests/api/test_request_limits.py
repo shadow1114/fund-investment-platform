@@ -14,6 +14,17 @@ def test_page_size_above_configured_max_is_validation_error():
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+def test_default_page_size_limit_is_200_but_fund_ingestion_history_stays_at_100():
+    runtime = Settings(database_url="sqlite://")
+    assert runtime.max_page_size == 200
+    with TestClient(create_app(settings_override=runtime)) as client:
+        assert client.get("/api/v1/funds?page_size=201").status_code == 422
+        assert client.get("/api/v1/fund-ingestions?page_size=101").status_code == 422
+        assert (
+            client.get("/api/v1/ingestions/test-operation/items?page_size=101").status_code == 422
+        )
+
+
 def test_rate_limit_is_429_with_retry_after():
     runtime = Settings(database_url="sqlite://", rate_limit_per_minute=1)
     app = create_app(settings_override=runtime)

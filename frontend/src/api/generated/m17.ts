@@ -32,6 +32,7 @@ import type {
   FundIngestionResponseResponse,
   FundIngestionSubmissionResponseResponse,
   FundListResponseResponse,
+  FundManagementCompaniesResponseResponse,
   FundResponseResponse,
   FundScoreResponseResponse,
   GetBacktestPerformanceParams,
@@ -47,6 +48,7 @@ import type {
   ListFundIngestionHistoryParams,
   ListFundIngestionItemsParams,
   ListFundIngestionsParams,
+  ListFundManagementCompaniesParams,
   ListFundsParams,
   ListPortfoliosParams,
   ListUniversesParams,
@@ -223,6 +225,60 @@ export const listFunds = async (
     ...options,
     method: "GET",
   });
+};
+
+export type listFundManagementCompaniesResponse200 = {
+  data: FundManagementCompaniesResponseResponse;
+  status: 200;
+};
+
+export type listFundManagementCompaniesResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listFundManagementCompaniesResponseSuccess =
+  listFundManagementCompaniesResponse200 & {
+    headers: Headers;
+  };
+export type listFundManagementCompaniesResponseError =
+  listFundManagementCompaniesResponseDefault & {
+    headers: Headers;
+  };
+
+export type listFundManagementCompaniesResponse =
+  | listFundManagementCompaniesResponseSuccess
+  | listFundManagementCompaniesResponseError;
+
+export const getListFundManagementCompaniesUrl = (
+  params?: ListFundManagementCompaniesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/fund-management-companies?${stringifiedParams}`
+    : `/api/v1/fund-management-companies`;
+};
+
+export const listFundManagementCompanies = async (
+  params?: ListFundManagementCompaniesParams,
+  options?: RequestInit,
+): Promise<listFundManagementCompaniesResponse> => {
+  return apiFetch<listFundManagementCompaniesResponse>(
+    getListFundManagementCompaniesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
 export type getFundResponse200 = {

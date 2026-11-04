@@ -29,14 +29,32 @@ paths:
       operationId: listFunds
       parameters:
         - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/FundListPageSize"
+        - $ref: "#/components/parameters/FundListSort"
         - $ref: "#/components/parameters/Order"
         - $ref: "#/components/parameters/AsOfDate"
         - name: fund_name
           in: query
           schema:
             type: string
+        - name: fund_code
+          in: query
+          description: Exactly six ASCII digits.
+          schema:
+            type: string
+            pattern: "^[0-9]{6}$"
+        - name: company_name
+          in: query
+          description: Exact management company name; omit to include every company.
+          schema:
+            type: string
+        - name: sub_status
+          in: query
+          description: Current placeholder subscription status; only open is supported.
+          schema:
+            type: string
+            enum:
+              - 开放
         - name: fund_type
           in: query
           style: form
@@ -126,6 +144,16 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/FundListResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/fund-management-companies:
+    get:
+      operationId: listFundManagementCompanies
+      parameters:
+        - $ref: "#/components/parameters/AsOfDate"
+      responses:
+        "200":
+          $ref: "#/components/responses/FundManagementCompaniesResponse"
         default:
           $ref: "#/components/responses/ErrorResponse"
   /api/v1/funds/{fund_id}:
@@ -785,6 +813,26 @@ components:
         minimum: 1
         maximum: 500
         default: 50
+    FundListPageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 20
+    FundListSort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum:
+          - fund_code
+          - fund_name
+          - company_name
+          - sub_status
+          - inception_date
+          - aum
     Sort:
       name: sort
       in: query
@@ -926,6 +974,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/FundListEnvelope"
+    FundManagementCompaniesResponse:
+      description: Distinct fund management companies visible at the requested date.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/FundManagementCompaniesEnvelope"
     FundResponse:
       description: Fund detail.
       content:
@@ -1709,6 +1763,65 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ClassificationPayloadModel"
             - type: "null"
+    FundListItem:
+      type: object
+      required:
+        - fund_id
+        - fund_name
+        - share_class
+        - fund_classification
+        - inception_date
+        - lifecycle_status
+        - investment_eligibility
+        - share_class_id
+        - sub_status
+        - manager_ids
+      properties:
+        fund_id:
+          type: string
+        fund_name:
+          type: string
+        share_class:
+          type: string
+        fund_classification:
+          type: string
+        management_company_id:
+          type:
+            - string
+            - "null"
+        inception_date:
+          type:
+            - string
+            - "null"
+          format: date
+        lifecycle_status:
+          $ref: "#/components/schemas/LifecycleStatus"
+        investment_eligibility:
+          $ref: "#/components/schemas/InvestmentEligibility"
+        classification:
+          anyOf:
+            - $ref: "#/components/schemas/ClassificationPayloadModel"
+            - type: "null"
+        share_class_id:
+          type: string
+        fund_code:
+          type:
+            - string
+            - "null"
+          pattern: "^[0-9]{6}$"
+        company_name:
+          type:
+            - string
+            - "null"
+        sub_status:
+          type: string
+          enum:
+            - 开放
+            - UNKNOWN
+        manager_ids:
+          type: array
+          items:
+            type: string
     BenchmarkComponent:
       type: object
       required:
@@ -1795,6 +1908,7 @@ components:
         - is_point_in_time
         - pagination
         - availability_quality_distribution
+        - subscription_status_source
       allOf:
         - $ref: "#/components/schemas/ResponseMeta"
         - type: object
@@ -1805,6 +1919,7 @@ components:
             - is_point_in_time
             - pagination
             - availability_quality_distribution
+            - subscription_status_source
           properties:
             as_of_date:
               type: string
@@ -1819,6 +1934,9 @@ components:
               $ref: "#/components/schemas/Pagination"
             availability_quality_distribution:
               $ref: "#/components/schemas/AvailabilityQualityDistribution"
+            subscription_status_source:
+              type: string
+              const: PLACEHOLDER
     FundListEnvelope:
       type: object
       required:
@@ -1829,9 +1947,59 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/FundSummary"
+            $ref: "#/components/schemas/FundListItem"
         meta:
           $ref: "#/components/schemas/FundListMeta"
+        error:
+          $ref: "#/components/schemas/EmptyError"
+    FundManagementCompany:
+      type: object
+      required:
+        - company_name
+      properties:
+        company_name:
+          type: string
+    FundManagementCompaniesMeta:
+      required:
+        - as_of_date
+        - data_version
+        - versions
+        - is_point_in_time
+        - availability_quality_distribution
+      allOf:
+        - $ref: "#/components/schemas/ResponseMeta"
+        - type: object
+          required:
+            - as_of_date
+            - data_version
+            - versions
+            - is_point_in_time
+            - availability_quality_distribution
+          properties:
+            as_of_date:
+              type: string
+              format: date
+            data_version:
+              type: string
+            versions:
+              $ref: "#/components/schemas/VersionReferences"
+            is_point_in_time:
+              type: boolean
+            availability_quality_distribution:
+              $ref: "#/components/schemas/AvailabilityQualityDistribution"
+    FundManagementCompaniesEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+        - error
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FundManagementCompany"
+        meta:
+          $ref: "#/components/schemas/FundManagementCompaniesMeta"
         error:
           $ref: "#/components/schemas/EmptyError"
     FundEnvelope:

@@ -117,7 +117,7 @@ test("offline classification review preserves historical visibility", async ({
     .getByRole("listbox", { name: "资产类别" })
     .selectOption(["EQUITY"]);
   await page.getByRole("button", { name: "查询", exact: true }).click();
-  await expect(page).toHaveURL(/asset_class=EQUITY/);
+  await expect(page).toHaveURL("http://127.0.0.1:4173/funds");
   await page
     .getByRole("link", { name: fundListEnvelope.data[0].fund_name })
     .click();

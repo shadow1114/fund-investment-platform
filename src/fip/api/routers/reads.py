@@ -17,7 +17,12 @@ from fip.api.fund_queries import FundQueries
 from fip.api.policy import require_read_access
 from fip.api.portfolio_queries import DecisionQueries, OptimizationQueries, PortfolioQueries
 from fip.api.repositories import ApiRepositories
-from fip.api.schemas import ReadEnvelopeModel
+from fip.api.schemas import (
+    FundListEnvelopeModel,
+    FundManagementCompaniesEnvelopeModel,
+    FundReadEnvelopeModel,
+    ReadEnvelopeModel,
+)
 from fip.api.universe_queries import UniverseQueries
 
 # FastAPI's dependency/query declarations intentionally live in signatures.
@@ -90,15 +95,19 @@ def get_session(request: Request) -> dict[str, Any]:
     )
 
 
-@router.get("/funds", operation_id="listFunds", response_model=ReadEnvelopeModel)
+@router.get("/funds", operation_id="listFunds", response_model=FundListEnvelopeModel)
 def list_funds(
     request: Request,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
-    sort: Literal["fund_name", "inception_date", "aum"] | None = None,
+    page_size: int = Query(20, ge=1, le=500),
+    sort: Literal["fund_code", "fund_name", "company_name", "sub_status", "inception_date", "aum"]
+    | None = None,
     order: Literal["asc", "desc"] = "asc",
     as_of_date: date | None = None,
     fund_name: str | None = None,
+    fund_code: str | None = Query(None, pattern=r"^[0-9]{6}$"),
+    company_name: str | None = None,
+    sub_status: Literal["开放"] | None = None,
     fund_type: list[str] | None = Query(None),
     management_company_id: str | None = None,
     manager_id: str | None = None,
@@ -127,6 +136,10 @@ def list_funds(
         raise InvalidQueryError("inception_date_from must not be after inception_date_to")
     if aum_min is not None and aum_max is not None and aum_min > aum_max:
         raise InvalidQueryError("aum_min must not be greater than aum_max")
+    fund_code = fund_code if fund_code else None
+    if fund_code and (len(fund_code) != 6 or any(char < "0" or char > "9" for char in fund_code)):
+        raise InvalidQueryError("fund_code must contain exactly six ASCII digits")
+    company_name = company_name.strip() if company_name else None
     policies = [get_classification_policy()]
     allowed = {
         name: {value for policy in policies for value in policy.catalog[name]}
@@ -153,6 +166,9 @@ def list_funds(
             allowed={"CONFIRMED", "CANDIDATE", "CONFLICT", "UNKNOWN"},
         ),
         fund_name=fund_name,
+        fund_code=fund_code,
+        company_name=company_name,
+        sub_status=sub_status,
         fund_type=_multi_values(fund_type, name="fund_type"),
         management_company_id=management_company_id,
         manager_id=manager_id,
@@ -193,6 +209,27 @@ def list_funds(
     return success(result.data, request_id=_request_id(request), **result.meta)
 
 
+@router.get(
+    "/fund-management-companies",
+    operation_id="listFundManagementCompanies",
+    response_model=FundManagementCompaniesEnvelopeModel,
+)
+def list_fund_management_companies(
+    request: Request,
+    as_of_date: date | None = None,
+    repository: ApiRepositories = Depends(get_repository),
+) -> dict[str, Any]:
+    values = repository.funds.list_management_companies(
+        as_of_date=as_of_date.isoformat() if as_of_date else None
+    )
+    return success(
+        [{"company_name": value} for value in values],
+        request_id=_request_id(request),
+        as_of_date=as_of_date.isoformat() if as_of_date else None,
+        is_point_in_time=as_of_date is not None,
+    )
+
+
 @router.get("/fund-universes", operation_id="listUniverses", response_model=ReadEnvelopeModel)
 def list_universes(
     request: Request,
@@ -225,7 +262,11 @@ def list_portfolios(
     return success(rows, request_id=_request_id(request), **meta)
 
 
-@router.get("/funds/{fund_id}", operation_id="getFund", response_model=ReadEnvelopeModel)
+@router.get(
+    "/funds/{fund_id}",
+    operation_id="getFund",
+    response_model=FundReadEnvelopeModel,
+)
 def get_fund(
     fund_id: str,
     request: Request,

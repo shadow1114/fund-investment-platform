@@ -66,7 +66,7 @@ describe("FactorAnalysisPanel", () => {
 
     expect(screen.getByRole("heading", { name: "收益表现" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "风险指标" })).toBeVisible();
-    expect(screen.getByText("12.34%", { exact: true })).toBeVisible();
+    expect(await screen.findByText("12.34%", { exact: true })).toBeVisible();
     expect(
       screen.getByText("不可用（INSUFFICIENT_OBSERVATIONS）"),
     ).toBeVisible();

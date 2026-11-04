@@ -1,6 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { classificationCatalog } from "../src/test/classificationFixtures";
 import {
   fundListEnvelope,
+  fundManagementCompaniesEnvelope,
   portfolioListEnvelope,
   responseMeta,
   sessionEnvelope,
@@ -32,6 +34,10 @@ async function installWorkspaceFixtures(page: Page) {
       await route.fulfill({ json: privilegedSession });
     } else if (url.pathname === "/api/v1/funds") {
       await route.fulfill({ json: fundListEnvelope });
+    } else if (url.pathname === "/api/v1/fund-management-companies") {
+      await route.fulfill({ json: fundManagementCompaniesEnvelope });
+    } else if (url.pathname === "/api/v1/fund-classifications/catalog") {
+      await route.fulfill({ json: classificationCatalog });
     } else if (url.pathname === "/api/v1/portfolios") {
       await route.fulfill({ json: portfolioListEnvelope });
     } else if (url.pathname === "/api/v1/fund-ingestions") {
@@ -83,7 +89,7 @@ test("root opens the workspace and capability exposes the data center", async ({
 }) => {
   await installWorkspaceFixtures(page);
   await page.goto("/");
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL("http://127.0.0.1:4173/");
   await expect(
     page.getByRole("heading", { level: 1, name: "工作台" }),
   ).toBeVisible();
@@ -93,6 +99,10 @@ test("root opens the workspace and capability exposes the data center", async ({
   await expect(page.getByRole("region", { name: "基金总数" })).toContainText(
     "1",
   );
+  const browserAddress = page.url();
+  await page.getByRole("link", { name: "基金研究", exact: true }).click();
+  await expect(page.getByRole("grid", { name: "基金研究结果" })).toBeVisible();
+  expect(page.url()).toBe(browserAddress);
 });
 
 test("operation deep links survive refresh without submitting another job", async ({
@@ -146,11 +156,9 @@ test("data center remains readable at the equivalent of 200 percent zoom", async
   page,
 }) => {
   await installWorkspaceFixtures(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // 1440×900 browser content at 200% zoom has 720×450 CSS pixels.
+  await page.setViewportSize({ width: 720, height: 450 });
   await page.goto("/data-ingestion");
-  await page.evaluate(() => {
-    document.documentElement.style.zoom = "2";
-  });
   await expect(
     page.getByRole("heading", { name: "基金数据中心" }),
   ).toBeVisible();

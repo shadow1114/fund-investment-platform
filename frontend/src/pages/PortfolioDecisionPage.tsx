@@ -121,37 +121,18 @@ const PortfolioIndex = () => {
           <ProvenanceBar meta={provenanceMeta(query.data.meta)} />
           {query.data.data.length > 0 ? (
             <>
-              <PortfolioList portfolios={query.data.data} />
-              <nav aria-label="组合列表分页">
-                <Group justify="space-between" wrap="wrap">
-                  <Button
-                    variant="default"
-                    disabled={query.data.meta.pagination.page <= 1}
-                    onClick={() =>
-                      changePage(query.data.meta.pagination.page - 1)
-                    }
-                  >
-                    上一页
-                  </Button>
-                  <Text size="sm">
-                    第 {query.data.meta.pagination.page} /{" "}
-                    {query.data.meta.pagination.total_pages} 页，共{" "}
-                    {query.data.meta.pagination.total_items} 个组合
-                  </Text>
-                  <Button
-                    variant="default"
-                    disabled={
-                      query.data.meta.pagination.page >=
-                      query.data.meta.pagination.total_pages
-                    }
-                    onClick={() =>
-                      changePage(query.data.meta.pagination.page + 1)
-                    }
-                  >
-                    下一页
-                  </Button>
-                </Group>
-              </nav>
+              <PortfolioList
+                portfolios={query.data.data}
+                serverPagination={{
+                  page,
+                  pageSize,
+                  total: query.data.meta.pagination.total_items,
+                  loading: query.isFetching,
+                  failed: query.isError,
+                  resetKey: `${sort}:${order}:${pageSize}`,
+                  onPageChange: changePage,
+                }}
+              />
             </>
           ) : (
             <p>当前用户没有可见组合。</p>
@@ -197,7 +178,7 @@ const PortfolioDetail = ({
     else next.delete("tab");
     setSearchParams(next);
   };
-  const optimizationKey = useRef<string>();
+  const optimizationKey = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     setDecisionInput(searchParams.get("decision_id") ?? "");

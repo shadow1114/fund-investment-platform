@@ -1,3 +1,4 @@
+import { ResearchDataTable } from "../../components/ResearchDataTable";
 import ReactEChartsCore from "echarts-for-react/lib/core";
 import { useCallback, useRef } from "react";
 
@@ -67,28 +68,29 @@ export const FundNavChart = ({ points }: { points: NavPoint[] }) => {
               aria-label="净值数值表"
               tabIndex={0}
             >
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">估值日</th>
-                    <th scope="col">净值</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {points.map((point) => (
-                    <tr key={point.date}>
-                      <th scope="row">{point.date}</th>
-                      <td>
-                        <MetricValue
-                          value={point.nav}
-                          status={point.nav_status}
-                          reason={point.nav_reason ?? point.reason_code}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ResearchDataTable<NavPoint>
+                caption="基金净值数值"
+                layoutKey="fund-nav-values"
+                rowData={points}
+                getRowId={({ data }) => data.date}
+                columnDefs={[
+                  { field: "date", headerName: "估值日" },
+                  {
+                    field: "nav",
+                    headerName: "净值",
+                    cellRenderer: ({ data: point }: { data: NavPoint }) => (
+                      <MetricValue
+                        value={point.nav}
+                        status={point.nav_status}
+                        reason={point.nav_reason ?? point.reason_code}
+                      />
+                    ),
+                  },
+                ]}
+                pagination
+                paginationPageSize={20}
+                paginationPageSizeSelector={[20, 50, 100]}
+              />
             </div>
           }
         />

@@ -22,6 +22,7 @@ RESPONSE_COMPONENT_REGISTRY: dict[str, str] = {
     "reviewClassification": "TypedEnvelope_ReviewOutcome_",
     "getFund": "FundEnvelope",
     "listFunds": "FundListEnvelope",
+    "listFundManagementCompanies": "FundManagementCompaniesEnvelope",
     "getFundNavSeries": "NavSeriesEnvelope",
     "getFundEvaluations": "FundEvaluationEnvelope",
     "getFundScores": "FundScoreEnvelope",

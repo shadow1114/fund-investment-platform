@@ -25,6 +25,10 @@ from fip.services.data_service.batch import (
     FundIngestSubject,
 )
 from fip.services.data_service.classification.models import ClassificationSnapshot
+from fip.services.data_service.company import (
+    company_name_from_fields,
+    raw_fund_company_from_record,
+)
 from fip.services.data_service.grouping import split_share_class_name
 from fip.services.data_service.models.fund import (
     Fund,
@@ -540,7 +544,9 @@ class IngestService:
             self._store_raw(error.record)
             raise
         payload = self._store_raw(record)
-        self._session.execute(select(Fund).where(Fund.id == fund_id).with_for_update()).scalar_one()
+        fund = self._session.execute(
+            select(Fund).where(Fund.id == fund_id).with_for_update()
+        ).scalar_one()
         frame = pd.read_parquet(io.BytesIO(record.payload))
         if frame.empty:
             raise ValueError("fund overview returned no rows")
@@ -548,7 +554,7 @@ class IngestService:
         raw_fields = {
             str(key): None if pd.isna(value) else str(value)
             for key, value in source_row.items()
-            if key not in {"基金经理", "基金经理人"}
+            if key not in {"基金经理", "基金经理人", "基金管理人"}
         }
         normalized_names = {
             "基金简称": "display_name",
@@ -565,6 +571,14 @@ class IngestService:
             for name, value in raw_fields.items()
             if name in normalized_names and value is not None
         }
+        company_record = self._adapter.fetch("fund_detail_xq", symbol=symbol)
+        self._store_raw(company_record)
+        raw_company_name = raw_fund_company_from_record(company_record, symbol=symbol)
+        if raw_company_name is not None:
+            raw_fields["基金公司"] = raw_company_name
+        company_name = company_name_from_fields(normalized_fields, raw_fields)
+        if company_name is not None:
+            normalized_fields["company_name"] = company_name
         content_hash = hashlib.sha256(
             json.dumps(
                 {"raw_fields": raw_fields, "normalized_fields": normalized_fields},
@@ -596,6 +610,10 @@ class IngestService:
                 )
             )
             self._session.flush()
+        # Current projection and immutable history are persisted in this caller's
+        # transaction; missing/blank evidence never erases a known company.
+        if company_name is not None:
+            fund.company_name = company_name
         fields: dict[str, str] = {}
         aliases = {
             "基金类型": "formal_type",

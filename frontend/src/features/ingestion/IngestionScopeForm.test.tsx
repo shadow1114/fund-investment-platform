@@ -315,7 +315,12 @@ describe("fund data center", () => {
     ).toBeVisible();
     expect(await screen.findByText("source timeout")).toBeVisible();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "结果下一页" }));
+    await user.click(
+      within(screen.getByRole("region", { name: "抓取项级结果" })).getByRole(
+        "button",
+        { name: "下一页" },
+      ),
+    );
     await waitFor(() =>
       expect(itemRequests.at(-1)?.searchParams.get("page")).toBe("2"),
     );
@@ -601,7 +606,11 @@ describe("fund data center", () => {
     await waitFor(() =>
       expect(requests.at(-1)?.searchParams.get("created_from")).toBeTruthy(),
     );
-    await user.click(await screen.findByRole("button", { name: "历史下一页" }));
+    await user.click(
+      await within(
+        await screen.findByRole("region", { name: "基金抓取任务历史" }),
+      ).findByRole("button", { name: "下一页" }),
+    );
     await waitFor(() =>
       expect(requests.at(-1)?.searchParams.get("page")).toBe("2"),
     );
@@ -764,7 +773,11 @@ describe("fund data center", () => {
     );
     expect(header).toHaveTextContent(new Date(finish).toLocaleString("zh-CN"));
     await user.selectOptions(screen.getByLabelText("历史状态"), "RUNNING");
-    await user.click(await screen.findByRole("button", { name: "历史下一页" }));
+    await user.click(
+      await within(
+        await screen.findByRole("region", { name: "基金抓取任务历史" }),
+      ).findByRole("button", { name: "下一页" }),
+    );
     await waitFor(() =>
       expect(requests.some((url) => url.searchParams.get("page") === "2")).toBe(
         true,

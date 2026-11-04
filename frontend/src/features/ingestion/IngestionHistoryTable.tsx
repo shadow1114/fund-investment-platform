@@ -1,13 +1,13 @@
+import { ResearchDataTable } from "../../components/ResearchDataTable";
 import {
   Button,
   Group,
   NativeSelect,
   Stack,
-  Table,
   Text,
   TextInput,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -17,6 +17,8 @@ import type {
 import { getIngestionHistoryQueryOptions } from "../../api/queries";
 import { ErrorState } from "../../components/ErrorState";
 import { datasetLabels, scopeLabels } from "./IngestionScopeForm";
+
+type taskRow = FundIngestionTask;
 
 export const ingestionStatusLabel = (task: FundIngestionTask) =>
   task.task_status === "PARTIAL_SUCCESS"
@@ -58,7 +60,10 @@ export const IngestionHistoryTable = () => {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const invalidDates = Boolean(from && to && from > to);
-  const query = useQuery(getIngestionHistoryQueryOptions(params));
+  const query = useQuery({
+    ...getIngestionHistoryQueryOptions(params),
+    placeholderData: keepPreviousData,
+  });
   const latest = query.data?.items[0];
   return (
     <section aria-labelledby="ingestion-history-title">
@@ -172,22 +177,37 @@ export const IngestionHistoryTable = () => {
             本页最近任务：{new Date(latest.created_at).toLocaleString("zh-CN")}
           </Text>
         )}
-        {query.data && query.data.items.length > 0 && (
-          <div style={{ overflowX: "auto" }}>
-            <Table>
-              <Table.Caption>基金抓取任务历史</Table.Caption>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>任务 / 提交时间</Table.Th>
-                  <Table.Th>数据集 / 范围</Table.Th>
-                  <Table.Th>状态 / 项数</Table.Th>
-                  <Table.Th>来源 / 提交人</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {query.data.items.map((task) => (
-                  <Table.Tr key={task.operation_id}>
-                    <Table.Td>
+        {query.data && (
+          <ResearchDataTable
+            caption="基金抓取任务历史"
+            layoutKey="ingestion-history"
+            rowData={query.data.items}
+            rowHeight={120}
+            serverPagination={{
+              page: params.page ?? 1,
+              pageSize: query.data.page_size,
+              total: query.data.total,
+              loading: query.isFetching,
+              failed: query.isError,
+              resetKey: JSON.stringify({ ...params, page: undefined }),
+              onPageChange: (page) =>
+                setParams((current) => ({ ...current, page })),
+            }}
+            getRowId={({ data }) => data.operation_id}
+            columnDefs={[
+              {
+                colId: "column0",
+                headerName: "任务 / 提交时间",
+                wrapText: true,
+                cellRenderer: ({ data: task }: { data?: taskRow }) =>
+                  task ? (
+                    <div
+                      style={{
+                        maxHeight: 110,
+                        overflow: "auto",
+                        whiteSpace: "normal",
+                      }}
+                    >
                       <Link
                         to={`/data-ingestion?operation_id=${encodeURIComponent(task.operation_id)}`}
                       >
@@ -196,62 +216,69 @@ export const IngestionHistoryTable = () => {
                       <Text size="sm">
                         {new Date(task.created_at).toLocaleString("zh-CN")}
                       </Text>
-                    </Table.Td>
-                    <Table.Td>
+                    </div>
+                  ) : null,
+              },
+              {
+                colId: "column1",
+                headerName: "数据集 / 范围",
+                wrapText: true,
+                cellRenderer: ({ data: task }: { data?: taskRow }) =>
+                  task ? (
+                    <div
+                      style={{
+                        maxHeight: 110,
+                        overflow: "auto",
+                        whiteSpace: "normal",
+                      }}
+                    >
                       {datasetLabels[task.dataset]}
                       <Text size="sm">
                         {task.scope_type
                           ? scopeLabels[task.scope_type]
                           : "历史任务"}
                       </Text>
-                    </Table.Td>
-                    <Table.Td>
+                    </div>
+                  ) : null,
+              },
+              {
+                colId: "column2",
+                headerName: "状态 / 项数",
+                wrapText: true,
+                cellRenderer: ({ data: task }: { data?: taskRow }) =>
+                  task ? (
+                    <div
+                      style={{
+                        maxHeight: 110,
+                        overflow: "auto",
+                        whiteSpace: "normal",
+                      }}
+                    >
                       {ingestionStatusLabel(task)}
                       <IngestionCounts task={task} />
-                    </Table.Td>
-                    <Table.Td>
+                    </div>
+                  ) : null,
+              },
+              {
+                colId: "column3",
+                headerName: "来源 / 提交人",
+                wrapText: true,
+                cellRenderer: ({ data: task }: { data?: taskRow }) =>
+                  task ? (
+                    <div
+                      style={{
+                        maxHeight: 110,
+                        overflow: "auto",
+                        whiteSpace: "normal",
+                      }}
+                    >
                       {task.source}
                       <Text size="sm">{task.actor}</Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </div>
-        )}
-        {query.data && (
-          <Group>
-            <Button
-              variant="default"
-              disabled={query.data.page <= 1 || query.isFetching}
-              onClick={() =>
-                setParams((current) => ({
-                  ...current,
-                  page: query.data!.page - 1,
-                }))
-              }
-            >
-              历史上一页
-            </Button>
-            <Text>
-              第 {query.data.page} 页 · 共 {query.data.total} 项任务
-            </Text>
-            <Button
-              variant="default"
-              disabled={
-                query.data.page * query.data.page_size >= query.data.total ||
-                query.isFetching
-              }
-              onClick={() =>
-                setParams((current) => ({
-                  ...current,
-                  page: query.data!.page + 1,
-                }))
-              }
-            >
-              历史下一页
-            </Button>
-          </Group>
+                    </div>
+                  ) : null,
+              },
+            ]}
+          />
         )}
       </Stack>
     </section>

@@ -63,19 +63,10 @@ def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
         "classification_status",
     )
     if any(filters.get(name) for name in classification_filters):
-        if not isinstance(classification, Mapping):
-            # Existing UNKNOWN-status reads also include funds without a snapshot.
-            if any(
-                filters.get(name)
-                for name in classification_filters
-                if name != "classification_status"
-            ):
-                return False
-        else:
-            try:
-                catalog = get_classification_policy()
-            except InvalidQueryError:
-                return False
+        try:
+            catalog = get_classification_policy()
+        except InvalidQueryError:
+            return False
     for dimension in (
         "asset_class",
         "strategy",
@@ -85,19 +76,28 @@ def _matches(row: Mapping[str, object], filters: Mapping[str, object]) -> bool:
     ):
         choices = filters.get(dimension)
         if choices:
-            if not isinstance(classification, Mapping):
+            requested = set(cast(Sequence[str], choices))
+            valid = requested.intersection(catalog.catalog[dimension]) if catalog else set()
+            if not valid:
                 return False
-            if catalog is None or not set(cast(Sequence[str], choices)).intersection(
-                catalog.catalog[dimension]
-            ):
+            if not isinstance(classification, Mapping):
+                if "UNKNOWN" in valid:
+                    continue
                 return False
             result = classification.get(dimension)
-            if not isinstance(result, Mapping) or result.get("status") != "CONFIRMED":
+            if not isinstance(result, Mapping):
+                return False
+            if result.get("status") == "UNKNOWN":
+                if "UNKNOWN" in valid and result.get("evaluation_state") == "EVALUATED":
+                    continue
+                return False
+            if result.get("status") != "CONFIRMED" or result.get("evaluation_state") != "EVALUATED":
                 return False
             value = result.get("value")
             values = [value] if isinstance(value, str) else value
+            confirmed_choices = valid - {"UNKNOWN"}
             if not isinstance(values, list | tuple) or not set(values).intersection(
-                cast(Sequence[str], choices), catalog.catalog[dimension]
+                confirmed_choices
             ):
                 return False
     tags = filters.get("strategy_tags")
@@ -221,6 +221,9 @@ class FundQueries:
         self,
         *,
         fund_name: str | None,
+        fund_code: str | None = None,
+        company_name: str | None = None,
+        sub_status: str | None = None,
         asset_class: Sequence[str] | None = None,
         strategy: Sequence[str] | None = None,
         strategy_tags: Sequence[str] | None = None,
@@ -251,7 +254,12 @@ class FundQueries:
             "product_structure": _as_tuple(product_structure),
             "market_attributes": _as_tuple(market_attributes),
             "classification_status": _as_tuple(classification_status),
-            "fund_name": fund_name,
+            "fund_name": fund_name.strip() or None if isinstance(fund_name, str) else None,
+            "fund_code": fund_code if isinstance(fund_code, str) and fund_code else None,
+            "company_name": company_name.strip()
+            if isinstance(company_name, str) and company_name.strip()
+            else None,
+            "sub_status": sub_status,
             "fund_type": _as_tuple(fund_type),
             "management_company_id": management_company_id,
             "manager_id": manager_id,
@@ -274,31 +282,24 @@ class FundQueries:
         ):
             if filters[key] is None:
                 del filters[key]
-        rows = [dict(row) for row in self._repository.list(**filters)]
-        if (
-            management_company_id is not None
-            and rows
-            and all(row.get("management_company_id") in (None, "UNKNOWN") for row in rows)
-        ):
-            raise InvalidQueryError("management_company_id is unavailable for the current data set")
-        if (
-            (aum_min is not None or aum_max is not None)
-            and rows
-            and all(not isinstance(row.get("aum"), int | float) for row in rows)
-        ):
-            raise InvalidQueryError("aum filters are unavailable for the current data set")
-        matched = _sort_rows([row for row in rows if _matches(row, filters)], sort, order)
-        offset = (page - 1) * page_size
+        rows, total = self._repository.list_page(
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            order=order,
+            **filters,
+        )
         return QueryResult(
-            matched[offset : offset + page_size],
+            rows,
             {
                 "as_of_date": _as_iso(as_of_date),
                 "is_point_in_time": as_of_date is not None,
+                "subscription_status_source": "PLACEHOLDER",
                 "pagination": {
                     "page": page,
                     "page_size": page_size,
-                    "total_items": len(matched),
-                    "total_pages": (len(matched) + page_size - 1) // page_size if matched else 0,
+                    "total_items": total,
+                    "total_pages": (total + page_size - 1) // page_size if total else 0,
                 },
             },
         )

@@ -1,41 +1,49 @@
-import { Button, Group, Pill, Stack, Text } from "@mantine/core";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { ActionIcon } from "@mantine/core";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-import { listFunds } from "../api/generated/m17";
 import type {
-  FundListMeta,
+  FundListItem,
   InvestmentEligibility,
   LifecycleStatus,
   ListFundsParams,
   OrderParameter,
 } from "../api/generated/m17.schemas";
-import { unwrapResponse } from "../api/http";
-import { ErrorState } from "../components/ErrorState";
-import { PageHeader } from "../components/PageHeader";
-import { ProvenanceBar } from "../components/ProvenanceBar";
+import { getSessionQueryOptions } from "../api/queries";
 import {
   FundFilters,
   emptyFundFilters,
   type FundFilterValues,
 } from "../features/funds/FundFilters";
+import { FundDetailModal } from "../features/funds/FundDetailModal";
 import { FundTable } from "../features/funds/FundTable";
-import { SavedFundViews } from "../features/funds/SavedFundViews";
-import { getSessionQueryOptions } from "../api/queries";
-import { dimensionLabels } from "../features/classifications/ClassificationView";
+import styles from "../features/funds/FundResearchPage.module.css";
 
 const split = (value: string | null) => value?.split(",").filter(Boolean) ?? [];
 const asList = (value: string[]) => (value.length > 0 ? value : undefined);
-const asCsv = (value: string[]) =>
-  value.length > 0 ? value.join(",") : undefined;
+const allowedPageSizes = [20, 50, 200] as const;
+const pageSizeFromUrl = (value: string | null) => {
+  const parsed = Number(value || 20);
+  return allowedPageSizes.includes(parsed as (typeof allowedPageSizes)[number])
+    ? parsed
+    : 20;
+};
 
 export const parseParams = (search: URLSearchParams): ListFundsParams => ({
-  asset_class: asCsv(split(search.get("asset_class"))),
-  strategy: asCsv(split(search.get("strategy"))),
+  asset_class: search.get("asset_class") || undefined,
+  strategy: search.get("strategy") || undefined,
   strategy_tags: asList(split(search.get("strategy_tags"))),
-  classification_status: asCsv(split(search.get("classification_status"))),
+  geography: search.get("geography") || undefined,
+  product_structure: search.get("product_structure") || undefined,
+  market_attributes: search.get("market_attributes") || undefined,
+  classification_status: search.get("classification_status") || undefined,
   fund_name: search.get("fund_name") || undefined,
+  fund_code: search.get("fund_code") || undefined,
+  company_name: search.get("company_name") || undefined,
+  sub_status: (search.get("sub_status") || undefined) as
+    ListFundsParams["sub_status"] | undefined,
   fund_type: asList(split(search.get("fund_type"))),
   lifecycle_status: asList(split(search.get("lifecycle_status"))) as
     LifecycleStatus[] | undefined,
@@ -44,14 +52,14 @@ export const parseParams = (search: URLSearchParams): ListFundsParams => ({
   ) as InvestmentEligibility[] | undefined,
   as_of_date: search.get("as_of_date") || undefined,
   page: Number(search.get("page") || "1"),
-  page_size: Number(search.get("page_size") || "20"),
-  sort: search.get("sort") || "fund_name",
+  page_size: pageSizeFromUrl(search.get("page_size")),
+  sort: (search.get("sort") || "fund_name") as ListFundsParams["sort"],
   order: (search.get("order") || "asc") as OrderParameter,
 });
 
 const initialFilterValues = (search: URLSearchParams): FundFilterValues => ({
   ...emptyFundFilters(),
-  asset_class: split(search.get("asset_class")),
+  asset_class: search.get("asset_class") || "",
   strategy: split(search.get("strategy")),
   strategy_tags: split(search.get("strategy_tags")),
   geography: split(search.get("geography")),
@@ -59,11 +67,14 @@ const initialFilterValues = (search: URLSearchParams): FundFilterValues => ({
   market_attributes: split(search.get("market_attributes")),
   classification_status: split(search.get("classification_status")),
   fund_name: search.get("fund_name") || "",
+  fund_code: search.get("fund_code") || "",
+  company_name: search.get("company_name") || "",
+  sub_status: search.get("sub_status") || "",
   fund_type: split(search.get("fund_type")),
   lifecycle_status: split(search.get("lifecycle_status")),
   investment_eligibility: split(search.get("investment_eligibility")),
   as_of_date: search.get("as_of_date") || "",
-  page_size: search.get("page_size") || "20",
+  page_size: String(pageSizeFromUrl(search.get("page_size"))),
   sort: search.get("sort") || "fund_name",
   order: search.get("order") || "asc",
 });
@@ -78,17 +89,10 @@ export const serializeFilters = (values: FundFilterValues) => {
   return next;
 };
 
-const labels: Record<string, string> = {
-  ...dimensionLabels,
-  fund_name: "基金名称",
-  fund_type: "基金类型",
-  lifecycle_status: "生命周期",
-  investment_eligibility: "投资资格",
-  as_of_date: "数据截止日",
-};
-
 export const FundResearchPage = () => {
   const [search, setSearch] = useSearchParams();
+  const [detailFund, setDetailFund] = useState<FundListItem | null>(null);
+  const [queryCollapsed, setQueryCollapsed] = useState(false);
   const session = useQuery(getSessionQueryOptions());
   const serializedSearch = search.toString();
   const params = useMemo(
@@ -99,174 +103,88 @@ export const FundResearchPage = () => {
     () => initialFilterValues(new URLSearchParams(serializedSearch)),
     [serializedSearch],
   );
-  const query = useQuery({
-    queryKey: ["fund-research", params],
-    queryFn: async () => {
-      const response = await listFunds(params);
-      return {
-        funds: unwrapResponse(response, {
-          requiredMeta: [
-            "as_of_date",
-            "data_version",
-            "versions",
-            "is_point_in_time",
-            "pagination",
-            "availability_quality_distribution",
-          ],
-        }),
-        meta: response.data.meta as FundListMeta,
-      };
-    },
-    placeholderData: keepPreviousData,
-  });
+  const appliedFilterKey = serializeFilters(filters).toString();
 
   const applyFilters = (values: FundFilterValues) =>
     setSearch(serializeFilters(values));
   const resetFilters = () => setSearch(serializeFilters(emptyFundFilters()));
-  const changePage = (page: number) => {
+  const changePagination = (page: number, pageSize: number) => {
     const next = new URLSearchParams(search);
-    next.set("page", String(page));
+    const currentSize = Number(next.get("page_size") || "20");
+    next.set("page_size", String(pageSize));
+    next.set("page", String(currentSize === pageSize ? page : 1));
     setSearch(next);
   };
-  const removeFilter = (key: string, value: string) => {
+  const changeSort = (sort: string, order: "asc" | "desc") => {
     const next = new URLSearchParams(search);
-    const existing = split(next.get(key));
-    if (existing.length > 1 && existing.includes(value)) {
-      const remaining = existing.filter((entry) => entry !== value);
-      next.set(key, remaining.join(","));
-    } else {
-      next.delete(key);
-    }
+    if (
+      next.get("sort") === sort &&
+      next.get("order") === order &&
+      (next.get("page") ?? "1") === "1"
+    )
+      return;
+    next.set("sort", sort);
+    next.set("order", order);
     next.set("page", "1");
     setSearch(next);
   };
-  const activeFilters = Object.entries(filters).flatMap(([key, value]) => {
-    if (
-      [
-        "page_size",
-        "sort",
-        "order",
-        "geography",
-        "product_structure",
-        "market_attributes",
-      ].includes(key)
-    )
-      return [];
-    const entries = Array.isArray(value) ? value : value ? [value] : [];
-    return entries.map((entry) => ({ key, value: entry }));
-  });
-
   return (
-    <Stack gap="lg">
-      <PageHeader
-        title="基金研究"
-        breadcrumbs={[{ label: "基金研究" }]}
-        context={
-          <Text size="sm" c="dimmed">
-            {params.as_of_date
-              ? `数据截止 ${params.as_of_date}`
-              : "使用当前可见数据"}{" "}
-            · {query.data?.meta.pagination.total_items ?? "—"} 只符合条件
-          </Text>
-        }
+    <div className={styles.researchPage} data-testid="fund-research-page">
+      <FundDetailModal
+        fund={detailFund}
+        asOfDate={params.as_of_date}
+        returnTo={"/funds?" + search.toString()}
+        onClose={() => setDetailFund(null)}
       />
-      <SavedFundViews
-        filters={serializeFilters(filters).toString()}
-        onApply={(value) => setSearch(new URLSearchParams(value))}
-      />
-      <FundFilters
-        key={serializedSearch}
-        initialValues={filters}
-        onSubmit={applyFilters}
-        onReset={resetFilters}
-      />
-      {activeFilters.length > 0 && (
-        <Group gap="xs" aria-label="已选筛选条件">
-          <Text size="sm" c="dimmed">
-            已选条件
-          </Text>
-          {activeFilters.map(({ key, value }) => (
-            <Button
-              key={`${key}-${value}`}
-              type="button"
-              size="compact-xs"
-              variant="light"
-              onClick={() => removeFilter(key, value)}
-              aria-label={`移除${labels[key] ?? key} ${value}`}
-            >
-              {labels[key] ?? key}：{value} ×
-            </Button>
-          ))}
-        </Group>
-      )}
-      {query.isPending && <Text role="status">正在加载基金…</Text>}
-      {query.isFetching && query.data && (
-        <Text role="status" size="sm" c="dimmed">
-          正在更新筛选结果；下方暂时保留上一次查询。
-        </Text>
-      )}
-      {query.isError && (
-        <ErrorState error={query.error} onRetry={() => void query.refetch()} />
-      )}
-      {query.data && (
-        <Stack gap="md">
-          <ProvenanceBar meta={query.data.meta} />
-          {query.data.funds.length === 0 ? (
-            <Pill>没有符合条件的基金</Pill>
+      <div
+        data-testid="fund-research-workspace"
+        className={`${styles.workspace} ${queryCollapsed ? styles.workspaceCollapsed : ""}`}
+      >
+        <section
+          id="fund-research-query-panel"
+          className={styles.queryPanel}
+          aria-label="基金查询条件"
+          hidden={queryCollapsed}
+        >
+          <FundFilters
+            key={appliedFilterKey}
+            initialValues={filters}
+            onSubmit={applyFilters}
+            onReset={resetFilters}
+          />
+        </section>
+        <ActionIcon
+          className={styles.queryToggle}
+          variant="subtle"
+          size="lg"
+          type="button"
+          aria-label={queryCollapsed ? "展开查询条件" : "收起查询条件"}
+          aria-expanded={!queryCollapsed}
+          aria-controls="fund-research-query-panel"
+          onClick={() => setQueryCollapsed((collapsed) => !collapsed)}
+        >
+          {queryCollapsed ? (
+            <ChevronDown aria-hidden="true" />
           ) : (
+            <ChevronUp aria-hidden="true" />
+          )}
+        </ActionIcon>
+        <section className={styles.resultsPanel} aria-label="基金研究结果区">
+          <div className={styles.gridSurface}>
             <FundTable
               key={serializedSearch}
-              funds={query.data.funds}
-              asOfDate={query.data.meta.as_of_date}
-              returnTo={`/funds?${search.toString()}`}
+              params={params}
+              onOpenDetail={setDetailFund}
+              returnTo={"/funds?" + search.toString()}
               canManageIngestion={
                 session.data?.capabilities?.can_manage_data_ingestion ?? false
               }
-              sort={params.sort ?? "fund_name"}
-              order={params.order ?? "asc"}
-              onSort={(sort, order) => {
-                const next = new URLSearchParams(search);
-                next.set("sort", sort);
-                next.set("order", order);
-                next.set("page", "1");
-                setSearch(next);
-              }}
+              onPageChange={changePagination}
+              onSortChange={changeSort}
             />
-          )}
-          {query.data.funds.length > 0 && (
-            <Group justify="space-between" wrap="wrap">
-              <Text size="sm" c="dimmed">
-                第 {query.data.meta.pagination.page} /{" "}
-                {query.data.meta.pagination.total_pages} 页 · 共{" "}
-                {query.data.meta.pagination.total_items} 只基金
-              </Text>
-              <Group gap="xs">
-                <Button
-                  variant="default"
-                  disabled={query.data.meta.pagination.page <= 1}
-                  onClick={() =>
-                    changePage(query.data!.meta.pagination.page - 1)
-                  }
-                >
-                  上一页
-                </Button>
-                <Button
-                  variant="default"
-                  disabled={
-                    query.data.meta.pagination.page >=
-                    query.data.meta.pagination.total_pages
-                  }
-                  onClick={() =>
-                    changePage(query.data!.meta.pagination.page + 1)
-                  }
-                >
-                  下一页
-                </Button>
-              </Group>
-            </Group>
-          )}
-        </Stack>
-      )}
-    </Stack>
+          </div>
+        </section>
+      </div>
+    </div>
   );
 };

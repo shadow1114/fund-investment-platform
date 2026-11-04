@@ -1,11 +1,24 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import { PortfolioDecisionPage } from "../../pages/PortfolioDecisionPage";
 
@@ -191,14 +204,30 @@ const server = setupServer(
   ),
 );
 
-const renderPage = (initialEntry = "/portfolios/P001") => {
+function HistoryNavigation() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <>
+      <button onClick={() => navigate(-1)}>浏览器后退</button>
+      <output aria-label="当前组合 URL">{location.search}</output>
+    </>
+  );
+}
+
+const renderPage = (initialEntry: string | string[] = "/portfolios/P001") => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <MantineProvider>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[initialEntry]}>
+        <MemoryRouter
+          initialEntries={
+            Array.isArray(initialEntry) ? initialEntry : [initialEntry]
+          }
+        >
+          <HistoryNavigation />
           <Routes>
             <Route path="/portfolios" element={<PortfolioDecisionPage />} />
             <Route
@@ -223,6 +252,155 @@ afterEach(() => {
 afterAll(() => server.close());
 
 describe("PortfolioDecisionPage", () => {
+  it("uses one native grid pager and preserves portfolio API filters from a paged URL", async () => {
+    const urls: URL[] = [];
+    server.use(
+      http.get("/api/v1/portfolios", ({ request }) => {
+        const url = new URL(request.url);
+        urls.push(url);
+        const page = Number(url.searchParams.get("page"));
+        return HttpResponse.json({
+          data: [
+            {
+              ...portfolio,
+              portfolio_id: `P${page}`,
+              portfolio_name: `组合第 ${page} 页`,
+            },
+          ],
+          meta: {
+            ...responseMeta,
+            pagination: {
+              page,
+              page_size: 20,
+              total_items: 41,
+              total_pages: 3,
+            },
+          },
+          error: null,
+        });
+      }),
+    );
+    renderPage("/portfolios?page=2&page_size=20&sort=portfolio_id&order=desc");
+    expect(
+      await screen.findByRole("link", { name: "组合第 2 页" }),
+    ).toBeVisible();
+    const region = screen.getByRole("region", { name: "可见组合列表" });
+    expect(
+      within(region).getAllByRole("button", { name: "下一页" }),
+    ).toHaveLength(1);
+    await userEvent.click(
+      within(region).getByRole("button", { name: "下一页" }),
+    );
+    expect(
+      await screen.findByRole("link", { name: "组合第 3 页" }),
+    ).toBeVisible();
+    expect(Object.fromEntries(urls.at(-1)!.searchParams)).toEqual({
+      page: "3",
+      page_size: "20",
+      sort: "portfolio_id",
+      order: "desc",
+    });
+    expect(
+      within(region).getByRole("button", { name: "下一页" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(
+      screen.queryByRole("navigation", { name: "组合列表分页" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(["cached", "uncached"])(
+    "keeps the portfolio URL and API on the pending %s destination after browser history returns to an earlier page",
+    async (cache) => {
+      const urls: URL[] = [];
+      let releaseBackResponse!: () => void;
+      const backResponse = new Promise<void>((resolve) => {
+        releaseBackResponse = resolve;
+      });
+      server.use(
+        http.get("/api/v1/portfolios", async ({ request }) => {
+          const url = new URL(request.url);
+          urls.push(url);
+          const page = Number(url.searchParams.get("page"));
+          if (
+            page === 1 &&
+            (cache === "uncached" ||
+              urls.filter((url) => url.searchParams.get("page") === "1")
+                .length > 1)
+          )
+            await backResponse;
+          return HttpResponse.json({
+            data: [
+              {
+                ...portfolio,
+                portfolio_id: `P${page}`,
+                portfolio_name: `历史组合第 ${page} 页`,
+              },
+            ],
+            meta: {
+              ...responseMeta,
+              pagination: {
+                page,
+                page_size: 20,
+                total_items: 41,
+                total_pages: 3,
+              },
+            },
+            error: null,
+          });
+        }),
+      );
+      const firstUrl =
+        "/portfolios?page=1&page_size=20&sort=portfolio_id&order=desc";
+      const secondUrl =
+        "/portfolios?page=2&page_size=20&sort=portfolio_id&order=desc";
+      if (cache === "cached") {
+        renderPage(firstUrl);
+        expect(
+          await screen.findByRole("link", { name: "历史组合第 1 页" }),
+        ).toBeVisible();
+        await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+      } else {
+        renderPage([firstUrl, secondUrl]);
+      }
+      expect(
+        await screen.findByRole("link", { name: "历史组合第 2 页" }),
+      ).toBeVisible();
+      expect(screen.getByLabelText("当前组合 URL")).toHaveTextContent(
+        "page=2&page_size=20&sort=portfolio_id&order=desc",
+      );
+      const afterSecondPage = urls.length;
+      await userEvent.click(screen.getByRole("button", { name: "浏览器后退" }));
+      await waitFor(() => expect(urls.length).toBeGreaterThan(afterSecondPage));
+      expect(
+        screen.getByText("正在更新组合列表；保留上一次结果。"),
+      ).toBeVisible();
+      // Keep the destination API response pending while outgoing callbacks drain.
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      });
+      expect(screen.getByLabelText("当前组合 URL")).toHaveTextContent(
+        "page=1&page_size=20&sort=portfolio_id&order=desc",
+      );
+      expect(
+        urls.slice(afterSecondPage).map((url) => url.searchParams.get("page")),
+      ).not.toContain("2");
+      expect(
+        screen.queryByRole("link", { name: "历史组合第 2 页" }),
+      ).not.toBeInTheDocument();
+      await act(async () => {
+        releaseBackResponse();
+        await backResponse;
+      });
+      expect(
+        await screen.findByRole("link", { name: "历史组合第 1 页" }),
+      ).toBeVisible();
+      expect(screen.getByRole("button", { name: "上一页" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    },
+  );
+
   it("does not expose unsupported live and rebalancing controls, including on old URLs", async () => {
     renderPage("/portfolios/P001?tab=live");
     await screen.findByRole("heading", { name: "稳健组合" });

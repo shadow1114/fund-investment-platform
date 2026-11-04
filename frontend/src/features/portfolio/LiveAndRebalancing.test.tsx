@@ -187,7 +187,7 @@ describe("RebalancingPanel", () => {
     expect(await screen.findByLabelText("动态再平衡与调仓评估")).toBeVisible();
     expect(screen.getByText("再平衡服务未接入真实数据")).toBeVisible();
     expect(
-      screen.getByText("持久化实际仓位、真实估值日期、已应用规则版本"),
+      await screen.findByText("持久化实际仓位、真实估值日期、已应用规则版本"),
     ).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "发起再平衡评估" }),

@@ -157,12 +157,12 @@ describe("UniverseSnapshotPage", () => {
       }),
     ).toBeVisible();
     expect(screen.getByRole("tab", { name: "已入选（1）" })).toBeVisible();
-    expect(screen.getByText("000001")).toBeVisible();
+    expect(await screen.findByText("000001")).toBeVisible();
     expect(screen.getByText("已入选")).toBeVisible();
     expect(screen.getAllByText("不可用（ELIGIBILITY_ONLY）")).toHaveLength(3);
 
     await user.click(screen.getByRole("tab", { name: "已排除（1）" }));
-    expect(screen.getByText("000002")).toBeVisible();
+    expect(await screen.findByText("000002")).toBeVisible();
     expect(screen.getByText("已排除")).toBeVisible();
 
     expect(screen.getAllByText("不可用（FAILED_ELIGIBILITY）")).toHaveLength(3);

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from fip.api.app import create_app
 from fip.api.dependencies import get_api_repositories
+from fip.api.fund_queries import _matches
 from fip.api.repositories import ApiRepositories, FundRepository
 
 
@@ -19,8 +20,12 @@ class _SeededFundRepository(FundRepository):
         self.rows = [
             {
                 "fund_id": "fund-3",
+                "fund_code": "000003",
                 "fund_name": "Beta",
                 "share_class": "A",
+                "share_class_id": "3",
+                "company_name": "Company Two",
+                "sub_status": "开放",
                 "fund_classification": "BOND",
                 "management_company_id": "manager-company-2",
                 "manager_ids": ["manager-2"],
@@ -31,8 +36,12 @@ class _SeededFundRepository(FundRepository):
             },
             {
                 "fund_id": "fund-2",
+                "fund_code": "000002",
                 "fund_name": "Alpha",
                 "share_class": "C",
+                "share_class_id": "2",
+                "company_name": "Company One",
+                "sub_status": "开放",
                 "fund_classification": "EQUITY",
                 "management_company_id": "manager-company-1",
                 "manager_ids": ["manager-1"],
@@ -43,8 +52,12 @@ class _SeededFundRepository(FundRepository):
             },
             {
                 "fund_id": "fund-1",
+                "fund_code": "000001",
                 "fund_name": "Alpha",
                 "share_class": "A",
+                "share_class_id": "1",
+                "company_name": "Company One",
+                "sub_status": "开放",
                 "fund_classification": "EQUITY",
                 "management_company_id": "manager-company-1",
                 "manager_ids": ["manager-1"],
@@ -58,6 +71,38 @@ class _SeededFundRepository(FundRepository):
     def list(self, **filters: object) -> list[dict[str, object]]:
         self.list_filters = filters
         return list(self.rows)
+
+    def list_page(self, *, page: int, page_size: int, sort: str | None, order: str, **filters):
+        self.list_filters = filters
+        rows = [
+            row
+            for row in self.rows
+            if _matches(row, filters)
+            and (not filters.get("fund_code") or row.get("fund_code") == filters["fund_code"])
+            and (
+                not filters.get("company_name")
+                or row.get("company_name") == filters["company_name"]
+            )
+            and (not filters.get("sub_status") or row.get("sub_status") == filters["sub_status"])
+        ]
+        field = (
+            sort
+            if sort
+            in {"fund_code", "fund_name", "company_name", "sub_status", "inception_date", "aum"}
+            else "fund_name"
+        )
+        rows.sort(key=lambda row: str(row.get("fund_id", "")))
+        rows.sort(key=lambda row: str(row.get(field) or ""), reverse=order == "desc")
+        offset = (page - 1) * page_size
+        selected = rows[offset : offset + page_size]
+        return [
+            {key: value for key, value in row.items() if key != "aum"}
+            for row in selected
+        ], len(rows)
+
+    def list_management_companies(self, *, as_of_date: str | None = None) -> list[str]:
+        _ = as_of_date
+        return sorted({str(row["company_name"]) for row in self.rows if row.get("company_name")})
 
     def get(self, identifier: str) -> Mapping[str, object]:
         for row in self.rows:
@@ -118,11 +163,16 @@ class _SeededFundRepository(FundRepository):
         }
 
 
-def _client(repository: FundRepository) -> TestClient:
-    app = create_app()
+def _client(
+    repository: FundRepository,
+    *,
+    strict_contracts: bool = False,
+    raise_server_exceptions: bool = True,
+) -> TestClient:
+    app = create_app(strict_contracts=strict_contracts)
     repositories = ApiRepositories.from_session(object())
     app.dependency_overrides[get_api_repositories] = lambda: replace(repositories, funds=repository)
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_fund_list_filters_paginates_and_breaks_name_ties_by_fund_id() -> None:
@@ -161,6 +211,9 @@ def test_fund_list_filters_paginates_and_breaks_name_ties_by_fund_id() -> None:
     assert response.json()["meta"]["is_point_in_time"] is True
     assert repository.list_filters == {
         "fund_name": None,
+        "fund_code": None,
+        "company_name": None,
+        "sub_status": None,
         "fund_type": ("EQUITY",),
         "management_company_id": "manager-company-1",
         "manager_id": "manager-1",
@@ -184,6 +237,129 @@ def test_fund_list_parses_comma_delimited_multi_value_filters() -> None:
     assert [row["fund_id"] for row in response.json()["data"]] == ["fund-1", "fund-2", "fund-3"]
     assert repository.list_filters is not None
     assert repository.list_filters["fund_type"] == ("EQUITY", "BOND")
+
+
+def test_fund_list_accepts_code_company_status_and_page_size_200() -> None:
+    repository = _SeededFundRepository()
+
+    response = _client(repository).get(
+        "/api/v1/funds",
+        params={
+            "fund_code": "000001",
+            "company_name": "Company One",
+            "sub_status": "开放",
+            "page_size": 200,
+            "sort": "company_name",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [row["fund_id"] for row in response.json()["data"]] == ["fund-1"]
+    assert response.json()["data"][0]["share_class_id"] == "1"
+    assert response.json()["data"][0]["fund_code"] == "000001"
+    assert response.json()["meta"]["pagination"]["page_size"] == 200
+    assert response.json()["meta"]["subscription_status_source"] == "PLACEHOLDER"
+    assert repository.list_filters is not None
+    assert repository.list_filters["fund_code"] == "000001"
+    assert repository.list_filters["company_name"] == "Company One"
+    assert repository.list_filters["sub_status"] == "开放"
+
+
+def test_fund_list_defaults_to_twenty_rows() -> None:
+    response = _client(_SeededFundRepository()).get("/api/v1/funds")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["pagination"]["page_size"] == 20
+
+
+def test_fund_name_filter_trims_surrounding_whitespace() -> None:
+    repository = _SeededFundRepository()
+
+    response = _client(repository).get("/api/v1/funds", params={"fund_name": "  Alpha  "})
+
+    assert response.status_code == 200
+    assert {row["fund_id"] for row in response.json()["data"]} == {"fund-1", "fund-2"}
+    assert repository.list_filters is not None
+    assert repository.list_filters["fund_name"] == "Alpha"
+
+
+def test_fund_list_unknown_asset_filter_keeps_no_snapshot_rows() -> None:
+    repository = _SeededFundRepository()
+    repository.rows = [{**row, "classification": None} for row in repository.rows]
+
+    response = _client(repository).get("/api/v1/funds?asset_class=UNKNOWN")
+
+    assert response.status_code == 200
+    assert {row["fund_id"] for row in response.json()["data"]} == {
+        "fund-1",
+        "fund-2",
+        "fund-3",
+    }
+    assert response.json()["meta"]["pagination"]["total_items"] == 3
+
+
+def test_fund_list_rejects_bad_code_and_non_placeholder_subscription_status() -> None:
+    client = _client(_SeededFundRepository())
+
+    assert client.get("/api/v1/funds", params={"fund_code": "１２３４５６"}).status_code == 422
+    assert client.get("/api/v1/funds", params={"fund_code": "12345x"}).status_code == 422
+    assert client.get("/api/v1/funds", params={"fund_code": " 123456 "}).status_code == 422
+    assert client.get("/api/v1/funds", params={"sub_status": "暂停"}).status_code == 422
+
+
+def test_fund_management_company_options_have_standard_envelope_and_optional_as_of_date() -> None:
+    response = _client(_SeededFundRepository()).get(
+        "/api/v1/fund-management-companies", params={"as_of_date": "2025-01-31"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {"company_name": "Company One"},
+        {"company_name": "Company Two"},
+    ]
+    assert response.json()["meta"]["as_of_date"] == "2025-01-31"
+    assert response.json()["meta"]["is_point_in_time"] is True
+
+
+def test_fund_list_and_company_options_pass_strict_runtime_contracts() -> None:
+    repository = _SeededFundRepository()
+    fund_without_company = next(row for row in repository.rows if row["fund_id"] == "fund-1")
+    fund_without_company.update(
+        company_name=None,
+        management_company_id=None,
+        fund_classification="UNKNOWN",
+        classification=None,
+    )
+    client = _client(repository, strict_contracts=True)
+
+    funds = client.get("/api/v1/funds", params={"page_size": 20})
+    companies = client.get("/api/v1/fund-management-companies")
+
+    assert funds.status_code == 200
+    assert funds.json()["data"][0]["share_class_id"] == "1"
+    assert funds.json()["data"][0]["fund_classification"] == "UNKNOWN"
+    assert funds.json()["data"][0].get("company_name") is None
+    assert funds.json()["data"][0].get("management_company_id") is None
+    assert funds.json()["meta"]["subscription_status_source"] == "PLACEHOLDER"
+    assert companies.status_code == 200
+    assert companies.json()["data"] == [
+        {"company_name": "Company One"},
+        {"company_name": "Company Two"},
+    ]
+
+
+def test_strict_list_endpoint_rejects_unmodeled_payload_fields() -> None:
+    repository = _SeededFundRepository()
+    repository.rows[0]["unexpected_field"] = "must not escape the strict contract"
+    client = _client(
+        repository,
+        strict_contracts=True,
+        raise_server_exceptions=False,
+    )
+
+    response = client.get("/api/v1/funds")
+
+    assert response.status_code == 500
 
 
 def test_fund_detail_and_related_reads_delegate_to_seeded_repository() -> None:

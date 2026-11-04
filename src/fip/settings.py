@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     )
     worker_lease_seconds: int = Field(default=60, ge=5)
     worker_poll_seconds: float = Field(default=1.0, gt=0)
-    max_page_size: int = Field(default=100, ge=1, le=500)
+    max_page_size: int = Field(default=200, ge=1, le=500)
     rate_limit_per_minute: int = Field(default=120, gt=0)
     require_verified_principal: bool = False
     enable_m2_rebalance: bool = False

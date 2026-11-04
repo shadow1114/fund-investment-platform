@@ -1,9 +1,9 @@
+import { ResearchDataTable } from "../../components/ResearchDataTable";
 import {
   Accordion,
   Badge,
   SimpleGrid,
   Stack,
-  Table,
   Text,
   Title,
 } from "@mantine/core";
@@ -16,6 +16,14 @@ import type {
 } from "../../api/generated/m17.schemas";
 import { MetricValue } from "../../components/MetricValue";
 import { ScoreExplainChain } from "../../components/ScoreExplainChain";
+
+type factorRow = FundEvaluation["factor_results"][number];
+type entryRow = {
+  label: string;
+  valueKey: (typeof subScoreLabels)[number][1];
+  statusKey: (typeof subScoreLabels)[number][2];
+  reasonKey: (typeof subScoreLabels)[number][3];
+};
 
 const statusLabels: Record<string, string> = {
   NOT_ELIGIBLE: "不满足评估条件",
@@ -88,51 +96,82 @@ export const EvaluationMetrics = ({
     {evaluation.factor_results.length === 0 ? (
       <Text c="dimmed">暂无评估因子。</Text>
     ) : (
-      <Table.ScrollContainer minWidth={640}>
-        <Table striped withTableBorder>
-          <Table.Caption>基金评估因子</Table.Caption>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>因子</Table.Th>
-              <Table.Th>窗口</Table.Th>
-              <Table.Th>原始值</Table.Th>
-              <Table.Th>方向</Table.Th>
-              <Table.Th>状态</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {evaluation.factor_results.map((factor) => (
-              <Table.Tr key={`${factor.factor_id}-${factor.window}`}>
-                <Table.Th scope="row">{factor.factor_id}</Table.Th>
-                <Table.Td>{factor.window}</Table.Td>
-                <Table.Td>
-                  <MetricValue
-                    value={factor.raw_value}
-                    status={factor.status}
-                    reason={factor.reason_code}
-                  />
-                </Table.Td>
-                <Table.Td>
-                  {factor.direction === "HIGHER_IS_BETTER"
-                    ? "越高越好"
-                    : factor.direction === "LOWER_IS_BETTER"
-                      ? "越低越好"
-                      : "方向未知"}
-                </Table.Td>
-                <Table.Td>
-                  {factor.status === "VALID"
-                    ? "有效"
-                    : factor.status === "UNAVAILABLE"
-                      ? "不可用"
-                      : factor.status === "EXCLUDED"
-                        ? "已排除"
-                        : `未知（${factor.status}）`}
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
+      <ResearchDataTable
+        caption="基金评估因子"
+        layoutKey="fund-evaluation"
+        rowData={evaluation.factor_results}
+        getRowId={({ data }) => `${data.factor_id}-${data.window}`}
+        columnDefs={[
+          {
+            field: "factor_id",
+            headerName: "因子",
+            autoHeight: true,
+            wrapText: true,
+            cellRenderer: ({ data: factor }: { data: factorRow }) => (
+              <>{factor.factor_id}</>
+            ),
+          },
+          {
+            field: "window",
+            headerName: "窗口",
+            autoHeight: true,
+            wrapText: true,
+            cellRenderer: ({ data: factor }: { data: factorRow }) => (
+              <>{factor.window}</>
+            ),
+          },
+          {
+            field: "raw_value",
+            headerName: "原始值",
+            autoHeight: true,
+            wrapText: true,
+            cellRenderer: ({ data: factor }: { data: factorRow }) => (
+              <>
+                <MetricValue
+                  value={factor.raw_value}
+                  status={factor.status}
+                  reason={factor.reason_code}
+                />
+              </>
+            ),
+          },
+          {
+            field: "direction",
+            headerName: "方向",
+            autoHeight: true,
+            wrapText: true,
+            cellRenderer: ({ data: factor }: { data: factorRow }) => (
+              <>
+                {factor.direction === "HIGHER_IS_BETTER"
+                  ? "越高越好"
+                  : factor.direction === "LOWER_IS_BETTER"
+                    ? "越低越好"
+                    : "方向未知"}
+              </>
+            ),
+          },
+          {
+            field: "status",
+            headerName: "状态",
+            autoHeight: true,
+            wrapText: true,
+            cellRenderer: ({ data: factor }: { data: factorRow }) => (
+              <>
+                {factor.status === "VALID"
+                  ? "有效"
+                  : factor.status === "UNAVAILABLE"
+                    ? "不可用"
+                    : factor.status === "EXCLUDED"
+                      ? "已排除"
+                      : `未知（${factor.status}）`}
+              </>
+            ),
+          },
+        ]}
+        pagination
+        paginationPageSize={20}
+        paginationPageSizeSelector={[20, 50, 100]}
+      />
     )}
     {versionEntries([
       ["同类组版本", meta.peer_group_version],
@@ -210,40 +249,69 @@ export const ScoreMetrics = ({
     <Title order={3} size="h4">
       分项评分（无量纲）
     </Title>
-    <Table.ScrollContainer minWidth={640}>
-      <Table striped withTableBorder>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>维度</Table.Th>
-            <Table.Th>评分</Table.Th>
-            <Table.Th>状态</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {subScoreLabels.map(([label, valueKey, statusKey, reasonKey]) => (
-            <Table.Tr key={valueKey}>
-              <Table.Th scope="row">{label}</Table.Th>
-              <Table.Td>
-                <MetricValue
-                  value={score.sub_scores[valueKey]}
-                  status={score.sub_scores[statusKey]}
-                  reason={score.sub_scores[reasonKey]}
-                />
-              </Table.Td>
-              <Table.Td>
-                {score.sub_scores[statusKey] === "VALID"
-                  ? "有效"
-                  : score.sub_scores[statusKey] === "UNAVAILABLE"
-                    ? "不可用"
-                    : score.sub_scores[statusKey] === "EXCLUDED"
-                      ? "已排除"
-                      : `未知（${score.sub_scores[statusKey]}）`}
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </Table.ScrollContainer>
+    <ResearchDataTable
+      caption="基金分项评分"
+      layoutKey="fund-sub-scores"
+      rowData={subScoreLabels.map(
+        ([label, valueKey, statusKey, reasonKey]) => ({
+          label,
+          valueKey,
+          statusKey,
+          reasonKey,
+        }),
+      )}
+      getRowId={({ data }) => data.valueKey}
+      columnDefs={[
+        {
+          field: "label",
+          headerName: "维度",
+          autoHeight: true,
+          wrapText: true,
+          cellRenderer: ({ data: entry }: { data: entryRow }) => (
+            <>{entry.label}</>
+          ),
+        },
+        {
+          colId: "score",
+          valueGetter: ({ data }) =>
+            data ? score.sub_scores[data.valueKey] : null,
+          headerName: "评分",
+          autoHeight: true,
+          wrapText: true,
+          cellRenderer: ({ data: entry }: { data: entryRow }) => (
+            <>
+              <MetricValue
+                value={score.sub_scores[entry.valueKey]}
+                status={score.sub_scores[entry.statusKey]}
+                reason={score.sub_scores[entry.reasonKey]}
+              />
+            </>
+          ),
+        },
+        {
+          colId: "status",
+          valueGetter: ({ data }) =>
+            data ? score.sub_scores[data.statusKey] : null,
+          headerName: "状态",
+          autoHeight: true,
+          wrapText: true,
+          cellRenderer: ({ data: entry }: { data: entryRow }) => (
+            <>
+              {score.sub_scores[entry.statusKey] === "VALID"
+                ? "有效"
+                : score.sub_scores[entry.statusKey] === "UNAVAILABLE"
+                  ? "不可用"
+                  : score.sub_scores[entry.statusKey] === "EXCLUDED"
+                    ? "已排除"
+                    : `未知（${score.sub_scores[entry.statusKey]}）`}
+            </>
+          ),
+        },
+      ]}
+      pagination
+      paginationPageSize={20}
+      paginationPageSizeSelector={[20, 50, 100]}
+    />
     <Title order={3} size="h4">
       评分归因
     </Title>

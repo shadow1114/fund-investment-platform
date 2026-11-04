@@ -1,10 +1,10 @@
 # 数据域模型 · Data Domain Model
 
 > 上游文档：docs/01-product/01-product-overview.md（v2.6）｜本文细化环节：① Fund Data
-> 业务需求：docs/01-product/02-business-requirements.md（v2.3）
-> 架构依赖：docs/02-architecture/03-data-architecture.md（v1.1）
+> 业务需求：docs/01-product/02-business-requirements.md（v2.8）
+> 架构依赖：docs/02-architecture/03-data-architecture.md（v1.2）
 >
-> **文档版本**：v1.8 ｜ **产品阶段**：第一阶段
+> **文档版本**：v2.0 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -647,8 +647,8 @@ Data Domain Model 由 **13 个核心实体 + 1 个派生实体**构成，四个�
 
 | 关系 | 文档 |
 |---|---|
-| **上游** | `01-product/01-product-overview.md` v2.4（§4.2 ①、①-B、⑨-S、§11 术语表）、`01-product/02-business-requirements.md` v2.3（§5 基金覆盖、§25 生命周期） |
-| **架构依赖** | `02-architecture/03-data-architecture.md` v1.1（数据域与 Ownership） |
+| **上游** | `01-product/01-product-overview.md` v2.6（§4.2 ①、①-B、⑨-S、§11 术语表）、`01-product/02-business-requirements.md` v2.8（§5 基金覆盖、§25 生命周期） |
+| **架构依赖** | `02-architecture/03-data-architecture.md` v1.2（数据域与 Ownership） |
 | **本域同层** | `01-data-source`（来源）、`04-data-versioning`（版本化）、`05-data-normalization`（口径）、`06-data-validation`（校验）、`07-data-lineage`（血缘） |
 | **下游** | `04-factor`（消费 NAV 与 Benchmark）、`05-fund-evaluation`（消费 Classification 构建 Peer Group）、`07-return-risk`、`08-backtest`、`11-database`（物理设计） |
 
@@ -693,3 +693,19 @@ Data Domain Model 由 **13 个核心实体 + 1 个派生实体**构成，四个�
 | 版本 | 日期 | 变更 | 依赖与下游 |
 |---|---|---|---|
 | v1.8 | 2026-10-26 | 增加基金基本信息不可变抓取快照和来源时间语义 | 同步 API 契约 v1.2；迁移 0036、数据采集 Worker、基金详情页 |
+
+
+## 22. 基金研究的身份、管理公司与申购占位边界（v2.0）
+
+研究列表以 Fund Share Class 为一行，`share_class_id` 是稳定行身份和详情、NAV、评价、评分、因子分析的资源身份。同产品 A/C 或同名产品不会因此合并。内部 Fund ID、内部 Share Class ID 与公开/供应商代码分开保存；API 的产品公开 `fund_id` 仍供产品级采集与基本信息历史使用，六位 `fund_code` 必须作为字符串保留前导零，来源为查询时点有效且可见的 AKSHARE Provider Fund Identity。
+
+产品层 `company_name` 是可空的当前展示/检索投影，来源为基本信息抓取中基金详情字段“基金公司”（规范键 `company_name`），例如“华夏基金”“易方达基金”。“基金管理人”可能是自然人姓名，不能用作公司名称；详情来源需先校验六位基金代码与请求一致。公司信息缺失时保持当前值，不从管理人、基金经理、名称或代码推测。
+
+公司历史真值属于不可变 Fund Basic Info History 快照。公司 PIT 查询沿用快照可见时间规则：每条可见快照内优先使用去空白后的 `normalized_fields.company_name`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`。不回退到“基金管理人”或基金经理字段，防止把自然人姓名当作基金公司。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；字段回退不能跨快照拼接，也不能读取当前投影或未来快照，没有可用可见快照时为 NULL。来源变化会追加新内容版本；相同内容重复采集不增加有效版本。旧本地快照可用于补齐当前空投影，不能倒填历史可见时间，也不改写不可变历史。
+
+研究 API/界面 `sub_status = 开放` 且 `subscription_status_source = PLACEHOLDER`，仅为尚无真实申购来源时的显示占位。它不改变本域 Fund Subscription Status 实体、Lifecycle 或 Investment Eligibility，不得据此交易或认定可新建仓；真实申赎状态来源仍待接入。
+
+| 版本 | 日期 | 变更 | 依赖与下游 |
+|---|---|---|---|
+| v1.9 | 2026-11-04 | 明确份额行身份/六位代码、公司当前投影与不可变历史来源、占位申购边界 | 上游产品 v2.6、需求 v2.8、数据架构 v1.2；受影响下游：基金 API v1.7、物理设计 v1.11、研究/详情界面、公司回填工具；实体关系未改变，ERD v1.3 不变 |
+| v2.0 | 2026-11-05 | 明确 `company_name` 必须取“基金公司”字段，不得把“基金管理人”或基金经理姓名当公司 | 受影响下游：基金基本信息抓取、公司当前投影、PIT 查询、公司选项 API 与本地回填；ERD 不变 |

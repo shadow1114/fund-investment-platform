@@ -9,6 +9,14 @@
   margin-inline: auto;
   padding: 28px;
 }
+.researchContent {
+  height: calc(100dvh - 64px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-block: 16px;
+}
 .header {
   background: #fff;
   border-bottom: 1px solid var(--workspace-border);

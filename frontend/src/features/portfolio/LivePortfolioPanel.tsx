@@ -1,4 +1,5 @@
-import { Alert, Button, Paper, Stack, Table, Text, Title } from "@mantine/core";
+import { ResearchDataTable } from "../../components/ResearchDataTable";
+import { Alert, Button, Paper, Stack, Text, Title } from "@mantine/core";
 
 export const LivePortfolioPanel = ({
   portfolioId,
@@ -25,33 +26,48 @@ export const LivePortfolioPanel = ({
         tabIndex={0}
         className="table-scroll"
       >
-        <Table withTableBorder withColumnBorders>
-          <caption>组合三态持仓数据状态</caption>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th scope="col">状态</Table.Th>
-              <Table.Th scope="col">数据来源</Table.Th>
-              <Table.Th scope="col">可用性</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            <Table.Tr>
-              <Table.Th scope="row">Target 目标仓位</Table.Th>
-              <Table.Td>未连接已审查的优化/决策资源</Table.Td>
-              <Table.Td>不可用</Table.Td>
-            </Table.Tr>
-            <Table.Tr>
-              <Table.Th scope="row">Pending 在途仓位</Table.Th>
-              <Table.Td>未接入持久化委托与成交回报</Table.Td>
-              <Table.Td>不可用</Table.Td>
-            </Table.Tr>
-            <Table.Tr>
-              <Table.Th scope="row">Actual 实际仓位</Table.Th>
-              <Table.Td>无经核验的账户持仓来源</Table.Td>
-              <Table.Td>不可用</Table.Td>
-            </Table.Tr>
-          </Table.Tbody>
-        </Table>
+        <ResearchDataTable
+          caption="组合三态持仓数据状态"
+          layoutKey="live-status"
+          rowData={[
+            {
+              column0: "Target 目标仓位",
+              column1: "未连接已审查的优化/决策资源",
+              column2: "不可用",
+            },
+            {
+              column0: "Pending 在途仓位",
+              column1: "未接入持久化委托与成交回报",
+              column2: "不可用",
+            },
+            {
+              column0: "Actual 实际仓位",
+              column1: "无经核验的账户持仓来源",
+              column2: "不可用",
+            },
+          ]}
+          getRowId={({ data }) => data.column0}
+          columnDefs={[
+            {
+              field: "column0",
+              headerName: "状态",
+              wrapText: true,
+              autoHeight: true,
+            },
+            {
+              field: "column1",
+              headerName: "数据来源",
+              wrapText: true,
+              autoHeight: true,
+            },
+            {
+              field: "column2",
+              headerName: "可用性",
+              wrapText: true,
+              autoHeight: true,
+            },
+          ]}
+        />
       </div>
       <Alert color="yellow" variant="light">
         提交成交回报已停用：当前接口会修改进程内演示状态，不能形成可追溯的实际记账。上线前需要持久化持仓、现金、成交去重和授权检查。

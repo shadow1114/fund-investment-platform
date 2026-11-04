@@ -57,6 +57,13 @@ class Funds:
     def list(self, **filters):
         return self.rows
 
+    def list_page(self, *, page, page_size, sort, order, **filters):
+        rows = [row for row in self.rows if _matches(row, filters)]
+        if sort:
+            rows.sort(key=lambda row: str(row.get(sort) or ""), reverse=order == "desc")
+        offset = (page - 1) * page_size
+        return rows[offset : offset + page_size], len(rows)
+
     def _required_share_class(self, fund_id):
         if fund_id != "fixture":
             from fip.api.errors import NotFoundError
@@ -140,6 +147,31 @@ def test_filters_use_the_single_current_catalog():
     assert not _matches({"classification": old}, {"strategy": ("QUANTITATIVE",)})
     assert not _matches({"classification": malformed_current}, {"strategy": ("QUANTITATIVE",)})
     assert _matches({"classification": current}, {"asset_class": ("EQUITY",)})
+
+
+def test_unknown_dimension_filter_matches_no_snapshot_or_evaluated_unknown_only():
+    no_snapshot = {"classification": None}
+    assert _matches(no_snapshot, {"asset_class": ("UNKNOWN",)})
+
+    evaluated_unknown = snap().to_dict()
+    evaluated_unknown["asset_class"].update(
+        status="UNKNOWN", value="UNKNOWN", evaluation_state="EVALUATED"
+    )
+    assert _matches({"classification": evaluated_unknown}, {"asset_class": ("UNKNOWN",)})
+
+    for status, evaluation_state in (
+        ("UNKNOWN", "NOT_EVALUATED"),
+        ("UNKNOWN", "PAUSED"),
+        ("CANDIDATE", "EVALUATED"),
+        ("CONFLICT", "EVALUATED"),
+    ):
+        changed = deepcopy(evaluated_unknown)
+        changed["asset_class"].update(status=status, evaluation_state=evaluation_state)
+        assert not _matches({"classification": changed}, {"asset_class": ("UNKNOWN",)})
+
+    missing_evaluation_state = snap().to_dict()
+    missing_evaluation_state["asset_class"].pop("evaluation_state")
+    assert not _matches({"classification": missing_evaluation_state}, {"asset_class": ("EQUITY",)})
 
 
 def test_list_exposes_tag_filters_and_rejects_catalog_versions(offline):

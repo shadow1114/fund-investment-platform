@@ -6,6 +6,7 @@ import pytest
 from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
 from fip.services.data_service.ingest import IngestService
 from fip.services.data_service.models.fund import (
+    Fund,
     FundBasicInfoHistory,
     FundManager,
     FundManagerAssignment,
@@ -24,7 +25,7 @@ FUND_LIST = pd.DataFrame(
 )
 
 
-def test_basic_info_ingest_does_not_persist_manager_data_or_assignments(db_session):
+def test_basic_info_ingest_stores_fund_company_but_not_manager_data(db_session):
     observed_at = [FIXED_NOW]
     current_managers: list[str | None] = ["张三、李四"]
     manager_field = ["基金经理人"]
@@ -40,6 +41,15 @@ def test_basic_info_ingest_does_not_persist_manager_data_or_assignments(db_sessi
             if current_managers[0] is not None:
                 fields[manager_field[0]] = [current_managers[0]]
             return pd.DataFrame(fields)
+        if name == "fund_individual_basic_info_xq":
+            return pd.DataFrame(
+                [
+                    ("基金代码", params["symbol"]),
+                    ("基金公司", "华夏基金"),
+                    ("基金经理", "李四"),
+                ],
+                columns=["item", "value"],
+            )
         raise AssertionError(f"Unexpected call {name} {params}")
 
     adapter = AkShareSourceAdapter(clock=lambda: observed_at[0], caller=caller)
@@ -52,6 +62,9 @@ def test_basic_info_ingest_does_not_persist_manager_data_or_assignments(db_sessi
     history = db_session.query(FundBasicInfoHistory).filter_by(fund_id=fund_id).one()
     assert "基金经理人" not in history.raw_fields
     assert "基金经理" not in history.raw_fields
+    assert "基金管理人" not in history.raw_fields
+    assert history.raw_fields["基金公司"] == "华夏基金"
+    assert db_session.get(Fund, fund_id).company_name == "华夏基金"
     assert "manager_name" not in history.normalized_fields
     assert db_session.query(FundManager).count() == 0
     assert db_session.query(FundManagerAssignment).count() == 0

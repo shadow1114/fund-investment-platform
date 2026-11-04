@@ -1,25 +1,34 @@
 from __future__ import annotations
 
 import calendar
-from collections.abc import Mapping
+from builtins import list as builtin_list
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, column, func, literal, or_, select, true
+from sqlalchemy import cast as sa_cast
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from fip.api.errors import InvalidQueryError, NotFoundError
 from fip.platform.decision_data.pit import RiskFreeRatePoint, resolve_visible_until
 from fip.services.data_service.models.fund import (
     Fund,
+    FundBasicInfoHistory,
+    FundClassificationHistory,
+    FundClassificationRevision,
     FundManagerAssignment,
     FundShareClass,
     FundStatusHistory,
     InvestmentEligibility,
+    ProviderFundIdentity,
 )
+from fip.services.data_service.models.governance import AuditLog, DataProvider
 from fip.services.data_service.models.market import FundNav
 from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
 from fip.services.data_service.repositories.benchmark import SqlBenchmarkPitRepository
@@ -122,6 +131,21 @@ class RepositoryAdapter:
         rows = (dict(row) for row in self._list_rows(**filters))
         return sorted(rows, key=lambda row: (str(row.get("name", "")), str(row.get("id", ""))))
 
+    def list_page(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        sort: str | None,
+        order: str,
+        **filters: object,
+    ) -> tuple[builtin_list[dict[str, object]], int]:
+        """Compatibility boundary for seeded adapters; SQL repositories override it."""
+        _ = sort, order
+        rows = self.list(**filters)
+        offset = (page - 1) * page_size
+        return rows[offset : offset + page_size], len(rows)
+
     def get(self, identifier: str) -> Mapping[str, object]:
         row = self._get_row(identifier)
         if row is None:
@@ -132,6 +156,646 @@ class RepositoryAdapter:
 class FundRepository(RepositoryAdapter):
     def __init__(self, session: object) -> None:
         super().__init__(session, "fund")
+
+    def list_page(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        sort: str | None,
+        order: str,
+        **filters: object,
+    ) -> tuple[list[dict[str, object]], int]:
+        """Filter, count, sort, and page unique share classes in PostgreSQL.
+
+        The request-scoped API session is new when this method is entered. Set
+        its connection isolation before the first statement so the page query
+        and the compatibility projection below see one MVCC snapshot.
+        """
+        if page < 1 or page_size < 1:
+            raise InvalidQueryError("page and page_size must be positive")
+        if not isinstance(self.session, Session):
+            return super().list_page(
+                page=page, page_size=page_size, sort=sort, order=order, **filters
+            )
+        session = self._session()
+        if filters.get("management_company_id") is not None:
+            raise InvalidQueryError("management_company_id is unavailable for the current data set")
+        if filters.get("aum_min") is not None or filters.get("aum_max") is not None:
+            raise InvalidQueryError("aum filters are unavailable for the current data set")
+
+        # Request sessions are created in dependencies._new_session and have
+        # not begun a DB transaction yet. Direct repository callers may have
+        # an outer transaction already (for example, a test fixture), in which
+        # case the caller owns its isolation level.
+        if not session.in_transaction():
+            session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+
+        view_date = _query_date(filters.get("as_of_date")) or date.today()
+        visible_until = resolve_visible_until(view_date)
+        revision_id = (
+            select(FundClassificationRevision.id)
+            .where(
+                FundClassificationRevision.fund_id == Fund.id,
+                FundClassificationRevision.scheme == "FIP_CLASSIFICATION",
+                FundClassificationRevision.available_at <= visible_until,
+            )
+            .order_by(FundClassificationRevision.version.desc())
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+        classification_row = (
+            select(FundClassificationHistory.classification_result)
+            .where(
+                FundClassificationHistory.revision_id == revision_id,
+                FundClassificationHistory.valid_from <= view_date,
+                FundClassificationHistory.valid_to.is_(None)
+                | (FundClassificationHistory.valid_to > view_date),
+            )
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+        classification = classification_row
+        legacy_code = self._legacy_classification_code(
+            revision_id, classification, visible_until, view_date
+        )
+        company_name = self._company_name_expression(
+            view_date if filters.get("as_of_date") else None, visible_until
+        )
+        akshare_code = (
+            select(ProviderFundIdentity.provider_fund_id)
+            .join(DataProvider, DataProvider.id == ProviderFundIdentity.provider_id)
+            .where(
+                ProviderFundIdentity.share_class_id == FundShareClass.id,
+                DataProvider.provider_code == "AKSHARE",
+                ProviderFundIdentity.provider_fund_id.op("~")(r"^[0-9]{6}$"),
+                ProviderFundIdentity.available_at <= visible_until,
+                ProviderFundIdentity.valid_from <= view_date,
+                ProviderFundIdentity.valid_to.is_(None)
+                | (ProviderFundIdentity.valid_to > view_date),
+            )
+            .order_by(
+                ProviderFundIdentity.valid_from.desc(),
+                ProviderFundIdentity.available_at.desc(),
+                ProviderFundIdentity.id.desc(),
+            )
+            .limit(1)
+            .correlate(FundShareClass)
+            .scalar_subquery()
+        )
+
+        predicates: list[ColumnElement[bool]] = []
+        fund_name = filters.get("fund_name")
+        if isinstance(fund_name, str) and fund_name.strip():
+            escaped = (
+                fund_name.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            predicates.append(Fund.product_name.ilike(f"%{escaped}%", escape="\\"))
+        fund_code = filters.get("fund_code")
+        if isinstance(fund_code, str) and fund_code.strip():
+            normalized_code = fund_code.strip()
+            if len(normalized_code) != 6 or any(
+                char < "0" or char > "9" for char in normalized_code
+            ):
+                raise InvalidQueryError("fund_code must contain exactly six ASCII digits")
+            predicates.append(akshare_code == normalized_code)
+        requested_company = filters.get("company_name")
+        if isinstance(requested_company, str) and requested_company.strip():
+            predicates.append(company_name == requested_company.strip())
+        sub_status = filters.get("sub_status")
+        if sub_status not in (None, "", "开放"):
+            raise InvalidQueryError("sub_status only supports 开放")
+        if sub_status == "开放":
+            predicates.append(literal("开放") == sub_status)
+
+        manager_id = filters.get("manager_id")
+        if manager_id is not None:
+            try:
+                manager_pk = int(str(manager_id))
+            except ValueError as exc:
+                raise InvalidQueryError("manager_id must be a numeric manager identifier") from exc
+            predicates.append(
+                select(1)
+                .select_from(FundManagerAssignment)
+                .where(
+                    FundManagerAssignment.fund_id == Fund.id,
+                    FundManagerAssignment.manager_id == manager_pk,
+                    FundManagerAssignment.available_at <= visible_until,
+                    FundManagerAssignment.valid_from <= view_date,
+                    FundManagerAssignment.valid_to.is_(None)
+                    | (FundManagerAssignment.valid_to > view_date),
+                )
+                .exists()
+            )
+        fund_types = filters.get("fund_type")
+        if fund_types:
+            predicates.append(legacy_code.in_(tuple(cast(Sequence[str], fund_types))))
+
+        for dimension in (
+            "asset_class",
+            "strategy",
+            "geography",
+            "product_structure",
+            "market_attributes",
+        ):
+            choices = filters.get(dimension)
+            if choices:
+                predicates.append(
+                    self._classification_dimension_predicate(
+                        classification, dimension, cast(Sequence[str], choices)
+                    )
+                )
+        tags = filters.get("strategy_tags")
+        if tags:
+            predicates.append(
+                self._strategy_tag_predicate(classification, cast(Sequence[str], tags))
+            )
+        statuses = filters.get("classification_status")
+        if statuses:
+            predicates.append(
+                self._classification_status_predicate(classification, cast(Sequence[str], statuses))
+            )
+
+        lifecycle = filters.get("lifecycle_status")
+        if lifecycle:
+            status = (
+                select(FundStatusHistory.lifecycle_status)
+                .where(
+                    FundStatusHistory.share_class_id == FundShareClass.id,
+                    FundStatusHistory.available_at <= visible_until,
+                    FundStatusHistory.valid_from <= view_date,
+                    FundStatusHistory.valid_to.is_(None) | (FundStatusHistory.valid_to > view_date),
+                )
+                .order_by(
+                    FundStatusHistory.valid_from.desc(),
+                    FundStatusHistory.available_at.desc(),
+                    FundStatusHistory.id.desc(),
+                )
+                .limit(1)
+                .correlate(FundShareClass)
+                .scalar_subquery()
+            )
+            predicates.append(
+                func.coalesce(status, "UNKNOWN").in_(tuple(cast(Sequence[str], lifecycle)))
+            )
+        eligibility_choices = filters.get("investment_eligibility")
+        if eligibility_choices:
+            eligibility = (
+                select(InvestmentEligibility.eligibility_status)
+                .where(
+                    InvestmentEligibility.share_class_id == FundShareClass.id,
+                    InvestmentEligibility.effective_at <= view_date,
+                    InvestmentEligibility.available_at <= visible_until,
+                )
+                .order_by(
+                    InvestmentEligibility.effective_at.desc(),
+                    InvestmentEligibility.version.desc(),
+                )
+                .limit(1)
+                .correlate(FundShareClass)
+                .scalar_subquery()
+            )
+            predicates.append(
+                func.coalesce(eligibility, "UNKNOWN").in_(
+                    tuple(cast(Sequence[str], eligibility_choices))
+                )
+            )
+        inception_from = _query_date(filters.get("inception_date_from"))
+        inception_to = _query_date(filters.get("inception_date_to"))
+        if inception_from:
+            predicates.append(FundShareClass.inception_date >= inception_from)
+        if inception_to:
+            predicates.append(FundShareClass.inception_date <= inception_to)
+
+        filtered = (
+            select(
+                Fund.id.label("fund_pk"),
+                Fund.fund_code.label("fund_id"),
+                Fund.product_name.label("fund_name"),
+                Fund.company_name.label("company_name_current"),
+                company_name.label("company_name"),
+                FundShareClass.id.label("share_class_pk"),
+                FundShareClass.share_class_code.label("share_class"),
+                FundShareClass.inception_date.label("inception_date"),
+                akshare_code.label("fund_code"),
+                literal("开放").label("sub_status"),
+                literal(None).label("aum"),
+            )
+            .select_from(Fund)
+            .join(FundShareClass, FundShareClass.fund_id == Fund.id)
+            .where(*predicates)
+            .cte("filtered_fund_share_classes")
+        )
+        sort_field = (
+            sort
+            if sort
+            in {
+                "fund_code",
+                "fund_name",
+                "company_name",
+                "sub_status",
+                "inception_date",
+                "aum",
+            }
+            else "fund_name"
+        )
+        sort_expr = {
+            "fund_code": filtered.c.fund_code,
+            "fund_name": filtered.c.fund_name,
+            "company_name": filtered.c.company_name,
+            "sub_status": filtered.c.sub_status,
+            "inception_date": filtered.c.inception_date,
+            "aum": filtered.c.aum,
+        }[sort_field]
+        direction = (
+            sort_expr.desc().nulls_last() if order == "desc" else sort_expr.asc().nulls_last()
+        )
+        page_rows = (
+            select(filtered)
+            .order_by(direction, filtered.c.fund_id.asc(), filtered.c.share_class_pk.asc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+            .cte("fund_share_class_page")
+        )
+        total = (
+            select(func.count().label("total_items")).select_from(filtered).cte("fund_page_total")
+        )
+        outer_sort_expr = getattr(page_rows.c, sort_field)
+        outer_direction = (
+            outer_sort_expr.desc().nulls_last()
+            if order == "desc"
+            else outer_sort_expr.asc().nulls_last()
+        )
+        statement = (
+            select(
+                Fund,
+                FundShareClass,
+                page_rows.c.fund_code,
+                page_rows.c.company_name,
+                page_rows.c.sub_status,
+                total.c.total_items,
+            )
+            .select_from(total.outerjoin(page_rows, true()))
+            .outerjoin(Fund, Fund.id == page_rows.c.fund_pk)
+            .outerjoin(FundShareClass, FundShareClass.id == page_rows.c.share_class_pk)
+            .order_by(
+                outer_direction,
+                page_rows.c.fund_id.asc(),
+                page_rows.c.share_class_pk.asc(),
+            )
+        )
+        fetched = session.execute(statement).all()
+        if not fetched:
+            return [], 0
+        total_items = int(fetched[0].total_items)
+        result: list[dict[str, object]] = []
+        for fund, share_class, code, company, status, _ in fetched:
+            if fund is None or share_class is None:
+                continue
+            row = self._summary(fund, share_class, view_date)
+            row.update(
+                {
+                    "fund_id": fund.fund_code,
+                    "fund_code": code,
+                    "fund_name": fund.product_name,
+                    "company_name": company,
+                    "sub_status": status,
+                    "share_class_id": str(share_class.id),
+                    "share_class": share_class.share_class_code,
+                    "inception_date": (
+                        share_class.inception_date.isoformat()
+                        if share_class.inception_date
+                        else None
+                    ),
+                }
+            )
+            # No source-backed company entity ID exists for the list projection.
+            row["management_company_id"] = None
+            result.append(row)
+        return result, total_items
+
+    def list_management_companies(self, *, as_of_date: str | None = None) -> list[str]:
+        session = self._session()
+        if not session.in_transaction():
+            session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+        effective_date = _query_date(as_of_date)
+        visible_until = resolve_visible_until(effective_date or date.today())
+        company = self._company_name_expression(effective_date, visible_until)
+        values = session.scalars(
+            select(company)
+            .select_from(Fund)
+            .where(company.is_not(None))
+            .distinct()
+            .order_by(company.asc())
+        )
+        return [str(value) for value in values if value]
+
+    def _company_name_expression(
+        self, effective_date: date | None, visible_until: datetime
+    ) -> ColumnElement[Any]:
+        if effective_date is None:
+            return func.nullif(func.btrim(Fund.company_name), "")
+        normalized = func.nullif(
+            func.btrim(FundBasicInfoHistory.normalized_fields["company_name"].as_string()), ""
+        )
+        raw = func.nullif(func.btrim(FundBasicInfoHistory.raw_fields["基金公司"].as_string()), "")
+        invalid_names = ("nan", "none", "null", "<na>")
+        normalized_usable = and_(
+            normalized.is_not(None),
+            func.lower(normalized).not_in(invalid_names),
+            func.length(normalized) <= 128,
+        )
+        raw_usable = and_(
+            raw.is_not(None),
+            func.lower(raw).not_in(invalid_names),
+            func.length(raw) <= 128,
+        )
+        value = case(
+            (normalized_usable, normalized),
+            (raw_usable, raw),
+            else_=None,
+        )
+        usable = and_(
+            FundBasicInfoHistory.fund_id == Fund.id,
+            FundBasicInfoHistory.available_at <= visible_until,
+            value.is_not(None),
+        )
+        return (
+            select(value)
+            .where(usable)
+            .order_by(
+                FundBasicInfoHistory.available_at.desc(),
+                FundBasicInfoHistory.version.desc(),
+                FundBasicInfoHistory.id.desc(),
+            )
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+
+    def _classification_dimension_predicate(
+        self,
+        classification: ColumnElement[Any],
+        dimension: str,
+        choices: Sequence[str],
+    ) -> ColumnElement[bool]:
+        result = classification[dimension]
+        status = result["status"].as_string()
+        value = result["value"]
+        evaluation = result["evaluation_state"].as_string()
+        options = []
+        if "UNKNOWN" in choices:
+            options.append(
+                or_(
+                    classification.is_(None),
+                    and_(
+                        status == "UNKNOWN",
+                        evaluation == "EVALUATED",
+                    ),
+                )
+            )
+        confirmed = [choice for choice in choices if choice != "UNKNOWN"]
+        if confirmed:
+            value_matches = [
+                or_(value.as_string() == choice, value.contains([choice])) for choice in confirmed
+            ]
+            options.append(
+                and_(
+                    status == "CONFIRMED",
+                    evaluation == "EVALUATED",
+                    or_(*value_matches),
+                )
+            )
+        return or_(*options)
+
+    def _classification_status_predicate(
+        self, classification: ColumnElement[Any], statuses: Sequence[str]
+    ) -> ColumnElement[bool]:
+        values = []
+        for dimension in ("asset_class", "strategy"):
+            result = classification[dimension]
+            evaluation = result["evaluation_state"].as_string()
+            status = result["status"].as_string()
+            values.append(
+                and_(
+                    or_(evaluation.is_(None), ~evaluation.in_(("PAUSED", "NOT_EVALUATED"))),
+                    status.in_(tuple(statuses)),
+                )
+            )
+        if "UNKNOWN" in statuses:
+            values.append(classification.is_(None))
+        return or_(*values)
+
+    def _strategy_tag_predicate(
+        self, classification: ColumnElement[Any], tags: Sequence[str]
+    ) -> ColumnElement[bool]:
+        choices = []
+        for tag in tags:
+            result = classification["strategy_tag_results"][tag]
+            choices.append(
+                and_(
+                    result["status"].as_string() == "CONFIRMED",
+                    result["value"].as_string() == tag,
+                    result["evaluation_state"].as_string() == "EVALUATED",
+                    func.jsonb_array_length(func.coalesce(result["evidence"], sa_cast("[]", JSONB)))
+                    > 0,
+                )
+            )
+        return and_(classification.is_not(None), or_(*choices))
+
+    def _legacy_classification_code(
+        self,
+        revision_id: ColumnElement[Any],
+        classification: ColumnElement[Any],
+        visible_until: datetime,
+        view_date: date,
+    ) -> ColumnElement[Any]:
+        from fip.services.data_service.models.fund import FundClassificationHistory
+
+        legacy = (
+            select(FundClassificationHistory.classification_code)
+            .where(
+                FundClassificationHistory.fund_id == Fund.id,
+                FundClassificationHistory.classification_scheme == "FIP_INTERNAL_L2",
+                FundClassificationHistory.revision_id.is_(None),
+                FundClassificationHistory.available_at <= visible_until,
+                FundClassificationHistory.valid_from <= view_date,
+                FundClassificationHistory.valid_to.is_(None)
+                | (FundClassificationHistory.valid_to > view_date),
+            )
+            .order_by(
+                FundClassificationHistory.valid_from.desc(),
+                FundClassificationHistory.available_at.desc(),
+                FundClassificationHistory.id.desc(),
+            )
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+        asset = classification["asset_class"]
+        strategy = classification["strategy"]
+        tag = classification["strategy_tag_results"]["QUANTITATIVE"]
+        tag_evidence = (
+            func.jsonb_array_elements(func.coalesce(tag["evidence"], sa_cast("[]", JSONB)))
+            .table_valued(column("value", JSONB))
+            .alias("tag_evidence")
+        )
+        evidence_value = tag_evidence.c.value
+        invalid_negative_evidence = or_(
+            evidence_value["rule_id"].as_string().is_distinct_from("TAG_QUANTITATIVE"),
+            evidence_value["rationale"].as_string().is_(None),
+            ~evidence_value["rationale"].as_string().contains("polarity=NEGATIVE"),
+            func.jsonb_array_length(
+                func.coalesce(evidence_value["required_observations"], sa_cast("[]", JSONB))
+            )
+            == 0,
+        )
+        has_invalid_negative_evidence = (
+            select(1)
+            .select_from(tag_evidence)
+            .where(invalid_negative_evidence)
+            .correlate(Fund)
+            .exists()
+        )
+        negative_evidence = and_(
+            func.jsonb_array_length(func.coalesce(tag["evidence"], sa_cast("[]", JSONB))) > 0,
+            ~has_invalid_negative_evidence,
+        )
+        manual_rejection = self._verified_manual_tag_rejection(
+            revision_id, classification, tag, visible_until, view_date
+        )
+        tag_admitted = and_(
+            tag["status"].as_string() == "UNKNOWN",
+            tag["evaluation_state"].as_string() == "EVALUATED",
+            or_(negative_evidence, manual_rejection),
+        )
+        projected = case(
+            (Fund.grouping_status != "CONFIRMED", None),
+            (classification.is_(None), None),
+            (asset["status"].as_string() != "CONFIRMED", None),
+            (strategy["status"].as_string() == "CONFLICT", None),
+            (
+                and_(
+                    classification["scheme"].as_string() == "FIP_CLASSIFICATION",
+                    strategy["status"].as_string() != "CONFIRMED",
+                ),
+                None,
+            ),
+            (asset["value"].as_string() == "BOND", "BOND"),
+            (asset["value"].as_string() == "MIXED", "HYBRID"),
+            (
+                and_(
+                    asset["value"].as_string() == "EQUITY",
+                    strategy["status"].as_string() == "CONFIRMED",
+                    strategy["value"].as_string() == "ACTIVE",
+                    tag_admitted,
+                ),
+                "ACTIVE_EQUITY",
+            ),
+            (
+                and_(
+                    asset["value"].as_string() == "EQUITY",
+                    strategy["status"].as_string() == "CONFIRMED",
+                    strategy["value"].as_string() == "PASSIVE_INDEX",
+                ),
+                "PASSIVE_EQUITY",
+            ),
+            else_=None,
+        )
+        return case((revision_id.is_not(None), projected), else_=legacy)
+
+    def _verified_manual_tag_rejection(
+        self,
+        revision_id: ColumnElement[Any],
+        classification: ColumnElement[Any],
+        tag: ColumnElement[Any],
+        visible_until: datetime,
+        view_date: date,
+    ) -> ColumnElement[bool]:
+        from fip.services.data_service.models.fund import FundClassificationReviewCase
+
+        history = FundClassificationHistory
+        audit = AuditLog
+        review_case = FundClassificationReviewCase
+        detail = audit.detail
+        scope_start = detail["valid_from"].as_string()
+        scope_end = detail["valid_to"].as_string()
+        interval_start = (
+            select(history.valid_from)
+            .where(
+                history.revision_id == revision_id,
+                history.valid_from <= view_date,
+                history.valid_to.is_(None) | (history.valid_to > view_date),
+            )
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+        interval_end = (
+            select(history.valid_to)
+            .where(
+                history.revision_id == revision_id,
+                history.valid_from <= view_date,
+                history.valid_to.is_(None) | (history.valid_to > view_date),
+            )
+            .limit(1)
+            .correlate(Fund)
+            .scalar_subquery()
+        )
+        decision = detail["tag_decisions"]["QUANTITATIVE"]
+        return (
+            select(1)
+            .select_from(
+                audit.__table__.join(
+                    review_case.__table__,
+                    review_case.id == sa_cast(detail["case_id"].as_string(), review_case.id.type),
+                )
+            )
+            .where(
+                audit.resource_type == "fund_classification",
+                audit.resource_id == sa_cast(Fund.id, audit.resource_id.type),
+                audit.action == "REVIEW",
+                audit.created_at <= visible_until,
+                func.btrim(audit.operator) != "",
+                audit.detail["revision_id"].as_string()
+                == sa_cast(revision_id, audit.resource_id.type),
+                tag["manual_action"].as_string() == "REJECT",
+                tag["evaluation_state"].as_string() == "EVALUATED",
+                audit.detail["expected_revision"].as_string()
+                == sa_cast(review_case.revision_id, audit.resource_id.type),
+                review_case.fund_id == Fund.id,
+                review_case.revision_id
+                == sa_cast(
+                    audit.detail["expected_revision"].as_string(), review_case.revision_id.type
+                ),
+                select(1)
+                .select_from(FundClassificationRevision)
+                .where(
+                    FundClassificationRevision.id == revision_id,
+                    FundClassificationRevision.reviewed.is_(True),
+                    FundClassificationRevision.available_at <= visible_until,
+                    FundClassificationRevision.scheme == "FIP_CLASSIFICATION",
+                )
+                .exists(),
+                func.btrim(detail["reason"].as_string()) != "",
+                decision["action"].as_string() == "REJECT",
+                func.jsonb_array_length(func.coalesce(decision["evidence"], sa_cast("[]", JSONB)))
+                > 0,
+                detail["result_tag_results"]["QUANTITATIVE"] == tag,
+                scope_start <= sa_cast(interval_start, scope_start.type),
+                or_(
+                    scope_end.is_(None),
+                    and_(
+                        interval_end.is_not(None),
+                        sa_cast(interval_end, scope_end.type) <= scope_end,
+                    ),
+                ),
+            )
+            .correlate(Fund)
+            .exists()
+        )
 
     def _list_rows(self, **filters: object) -> list[Mapping[str, object]]:
         if not isinstance(self.session, Session):

@@ -1,16 +1,16 @@
+import { ResearchDataTable } from "../../components/ResearchDataTable";
+import { Button, Group, Modal, NativeSelect, Stack, Text } from "@mantine/core";
 import {
-  Button,
-  Group,
-  Modal,
-  NativeSelect,
-  Stack,
-  Table,
-  Text,
-} from "@mantine/core";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ListFundIngestionItemsParams } from "../../api/generated/m17.schemas";
+import type {
+  FundIngestionRunItem,
+  ListFundIngestionItemsParams,
+} from "../../api/generated/m17.schemas";
 import {
   useCancelIngestion,
   useRetryIngestionFailures,
@@ -24,6 +24,8 @@ import {
 import { ErrorState } from "../../components/ErrorState";
 import { IngestionCounts, ingestionStatusLabel } from "./IngestionHistoryTable";
 import { datasetLabels, scopeLabels } from "./IngestionScopeForm";
+
+type itemRow = FundIngestionRunItem;
 
 export const IngestionTaskDetail = ({
   operationId,
@@ -41,17 +43,18 @@ export const IngestionTaskDetail = ({
     page: 1,
     page_size: 20,
   });
-  const items = useQuery(
-    getIngestionItemsQueryOptions(
+  const items = useQuery({
+    ...getIngestionItemsQueryOptions(
       task ? operationId : "",
       params,
       task?.status === "RUNNING",
     ),
-  );
+    placeholderData: keepPreviousData,
+  });
   const cancel = useCancelIngestion();
   const retry = useRetryIngestionFailures();
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const refreshedTerminal = useRef<string>();
+  const refreshedTerminal = useRef<string | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
@@ -203,21 +206,37 @@ export const IngestionTaskDetail = ({
             {items.data?.items.length === 0 && (
               <Text>暂无符合条件的项级结果。</Text>
             )}
-            {items.data && items.data.items.length > 0 && (
-              <div style={{ overflowX: "auto" }}>
-                <Table>
-                  <Table.Caption>抓取项级结果</Table.Caption>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>基金 / 份额类别</Table.Th>
-                      <Table.Th>状态 / 尝试次数</Table.Th>
-                      <Table.Th>来源结果 / 日期 / 错误</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {items.data.items.map((item) => (
-                      <Table.Tr key={item.id}>
-                        <Table.Td>
+            {items.data && (
+              <ResearchDataTable
+                caption="抓取项级结果"
+                layoutKey="ingestion-items"
+                rowData={items.data.items}
+                rowHeight={200}
+                serverPagination={{
+                  page: params.page ?? 1,
+                  pageSize: items.data.page_size,
+                  total: items.data.total,
+                  loading: items.isFetching,
+                  failed: items.isError,
+                  resetKey: `${operationId}:${params.status ?? ""}`,
+                  onPageChange: (page) =>
+                    setParams((current) => ({ ...current, page })),
+                }}
+                getRowId={({ data }) => String(data.id)}
+                columnDefs={[
+                  {
+                    colId: "column0",
+                    headerName: "基金 / 份额类别",
+                    wrapText: true,
+                    cellRenderer: ({ data: item }: { data?: itemRow }) =>
+                      item ? (
+                        <div
+                          style={{
+                            maxHeight: 190,
+                            overflow: "auto",
+                            whiteSpace: "normal",
+                          }}
+                        >
                           <Link
                             to={`/funds/${encodeURIComponent(item.fund_id)}`}
                           >
@@ -227,12 +246,40 @@ export const IngestionTaskDetail = ({
                             份额 {item.share_class_id ?? "不适用"} · 来源代码{" "}
                             {item.symbol ?? "—"}
                           </Text>
-                        </Table.Td>
-                        <Table.Td>
+                        </div>
+                      ) : null,
+                  },
+                  {
+                    colId: "column1",
+                    headerName: "状态 / 尝试次数",
+                    wrapText: true,
+                    cellRenderer: ({ data: item }: { data?: itemRow }) =>
+                      item ? (
+                        <div
+                          style={{
+                            maxHeight: 190,
+                            overflow: "auto",
+                            whiteSpace: "normal",
+                          }}
+                        >
                           {item.status}
                           <Text size="sm">尝试 {item.attempts} 次</Text>
-                        </Table.Td>
-                        <Table.Td>
+                        </div>
+                      ) : null,
+                  },
+                  {
+                    colId: "column2",
+                    headerName: "来源结果 / 日期 / 错误",
+                    wrapText: true,
+                    cellRenderer: ({ data: item }: { data?: itemRow }) =>
+                      item ? (
+                        <div
+                          style={{
+                            maxHeight: 190,
+                            overflow: "auto",
+                            whiteSpace: "normal",
+                          }}
+                        >
                           {item.error && <Text c="red">{item.error}</Text>}
                           {item.result && (
                             <dl>
@@ -253,40 +300,11 @@ export const IngestionTaskDetail = ({
                             </dl>
                           )}
                           {!item.error && !item.result && "等待结果"}
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </div>
-            )}
-            {items.data && (
-              <Group>
-                <Button
-                  variant="default"
-                  disabled={items.data.page <= 1 || items.isFetching}
-                  onClick={() =>
-                    setParams({ ...params, page: items.data!.page - 1 })
-                  }
-                >
-                  结果上一页
-                </Button>
-                <Text>
-                  第 {items.data.page} 页 · 共 {items.data.total} 项结果
-                </Text>
-                <Button
-                  variant="default"
-                  disabled={
-                    items.data.page * items.data.page_size >=
-                      items.data.total || items.isFetching
-                  }
-                  onClick={() =>
-                    setParams({ ...params, page: items.data!.page + 1 })
-                  }
-                >
-                  结果下一页
-                </Button>
-              </Group>
+                        </div>
+                      ) : null,
+                  },
+                ]}
+              />
             )}
           </>
         )}

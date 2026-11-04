@@ -547,6 +547,46 @@ export interface FundSummary {
   classification?: FundSummaryClassification;
 }
 
+export type FundListItemManagementCompanyId = string | null;
+
+export type FundListItemInceptionDate = string | null;
+
+export type FundListItemClassification = ClassificationPayloadModel | null;
+
+/**
+ * @pattern ^[0-9]{6}$
+ */
+export type FundListItemFundCode = string | null;
+
+export type FundListItemCompanyName = string | null;
+
+export type FundListItemSubStatus =
+  (typeof FundListItemSubStatus)[keyof typeof FundListItemSubStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundListItemSubStatus = {
+  开放: "开放",
+  UNKNOWN: "UNKNOWN",
+} as const;
+
+export interface FundListItem {
+  fund_id: string;
+  fund_name: string;
+  share_class: string;
+  fund_classification: string;
+  management_company_id?: FundListItemManagementCompanyId;
+  inception_date: FundListItemInceptionDate;
+  lifecycle_status: LifecycleStatus;
+  investment_eligibility: InvestmentEligibility;
+  classification?: FundListItemClassification;
+  share_class_id: string;
+  /** @pattern ^[0-9]{6}$ */
+  fund_code?: FundListItemFundCode;
+  company_name?: FundListItemCompanyName;
+  sub_status: FundListItemSubStatus;
+  manager_ids: string[];
+}
+
 export interface BenchmarkComponent {
   benchmark_id: string;
   weight: number;
@@ -596,13 +636,35 @@ export type FundListMetaAllOf = {
   is_point_in_time: boolean;
   pagination: Pagination;
   availability_quality_distribution: AvailabilityQualityDistribution;
+  subscription_status_source: "PLACEHOLDER";
 };
 
 export type FundListMeta = ResponseMeta & FundListMetaAllOf;
 
 export interface FundListEnvelope {
-  data: FundSummary[];
+  data: FundListItem[];
   meta: FundListMeta;
+  error: EmptyError;
+}
+
+export interface FundManagementCompany {
+  company_name: string;
+}
+
+export type FundManagementCompaniesMetaAllOf = {
+  as_of_date: string;
+  data_version: string;
+  versions: VersionReferences;
+  is_point_in_time: boolean;
+  availability_quality_distribution: AvailabilityQualityDistribution;
+};
+
+export type FundManagementCompaniesMeta = ResponseMeta &
+  FundManagementCompaniesMetaAllOf;
+
+export interface FundManagementCompaniesEnvelope {
+  data: FundManagementCompany[];
+  meta: FundManagementCompaniesMeta;
   error: EmptyError;
 }
 
@@ -2439,6 +2501,12 @@ export type FundBasicInfoHistoryListResponseResponse =
 export type FundListResponseResponse = FundListEnvelope;
 
 /**
+ * Distinct fund management companies visible at the requested date.
+ */
+export type FundManagementCompaniesResponseResponse =
+  FundManagementCompaniesEnvelope;
+
+/**
  * Fund detail.
  */
 export type FundResponseResponse = FundEnvelope;
@@ -2543,6 +2611,21 @@ export type PageParameter = number;
 
 export type PageSizeParameter = number;
 
+export type FundListPageSizeParameter = number;
+
+export type FundListSortParameter =
+  (typeof FundListSortParameter)[keyof typeof FundListSortParameter];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundListSortParameter = {
+  fund_code: "fund_code",
+  fund_name: "fund_name",
+  company_name: "company_name",
+  sub_status: "sub_status",
+  inception_date: "inception_date",
+  aum: "aum",
+} as const;
+
 export type SortParameter = string;
 
 export type OrderParameter =
@@ -2584,11 +2667,24 @@ export type ListFundsParams = {
    * @minimum 1
    * @maximum 500
    */
-  page_size?: PageSizeParameter;
-  sort?: SortParameter;
+  page_size?: FundListPageSizeParameter;
+  sort?: FundListSortParameter;
   order?: OrderParameter;
   as_of_date?: AsOfDateParameter;
   fund_name?: string;
+  /**
+   * Exactly six ASCII digits.
+   * @pattern ^[0-9]{6}$
+   */
+  fund_code?: string;
+  /**
+   * Exact management company name; omit to include every company.
+   */
+  company_name?: string;
+  /**
+   * Current placeholder subscription status; only open is supported.
+   */
+  sub_status?: ListFundsSubStatus;
   fund_type?: string[];
   management_company_id?: string;
   manager_id?: string;
@@ -2608,6 +2704,18 @@ export type ListFundsParams = {
    * Matches only evidence-backed CONFIRMED independent tags; legacy QUANTITATIVE strategy is not a tag.
    */
   strategy_tags?: string[];
+};
+
+export type ListFundsSubStatus =
+  (typeof ListFundsSubStatus)[keyof typeof ListFundsSubStatus];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListFundsSubStatus = {
+  开放: "开放",
+} as const;
+
+export type ListFundManagementCompaniesParams = {
+  as_of_date?: AsOfDateParameter;
 };
 
 export type GetFundParams = {

@@ -15,7 +15,7 @@ export const IngestionCompletionWatcher = ({
 }) => {
   const client = useQueryClient();
   const latest = useQuery({ ...getLatestIngestionQueryOptions(), enabled });
-  const observed = useRef<string>();
+  const observed = useRef<string | undefined>(undefined);
   const task = latest.data?.items[0];
   useEffect(() => {
     if (!enabled || !task || task.status === "RUNNING" || !task.finished_at)
