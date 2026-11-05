@@ -3,6 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { listFunds } from "./generated/m17";
 import {
   fundPageQueryOptions,
+  getIngestionHistoryQueryOptions,
+  getLatestIngestionQueryOptions,
   invalidateIngestionFundData,
   listFundsQueryOptions,
   queryKeys,
@@ -49,6 +51,14 @@ describe("fund list query contract", () => {
 });
 
 describe("ingestion cache invalidation", () => {
+  it("does not poll the fund ingestion history endpoint", () => {
+    expect(
+      getIngestionHistoryQueryOptions({ page: 1, page_size: 20 })
+        .refetchInterval,
+    ).toBeUndefined();
+    expect(getLatestIngestionQueryOptions().refetchInterval).toBeUndefined();
+  });
+
   it("invalidates company options when fund basic information is ingested", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

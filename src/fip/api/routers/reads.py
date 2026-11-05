@@ -327,7 +327,7 @@ def get_evaluations(
 def get_fund_factor_analysis(
     fund_id: str,
     request: Request,
-    evaluation_period: Literal["1M", "6M", "1Y", "3Y", "5Y"] = "1Y",
+    evaluation_period: Literal["1M", "3M", "6M", "1Y", "3Y", "5Y", "ALL"] = "1Y",
     as_of_date: date | None = None,
     repository: ApiRepositories = Depends(get_repository),
 ) -> dict[str, Any]:

@@ -24,7 +24,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, type ReactNode } from "react";
 import { getSessionQueryOptions, listFundsQueryOptions } from "../api/queries";
 import styles from "./PageLayout.module.css";
-import { IngestionCompletionWatcher } from "../features/ingestion/IngestionCompletionWatcher";
 
 const links: {
   label: string;
@@ -110,12 +109,6 @@ export const PageLayout = ({ children }: { children: ReactNode }) => {
       padding={0}
       classNames={{ main: styles.main }}
     >
-      <IngestionCompletionWatcher
-        enabled={
-          session.isSuccess &&
-          session.data.capabilities.can_manage_data_ingestion === true
-        }
-      />
       <Link
         to="#main-content"
         className={styles.skipLink}

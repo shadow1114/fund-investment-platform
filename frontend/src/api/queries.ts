@@ -298,10 +298,6 @@ export const getIngestionHistoryQueryOptions = (
   queryOptions({
     queryKey: [...ingestionKeys.history, params],
     queryFn: async () => unwrapResponse(await listFundIngestionHistory(params)),
-    refetchInterval: (query) =>
-      query.state.data?.items.some((task) => task.status === "RUNNING")
-        ? 2500
-        : false,
   });
 
 export const getIngestionTaskQueryOptions = (id: string) =>
@@ -338,7 +334,6 @@ export const getLatestIngestionQueryOptions = (completedOnly = false) =>
           status: completedOnly ? "COMPLETED" : undefined,
         }),
       ),
-    refetchInterval: 2500,
   });
 
 export const invalidateIngestionFundData = (client: QueryClient) => {

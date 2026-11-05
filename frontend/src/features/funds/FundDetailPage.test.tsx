@@ -35,13 +35,19 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { FundDetailPage } from "../../pages/FundDetailPage";
+import { prototypeFactorText } from "./FactorAnalysisPanel";
+
+const chartOptions: { series: { data: unknown[] }[] }[] = [];
 
 vi.mock("echarts-for-react/lib/core", () => ({
-  default: ({ option }: { option: { series: { data: unknown[] }[] } }) => (
-    <div aria-label="基金净值图">
-      图表数据点：{option.series[0].data.length}
-    </div>
-  ),
+  default: ({ option }: { option: { series: { data: unknown[] }[] } }) => {
+    chartOptions.push(option);
+    return (
+      <div aria-label="基金净值图">
+        图表数据点：{option.series[0].data.length}
+      </div>
+    );
+  },
 }));
 
 const baseMeta = {
@@ -270,13 +276,43 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   factorPeriodsRequested.length = 0;
+  chartOptions.length = 0;
 });
 afterAll(() => {
   server.close();
 });
 
 describe("FundDetailPage", () => {
-  it("uses explicit share class identity for all research reads and product identity for history", async () => {
+  it("formats prototype loss values without changing the API result", () => {
+    const analysis = {
+      fund_id: "000001",
+      evaluation_period: "1Y" as const,
+      as_of_date: "2026-09-16",
+      factor_categories: [
+        {
+          category: "RISK" as const,
+          name: "风险",
+          factors: [
+            {
+              factor_id: "F-RISK-004",
+              name: "VaR",
+              category: "RISK" as const,
+              direction: "LOWER_IS_BETTER",
+              raw_value: 0.02,
+              normalized_value: null,
+              status: "VALID" as const,
+              reason_code: null,
+              observations: 252,
+              series: [],
+            },
+          ],
+        },
+      ],
+    };
+    expect(prototypeFactorText(analysis, "F-RISK-004")).toBe("-2.00%");
+    expect(analysis.factor_categories[0].factors[0].raw_value).toBe(0.02);
+  });
+  it("uses the exact share class for prototype reads and never requests history or scores", async () => {
     const requests: URL[] = [];
     server.use(
       http.get("/api/v1/funds/:id", ({ request, params }) => {
@@ -327,27 +363,13 @@ describe("FundDetailPage", () => {
       ),
     );
     renderPage(
-      "/funds/000001?share_class_id=102&as_of_date=2026-09-16&tab=factors&factor_period=5Y&return_to=%2Ffunds%3Fpage%3D3",
+      "/funds/000001?share_class_id=102&as_of_date=2026-09-16&tab=rolling&factor_period=5Y&return_to=%2Ffunds%3Fpage%3D3",
     );
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
-    await screen.findByRole("tabpanel", { name: "因子分析" });
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: /五维分类与证据/ }));
-    await waitFor(() =>
-      expect(
-        requests.some((url) =>
-          url.pathname.endsWith("/classification-history"),
-        ),
-      ).toBe(true),
-    );
-    for (const suffix of [
-      "",
-      "/nav-series",
-      "/evaluations",
-      "/scores",
-      "/factor-analysis",
-    ]) {
+    await screen.findByRole("tabpanel", {
+      name: "滚动指标演变 (Sharpe/波动率)",
+    });
+    for (const suffix of ["", "/nav-series", "/factor-analysis"]) {
       const request = requests.find(
         (url) => url.pathname === `/api/v1/funds/102${suffix}`,
       );
@@ -364,16 +386,16 @@ describe("FundDetailPage", () => {
       "ingestions",
       "classification-history",
     ]) {
-      expect(
-        requests.some(
-          (url) => url.pathname === `/api/v1/funds/000001/${suffix}`,
-        ),
-      ).toBe(true);
+      expect(requests.some((url) => url.pathname.endsWith(`/${suffix}`))).toBe(
+        false,
+      );
     }
-    expect(screen.getByRole("link", { name: "返回基金研究" })).toHaveAttribute(
-      "href",
-      "/funds?page=3",
-    );
+    expect(
+      requests.some((url) => /\/(evaluations|scores)$/.test(url.pathname)),
+    ).toBe(false);
+    expect(
+      screen.queryByRole("link", { name: "返回基金研究" }),
+    ).not.toBeInTheDocument();
   });
 
   it.each([
@@ -389,76 +411,178 @@ describe("FundDetailPage", () => {
       );
       await screen.findByRole("heading", { name: "Alpha 稳健基金" });
       expect(
-        screen.getByRole("link", { name: "返回基金研究" }),
-      ).toHaveAttribute("href", "/funds?as_of_date=2026-09-16");
+        screen.queryByRole("link", { name: "返回基金研究" }),
+      ).not.toBeInTheDocument();
     },
   );
 
-  it("only offers classification review to authorized users", async () => {
+  it("never adds classification, ingestion or provenance sections to the prototype", async () => {
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: /五维分类与证据/ }));
-    await screen.findByText("分类：UNKNOWN（暂无可见修订）");
+    expect(screen.queryByText("五维分类与证据")).not.toBeInTheDocument();
+    expect(screen.queryByText("评分归因")).not.toBeInTheDocument();
+    expect(screen.queryByText("点时数据：是")).not.toBeInTheDocument();
+    expect(screen.queryByText("查看图表数值")).not.toBeInTheDocument();
     expect(screen.queryByText("打开分类复核工作区")).not.toBeInTheDocument();
   });
-  it("loads categorized factors on demand and recalculates after period selection", async () => {
+  it("shows categorized factors below the trend and recalculates after period selection", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole("tab", { name: "因子分析" }));
-    const panel = await screen.findByRole("tabpanel", { name: "因子分析" });
+    await screen.findByRole("heading", { name: "Alpha 稳健基金" });
     expect(
-      within(panel).getByRole("heading", { name: "收益表现" }),
+      await screen.findByRole("heading", { name: "收益指标 (4)" }),
     ).toBeVisible();
-    expect(within(panel).getByText("10.00%", { exact: true })).toBeVisible();
+    expect(
+      (await screen.findAllByText("+10.00%", { exact: true })).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("heading", { name: /量化多因子多维矩阵/ }),
+    ).toBeVisible();
     expect(factorPeriodsRequested).toContain("1Y");
-    await user.click(within(panel).getByRole("button", { name: "近5年" }));
+    await user.click(screen.getByRole("radio", { name: "5年" }));
     await waitFor(() => expect(factorPeriodsRequested).toContain("5Y"));
   });
-  it("shows NAV null semantics and PIT provenance without inventing zero", async () => {
+  it("keeps missing NAV observations as gaps without adding a value table", async () => {
     renderPage();
     expect(
       await screen.findByRole("heading", { name: "Alpha 稳健基金" }),
     ).toBeVisible();
-    await userEvent.setup().click(screen.getByRole("tab", { name: "净值" }));
-
-    const nav = await screen.findByRole("tabpanel", { name: "净值" });
+    const nav = await screen.findByRole("tabpanel", {
+      name: "净值走势 vs 基准超额",
+    });
     expect(await within(nav).findByText("图表数据点：2")).toBeVisible();
-    await userEvent.setup().click(within(nav).getByText("查看图表数值"));
-    expect(
-      within(nav).getByText("不可用（INSUFFICIENT_SAMPLE）"),
-    ).toBeVisible();
-    expect(within(nav).queryByText("0")).not.toBeInTheDocument();
-    expect(within(nav).getByText("点时数据：是")).toBeVisible();
+    expect(chartOptions.at(-1)?.series[0].data).toEqual([
+      ["2026-09-15", 0],
+      ["2026-09-16", null],
+    ]);
+    expect(within(nav).queryByText("查看图表数值")).not.toBeInTheDocument();
   });
 
-  it("normalizes an unknown evaluation status and keeps insufficient-sample reasons", async () => {
+  it("keeps the NAV view while changing period and renders the seven-column panorama automatically", async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole("heading", { name: "Alpha 稳健基金" });
-
-    await user.click(screen.getByRole("tab", { name: "业绩风险" }));
-    const evaluation = screen.getByRole("tabpanel", { name: "业绩风险" });
-    expect(within(evaluation).getByText("未知")).toBeVisible();
+    await screen.findByRole("heading", { name: "收益指标 (4)" });
+    await user.click(screen.getByRole("radio", { name: "5年" }));
+    await waitFor(() => expect(factorPeriodsRequested).toContain("5Y"));
     expect(
-      within(evaluation).getByText("不可用（INSUFFICIENT_SAMPLE）"),
-    ).toBeVisible();
-    await user.click(
-      within(evaluation).getByRole("button", { name: "查看计算版本" }),
+      screen.getByRole("tab", { name: "净值走势 vs 基准超额" }),
+    ).toHaveAttribute("aria-selected", "true");
+    await waitFor(() =>
+      expect(new Set(factorPeriodsRequested)).toEqual(
+        new Set(["1M", "3M", "6M", "1Y", "3Y", "5Y", "ALL"]),
+      ),
     );
+    const table = screen.getByRole("region", { name: "多周期数值" });
+    await waitFor(() =>
+      expect(within(table).queryByText("计算中")).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(within(table).getAllByText("+10.00%")).toHaveLength(7),
+    );
+    expect(within(table).queryByText("未加载")).not.toBeInTheDocument();
     expect(
-      await within(evaluation).findByText("评估策略版本：eval-v4"),
-    ).toBeInTheDocument();
+      within(table).getByRole("columnheader", { name: "3个月" }),
+    ).toBeVisible();
+    expect(
+      within(table).getByRole("columnheader", { name: "成立以来" }),
+    ).toBeVisible();
+  });
+
+  it("shows failed panorama periods without fabricating zero", async () => {
+    server.use(
+      http.get("/api/v1/funds/000001/factor-analysis", ({ request }) => {
+        const period = new URL(request.url).searchParams.get(
+          "evaluation_period",
+        );
+        if (period !== "5Y") return;
+        return HttpResponse.json(
+          {
+            data: null,
+            meta: baseMeta,
+            error: {
+              code: "CALCULATION_FAILED",
+              message: "Calculation failed",
+              details: {},
+            },
+          },
+          { status: 500 },
+        );
+      }),
+    );
+    renderPage();
+    const table = await screen.findByRole("region", { name: "多周期数值" });
+    await waitFor(() =>
+      expect(within(table).getAllByText("+10.00%")).toHaveLength(6),
+    );
+    expect(within(table).queryByText("0.00%")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "重试失败周期" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("draws underwater values against the period peak and preserves missing observations", async () => {
+    server.use(
+      http.get("/api/v1/funds/000001/nav-series", () =>
+        HttpResponse.json({
+          ...fundNavEnvelope,
+          data: {
+            ...fundNavEnvelope.data,
+            points: [
+              {
+                date: "2026-09-13",
+                nav: 4,
+                nav_status: "VALID",
+                nav_reason: null,
+              },
+              {
+                date: "2026-09-14",
+                nav: 3,
+                nav_status: "VALID",
+                nav_reason: null,
+              },
+              {
+                date: "2026-09-15",
+                nav: null,
+                nav_status: "UNAVAILABLE",
+                nav_reason: "MISSING_NAV",
+              },
+              {
+                date: "2026-09-16",
+                nav: 5,
+                nav_status: "VALID",
+                nav_reason: null,
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    renderPage();
+    await screen.findByText("图表数据点：4");
+    await userEvent
+      .setup()
+      .click(screen.getByRole("tab", { name: "动态回撤 (Underwater)" }));
+    await waitFor(() =>
+      expect(chartOptions.at(-1)?.series[0].data).toEqual([
+        ["2026-09-13", 0],
+        ["2026-09-14", -25],
+        ["2026-09-15", null],
+        ["2026-09-16", 0],
+      ]),
+    );
   });
 
   it("supports roving-tab keyboard navigation", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
-    const nav = screen.getByRole("tab", { name: "净值" });
-    const evaluation = screen.getByRole("tab", { name: "业绩风险" });
-    const factorTab = screen.getByRole("tab", { name: "因子分析" });
+    const nav = screen.getByRole("tab", { name: "净值走势 vs 基准超额" });
+    const evaluation = screen.getByRole("tab", {
+      name: "动态回撤 (Underwater)",
+    });
+    const factorTab = screen.getByRole("tab", {
+      name: "滚动指标演变 (Sharpe/波动率)",
+    });
     expect(nav).toHaveAttribute("tabindex", "0");
     expect(evaluation).toHaveAttribute("tabindex", "-1");
     nav.focus();
@@ -471,20 +595,17 @@ describe("FundDetailPage", () => {
     expect(nav).toHaveFocus();
   });
 
-  it("renders dimensionless score values and the attribution chain", async () => {
+  it("offers all seven prototype periods and requests since-inception factors", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole("heading", { name: "Alpha 稳健基金" });
 
-    await user.click(screen.getByRole("tab", { name: "评分归因" }));
-    const score = screen.getByRole("tabpanel", { name: "评分归因" });
-    expect(within(score).getByText("总分（无量纲）")).toBeVisible();
+    expect(screen.getAllByRole("radio")).toHaveLength(7);
+    await user.click(screen.getByRole("radio", { name: "成立以来" }));
+    await waitFor(() => expect(factorPeriodsRequested).toContain("ALL"));
     expect(
-      within(score).getAllByText("不可用（INSUFFICIENT_SAMPLE）").length,
-    ).toBeGreaterThan(0);
-    expect(within(score).getByText("downside_risk")).toBeVisible();
-    expect(within(score).getByText("25.00%")).toBeVisible();
-    expect(within(score).queryByText("0%")).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: /当前周期:.*成立以来/ }),
+    ).toBeVisible();
   });
 
   it("shows a stable API error state when detail loading fails", async () => {

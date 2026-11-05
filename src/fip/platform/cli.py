@@ -202,6 +202,30 @@ def cmd_ingest_nav(args: argparse.Namespace) -> None:
         raise SystemExit(f"净值灌入失败（{item.status}）：{item.error or '未知错误'}")
 
 
+def cmd_ingest_risk_free(args: argparse.Namespace) -> None:
+    from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
+    from fip.services.data_service.ingest import IngestService
+
+    date_to = dt.date.fromisoformat(args.date_to) if args.date_to else dt.date.today()
+    date_from = (
+        dt.date.fromisoformat(args.date_from)
+        if args.date_from
+        else date_to - dt.timedelta(days=6 * 366)
+    )
+    if date_from > date_to:
+        raise SystemExit("--from 不得晚于 --to")
+    with _session() as session:
+        service = IngestService.from_policy(
+            session,
+            AkShareSourceAdapter(),
+            rule_version=DATA_SOURCE_RULE_VERSION,
+            dataset_codes=("risk_free_rate",),
+        )
+        inserted = service.ingest_risk_free_rate(date_from, date_to)
+        session.commit()
+    print(f"无风险利率（中债国债曲线）{date_from} ~ {date_to}：新增 {inserted} 条")
+
+
 def cmd_pit_nav(args: argparse.Namespace) -> None:
     decision_at = dt.date.fromisoformat(args.decision_at)
     context = DecisionExecutionContext(
@@ -654,6 +678,13 @@ def main(argv: list[str] | None = None) -> int:
     p_nav = sub.add_parser("ingest-nav", help="灌入某只基金的净值与事件并回填复权净值")
     p_nav.add_argument("--symbol", required=True)
     p_nav.set_defaults(func=cmd_ingest_nav)
+
+    p_rf = sub.add_parser(
+        "ingest-risk-free", help="灌入中债国债收益率曲线作为无风险利率（默认最近 6 年）"
+    )
+    p_rf.add_argument("--from", dest="date_from", default=None, help="YYYY-MM-DD")
+    p_rf.add_argument("--to", dest="date_to", default=None, help="YYYY-MM-DD，默认今天")
+    p_rf.set_defaults(func=cmd_ingest_risk_free)
 
     p_pit = sub.add_parser("pit-nav", help="按历史 decision_at 查询复权净值序列")
     p_pit.add_argument("--symbol", required=True)

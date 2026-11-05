@@ -176,7 +176,7 @@ export const FundTable = ({
         cellRenderer: ({ data }: { data?: FundListItem }) =>
           data ? (
             <Link
-              to={`/funds/${data.fund_id}?share_class_id=${encodeURIComponent(data.share_class_id)}&return_to=${encodeURIComponent(returnTo)}${params.as_of_date ? `&as_of_date=${encodeURIComponent(params.as_of_date)}` : ""}`}
+              to={`/funds/${data.fund_id}?share_class_id=${encodeURIComponent(data.share_class_id)}&return_to=${encodeURIComponent(returnTo)}${data.fund_code ? `&fund_code=${encodeURIComponent(data.fund_code)}` : ""}${params.as_of_date ? `&as_of_date=${encodeURIComponent(params.as_of_date)}` : ""}`}
             >
               {data.fund_name}
             </Link>

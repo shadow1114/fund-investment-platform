@@ -125,6 +125,18 @@ def test_risk_free_curve_interpolates_only_between_adjacent_tenors():
         RiskFreeRatePoint(day, "3M", Decimal("0.02"), 1, "EXACT"),
         RiskFreeRatePoint(day, "1Y", Decimal("0.05"), 1, "EXACT"),
     )
-    resolved = _resolve_risk_free_curve(points, "6M", "CNY")
+    resolved = _resolve_risk_free_curve(points, 180, "CNY")
 
     assert resolved == ((day, Decimal("0.02981818181818181818181818182"), "INTERPOLATED"),)
+
+
+def test_risk_free_curve_matches_long_since_inception_span():
+    day = dt.date(2026, 10, 30)
+    points = (
+        RiskFreeRatePoint(day, "10Y", Decimal("0.018"), 1, "EXACT"),
+        RiskFreeRatePoint(day, "30Y", Decimal("0.022"), 1, "EXACT"),
+    )
+    # 30Y cap: spans beyond the longest tenor resolve to it exactly.
+    assert _resolve_risk_free_curve(points, 10950, "CNY") == ((day, Decimal("0.022"), "EXACT"),)
+    _, rate, quality = _resolve_risk_free_curve(points, 9000, "CNY")[0]
+    assert quality == "INTERPOLATED" and Decimal("0.018") < rate < Decimal("0.022")

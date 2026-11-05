@@ -15,7 +15,7 @@ import {
   sessionEnvelope,
 } from "../src/test/contractFixtures";
 
-async function installFixtures(page: Page) {
+async function installFixtures(page: Page, dashboard = false) {
   const requests: URL[] = [];
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -77,12 +77,21 @@ async function installFixtures(page: Page) {
         ...fundNavEnvelope,
         data: {
           ...fundNavEnvelope.data,
-          points: [
-            {
-              ...fundNavEnvelope.data.points[0],
-              nav: path.includes("/102/") ? 2.34 : 1.24,
-            },
-          ],
+          points: dashboard
+            ? Array.from({ length: 32 }, (_, index) => ({
+                date: new Date(Date.UTC(2026, 7, 15 + index))
+                  .toISOString()
+                  .slice(0, 10),
+                nav: 1.24 + index * 0.01 + Math.sin(index / 3) * 0.04,
+                nav_status: "VALID",
+                nav_reason: null,
+              }))
+            : [
+                {
+                  ...fundNavEnvelope.data.points[0],
+                  nav: path.includes("/102/") ? 2.34 : 1.24,
+                },
+              ],
         },
       };
     else if (path.endsWith("/evaluations")) body = fundEvaluationEnvelope;
@@ -93,7 +102,78 @@ async function installFixtures(page: Page) {
           fund_id: "000001",
           evaluation_period: url.searchParams.get("evaluation_period"),
           as_of_date: "2026-09-16",
-          factor_categories: [],
+          factor_categories: dashboard
+            ? [
+                [
+                  "RET",
+                  "收益表现",
+                  ["年化收益率", "累计收益率", "区间收益率", "滚动收益率"],
+                ],
+                ["RAP", "风险调整收益", ["夏普比率", "索提诺比率", "卡玛比率"]],
+                [
+                  "REL",
+                  "相对表现",
+                  ["超额收益", "Alpha", "Beta", "信息比率", "跟踪误差"],
+                ],
+                [
+                  "RISK",
+                  "风险指标",
+                  [
+                    "年化波动率",
+                    "下行波动率",
+                    "最大回撤",
+                    "VaR",
+                    "CVaR",
+                    "回撤持续期",
+                    "回撤恢复期",
+                  ],
+                ],
+                [
+                  "STAB",
+                  "稳定性",
+                  [
+                    "正收益比例",
+                    "R²",
+                    "偏度",
+                    "峰度",
+                    "滚动夏普",
+                    "滚动波动率",
+                    "滚动最大回撤",
+                  ],
+                ],
+              ].map(([category, name, names]) => ({
+                category,
+                name,
+                factors: (names as string[]).map((factorName, index) => ({
+                  factor_id: `F-${category}-${String(index + 1).padStart(3, "0")}`,
+                  name: factorName,
+                  category,
+                  raw_value:
+                    index === 6
+                      ? null
+                      : category === "RISK" && index === 5
+                        ? 42
+                        : 0.12 + index * 0.01,
+                  normalized_value: null,
+                  status: index === 6 ? "UNAVAILABLE" : "VALID",
+                  reason_code: index === 6 ? "NOT_RECOVERED" : null,
+                  direction:
+                    category === "RISK"
+                      ? "LOWER_IS_BETTER"
+                      : "HIGHER_IS_BETTER",
+                  observations: 252,
+                  series:
+                    category === "STAB" && index === 4
+                      ? Array.from({ length: 32 }, (_, point) => ({
+                          date: new Date(Date.UTC(2026, 7, 15 + point))
+                            .toISOString()
+                            .slice(0, 10),
+                          value: 0.8 + point * 0.01,
+                        }))
+                      : [],
+                })),
+              }))
+            : [],
         },
         meta: responseMeta,
         error: null,
@@ -128,15 +208,17 @@ test("double-click opens the exact share class; local tabs preserve background U
   await row(page, "102").locator('[col-id="fund_code"]').dblclick();
   const dialog = page.getByRole("dialog", { name: "基金详情" });
   await expect(dialog.getByRole("heading", { name: "Alpha C" })).toBeVisible();
-  await dialog.getByText("查看图表数值").click();
-  await expect(
-    dialog.getByRole("gridcell", { name: "2.34", exact: true }),
-  ).toBeVisible();
+  await expect(dialog.getByText("2.3400", { exact: true })).toBeVisible();
   expect(
     requests.some((url) => url.pathname.endsWith("/factor-analysis")),
-  ).toBe(false);
-  await dialog.getByRole("tab", { name: "因子分析" }).click();
-  await dialog.getByRole("button", { name: "近5年" }).click();
+  ).toBe(true);
+  await dialog
+    .getByRole("tab", { name: "滚动指标演变 (Sharpe/波动率)" })
+    .click();
+  await dialog
+    .getByRole("radiogroup", { name: "分析周期" })
+    .getByText("5年", { exact: true })
+    .click();
   await expect
     .poll(() =>
       requests.some(
@@ -146,13 +228,7 @@ test("double-click opens the exact share class; local tabs preserve background U
       ),
     )
     .toBe(true);
-  for (const suffix of [
-    "",
-    "/nav-series",
-    "/evaluations",
-    "/scores",
-    "/factor-analysis",
-  ]) {
+  for (const suffix of ["", "/nav-series", "/factor-analysis"]) {
     const request = requests.find(
       (url) => url.pathname === `/api/v1/funds/102${suffix}`,
     );
@@ -160,17 +236,18 @@ test("double-click opens the exact share class; local tabs preserve background U
   }
   await expect(
     dialog.getByRole("link", { name: "在数据中心抓取基本信息" }),
-  ).toHaveAttribute(
-    "href",
-    "/data-ingestion?fund_id=000001&dataset=BASIC_INFO",
-  );
-  await expect(dialog.getByText(/申购状态.*固定.*开放/)).toBeVisible();
+  ).toHaveCount(0);
+  await expect(dialog.getByText(/申购状态.*固定.*开放/)).toHaveCount(0);
   await expect(
     dialog.getByRole("link", { name: "打开独立详情页" }),
-  ).toHaveAttribute(
-    "href",
-    /\/funds\/000001\?.*share_class_id=102.*tab=factors.*factor_period=5Y/,
-  );
+  ).toHaveCount(0);
+  expect(
+    requests.some((url) =>
+      /\/(evaluations|scores|basic-info-history|classification-history)$/.test(
+        url.pathname,
+      ),
+    ),
+  ).toBe(false);
   expect(page.url()).toBe(backgroundUrl);
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
@@ -180,14 +257,10 @@ test("double-click opens the exact share class; local tabs preserve background U
   await row(page, "101")
     .getByRole("button", { name: "查看详情 Alpha A" })
     .click();
-  await expect(dialog.getByRole("tab", { name: "净值" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await dialog.getByText("查看图表数值").click();
   await expect(
-    dialog.getByRole("gridcell", { name: "1.24", exact: true }),
-  ).toBeVisible();
+    dialog.getByRole("tab", { name: "净值走势 vs 基准超额" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByText("1.2400", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "关闭基金详情" }).click();
   await expect(dialog).not.toBeVisible();
   await expect(
@@ -251,7 +324,7 @@ test("row links never trigger the modal; keyboard button opens it and traps focu
   ).toHaveAttribute("href", /share_class_id=101/);
 });
 
-test("mobile touch alternative opens a full-screen detail dialog", async ({
+test("mobile touch alternative fills the content below the header", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -266,27 +339,151 @@ test("mobile touch alternative opens a full-screen detail dialog", async ({
   await expect(dialog.getByRole("heading", { name: "Alpha A" })).toBeVisible();
   const box = await dialog.boundingBox();
   expect(box?.width).toBe(390);
+  expect(box?.x).toBe(0);
+  expect(box?.y).toBe(64);
+  expect(box?.height).toBe(780);
   await dialog.getByRole("button", { name: "关闭基金详情" }).click();
   await expect(trigger).toBeFocused();
 });
+
+test("detail fills the desktop content area without overlapping export", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await installFixtures(page, true);
+  await page.goto("/funds");
+  await row(page, "101")
+    .getByRole("button", { name: "查看详情 Alpha A" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "基金详情" });
+  await expect(dialog.getByRole("heading", { name: "Alpha A" })).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box?.x).toBe(240);
+  expect(box?.y).toBe(64);
+  expect(box?.width).toBe(1200);
+  expect(box?.height).toBe(936);
+  const close = await dialog
+    .getByRole("button", { name: "关闭基金详情" })
+    .boundingBox();
+  const exportButton = await dialog
+    .getByRole("button", { name: "导出简报" })
+    .boundingBox();
+  expect(close).not.toBeNull();
+  expect(exportButton).not.toBeNull();
+  expect(close!.y + close!.height).toBeLessThanOrEqual(exportButton!.y);
+  await page.screenshot({
+    path: testInfo.outputPath("fund-detail-content-area.png"),
+  });
+});
+
+for (const viewport of [
+  { width: 1440, height: 1000 },
+  { width: 390, height: 844 },
+]) {
+  test(`prototype dashboard matches the supplied content at ${viewport.width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await installFixtures(page, true);
+    await page.goto("/funds/000001?share_class_id=101&as_of_date=2026-09-16");
+    await expect(page.getByRole("heading", { name: "Alpha A" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /量化多因子多维矩阵/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "收益指标 (4)", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await expect(page.locator("canvas").first()).toBeVisible();
+    await expect
+      .poll(() =>
+        page
+          .locator("canvas")
+          .first()
+          .evaluate((canvas: HTMLCanvasElement) => {
+            const pixels = canvas
+              .getContext("2d")!
+              .getImageData(0, 0, canvas.width, canvas.height).data;
+            let visible = 0;
+            for (let offset = 3; offset < pixels.length; offset += 4)
+              if (pixels[offset] > 0) visible++;
+            return visible;
+          }),
+      )
+      .toBeGreaterThan(100);
+    await expect(page.locator("dl dt")).toHaveCount(26);
+    await expect(page.getByRole("tab")).toHaveCount(3);
+    await expect(
+      page
+        .getByRole("region", { name: "多周期数值" })
+        .getByRole("columnheader")
+        .filter({ hasText: /^(1个月|3个月|6个月|1年|3年|5年|成立以来)/ }),
+    ).toHaveCount(7);
+    for (const text of [
+      "五维分类与证据",
+      "数据抓取",
+      "评分归因",
+      "点时数据：是",
+      "查看图表数值",
+      "加载全部周期",
+      "返回基金研究",
+    ]) {
+      await expect(
+        page.getByRole("main").getByText(text, { exact: true }),
+      ).toHaveCount(0);
+    }
+    await expect(
+      page.getByRole("region", { name: "多周期数值" }).getByText("计算中"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("region", { name: "多周期数值" }).getByText("未加载"),
+    ).toHaveCount(0);
+    const matrix = page.locator('[data-category="RET"]').locator("..");
+    await matrix.screenshot({
+      path: testInfo.outputPath(`factor-matrix-${viewport.width}.png`),
+    });
+    if (viewport.width < 600) {
+      const panorama = page.getByRole("region", { name: "多周期数值" });
+      expect(
+        await panorama.evaluate(
+          (element) => element.scrollWidth > element.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({
+      path: testInfo.outputPath(`fund-dashboard-${viewport.width}.png`),
+      fullPage: true,
+    });
+    await page
+      .getByRole("tab", { name: "滚动指标演变 (Sharpe/波动率)" })
+      .click();
+    await expect(
+      page.getByRole("tab", { name: "滚动指标演变 (Sharpe/波动率)" }),
+    ).toHaveAttribute("aria-selected", "true");
+  });
+}
 
 test("an exact share-class route survives reload and preserves tab, period and safe return URL", async ({
   page,
 }) => {
   const requests = await installFixtures(page);
   await page.goto(
-    "/funds/000001?share_class_id=102&as_of_date=2026-09-16&tab=factors&factor_period=5Y&return_to=%2Ffunds%3Fpage%3D3",
+    "/funds/000001?share_class_id=102&as_of_date=2026-09-16&tab=rolling&factor_period=5Y&return_to=%2Ffunds%3Fpage%3D3",
   );
   await expect(page.getByRole("heading", { name: "Alpha C" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "因子分析" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
   await expect(
-    page.getByRole("link", { name: "返回基金研究" }),
-  ).toHaveAttribute("href", "/funds?page=3");
+    page.getByRole("tab", { name: "滚动指标演变 (Sharpe/波动率)" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("link", { name: "返回基金研究" })).toHaveCount(0);
   const beforeReload = requests.filter(
-    (url) => url.pathname === "/api/v1/funds/102/factor-analysis",
+    (url) =>
+      url.pathname === "/api/v1/funds/102/factor-analysis" &&
+      url.searchParams.get("evaluation_period") === "5Y",
   ).length;
   await page.reload();
   await expect(page.getByRole("heading", { name: "Alpha C" })).toBeVisible();

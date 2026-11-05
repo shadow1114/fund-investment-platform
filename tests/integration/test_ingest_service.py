@@ -429,3 +429,51 @@ def test_explicit_identity_reassignment_remains_reported(db_session, service):
     assert conflict.existing_share_class_id == identity.share_class_id
     assert conflict.incoming_share_class_id == other.id
     assert db_session.query(ProviderFundIdentity).filter_by(provider_fund_id='000001').count() == 1
+
+
+YIELD_FRAME = pd.DataFrame({
+    "曲线名称": ["中债国债收益率曲线", "中债商业银行普通债收益率曲线(AAA)"],
+    "日期": ["2024-01-02", "2024-01-02"],
+    "3月": [1.80, 2.30], "6月": [1.90, 2.40], "1年": [2.00, 2.50], "3年": [2.20, 2.60],
+    "5年": [2.30, 2.70], "7年": [2.40, 2.80], "10年": [2.56, 2.89], "30年": [2.80, 3.00],
+})
+
+
+def _risk_free_service(db_session, frame, calls):
+    def caller(name, **params):
+        assert name == "bond_china_yield"
+        calls.append(params)
+        return frame
+
+    adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=caller)
+    return IngestService(db_session, adapter, disclosure_lag_days={"risk_free_rate": 1})
+
+
+def test_risk_free_ingest_keeps_only_treasury_curve(db_session):
+    from fip.services.data_service.models.market import RiskFreeRate
+
+    calls: list[dict] = []
+    service = _risk_free_service(db_session, YIELD_FRAME, calls)
+    assert service.ingest_risk_free_rate(dt.date(2024, 1, 1), dt.date(2024, 1, 10)) == 8
+    rows = db_session.query(RiskFreeRate).all()
+    assert {row.curve_code for row in rows} == {"CN_TREASURY"}
+    assert {row.currency for row in rows} == {"CNY"}
+    ten_year = next(row for row in rows if row.tenor == "10Y")
+    assert ten_year.rate == Decimal("0.0256")
+    assert ten_year.availability_quality == "INFERRED"
+    assert ten_year.available_at.date() > ten_year.effective_at
+    assert calls == [{"start_date": "20240101", "end_date": "20240110"}]
+
+
+def test_risk_free_ingest_splits_windows_and_is_idempotent(db_session):
+    calls: list[dict] = []
+    service = _risk_free_service(db_session, YIELD_FRAME, calls)
+    service.ingest_risk_free_rate(dt.date(2022, 1, 1), dt.date(2024, 1, 10))
+    def _day(value: str) -> dt.date:
+        return dt.datetime.strptime(value, "%Y%m%d").date()
+
+    assert all(
+        _day(c["end_date"]) - _day(c["start_date"]) < dt.timedelta(days=365) for c in calls
+    )
+    assert calls[0]["start_date"] == "20220101" and calls[-1]["end_date"] == "20240110"
+    assert service.ingest_risk_free_rate(dt.date(2024, 1, 1), dt.date(2024, 1, 10)) == 0

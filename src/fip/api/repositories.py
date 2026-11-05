@@ -74,13 +74,14 @@ _TENOR_DAYS = {
     "10Y": 3650,
     "30Y": 10950,
 }
-_TARGET_TENOR_DAYS = {tenor: _TENOR_DAYS[tenor] for tenor in ("1M", "6M", "1Y", "3Y", "5Y")}
+_TARGET_TENOR_DAYS = {
+    tenor: _TENOR_DAYS[tenor] for tenor in ("1M", "3M", "6M", "1Y", "3Y", "5Y")
+}
 
 
 def _resolve_risk_free_curve(
-    points: tuple[RiskFreeRatePoint, ...], target_tenor: str, currency: str
+    points: tuple[RiskFreeRatePoint, ...], target_days: int, currency: str
 ) -> tuple[tuple[date, Decimal, str], ...]:
-    target_days = _TARGET_TENOR_DAYS[target_tenor]
     by_date: dict[date, list[RiskFreeRatePoint]] = {}
     for point in points:
         if point.tenor in _TENOR_DAYS:
@@ -878,11 +879,23 @@ class FundRepository(RepositoryAdapter):
         _ = frequency
         _fund, share_class = self._required_share_class(identifier)
         view_date = _query_date(as_of_date) or date.today()
-        start = _query_date(date_from) or share_class.inception_date or view_date
+        visible_until = resolve_visible_until(view_date)
+        start = (
+            _query_date(date_from)
+            or share_class.inception_date
+            # Many ingested share classes lack an inception date; fall back to the
+            # first visible NAV instead of collapsing the range to the view date.
+            or self._session().scalar(
+                select(func.min(FundNav.effective_at)).where(
+                    FundNav.share_class_id == share_class.id,
+                    FundNav.available_at <= visible_until,
+                )
+            )
+            or view_date
+        )
         end = _query_date(date_to) or view_date
         if end < start:
             raise InvalidQueryError("date_from must not be after date_to")
-        visible_until = resolve_visible_until(view_date)
         data: list[dict[str, object]]
         if nav_type == "ADJUSTED":
             try:
@@ -977,19 +990,36 @@ class FundRepository(RepositoryAdapter):
     ) -> Mapping[str, object]:
         """Calculate display factors from PIT inputs without persisting factor values."""
         from fip.platform.decision_data.context import RuntimeMode
-        from fip.services.factor_service.policy import load_evaluation_policy
+        from fip.services.fund_service.policy import load_evaluation_policy
 
-        periods_months = {"1M": 1, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60}
-        months = periods_months[evaluation_period]
+        periods_months = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60}
         view_date = _query_date(as_of_date) or date.today()
-        year, month_index = divmod(view_date.year * 12 + view_date.month - 1 - months, 12)
-        target_month = month_index + 1
-        start = date(
-            year, target_month, min(view_date.day, calendar.monthrange(year, target_month)[1])
-        )
         visible_until = resolve_visible_until(view_date)
         session = self._session()
         fund, share_class = self._required_share_class(identifier)
+        if evaluation_period == "ALL":
+            start = (
+                share_class.inception_date
+                or session.scalar(
+                    select(func.min(FundNav.effective_at)).where(
+                        FundNav.share_class_id == share_class.id,
+                        FundNav.available_at <= visible_until,
+                    )
+                )
+                or view_date
+            )
+            span_days = max((view_date - start).days, 1)
+            months = max(1, round(span_days / 30.4375))
+            # Match the risk-free tenor to the actual span, capped at the longest tenor.
+            risk_free_target_days = min(span_days, _TENOR_DAYS["30Y"])
+        else:
+            months = periods_months[evaluation_period]
+            year, month_index = divmod(view_date.year * 12 + view_date.month - 1 - months, 12)
+            target_month = month_index + 1
+            start = date(
+                year, target_month, min(view_date.day, calendar.monthrange(year, target_month)[1])
+            )
+            risk_free_target_days = _TARGET_TENOR_DAYS[evaluation_period]
 
         # Read one prior week so the return at the selected period's first date has
         # a valid preceding NAV. Adjusted NAV itself is recalculated under PIT.
@@ -1033,7 +1063,7 @@ class FundRepository(RepositoryAdapter):
             share_class.base_currency, start, view_date
         )
         resolved_rates = _resolve_risk_free_curve(
-            risk_free_curve, evaluation_period, share_class.base_currency
+            risk_free_curve, risk_free_target_days, share_class.base_currency
         )
         latest_rate = float(resolved_rates[-1][1]) if resolved_rates else None
         rates_by_date = {effective_at: float(rate) for effective_at, rate, _ in resolved_rates}

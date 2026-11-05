@@ -412,7 +412,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [1M, 6M, 1Y, 3Y, 5Y]
+            enum: [1M, 3M, 6M, 1Y, 3Y, 5Y, ALL]
             default: 1Y
         - $ref: "#/components/parameters/AsOfDate"
       responses:
@@ -2214,7 +2214,7 @@ components:
       required: [fund_id, evaluation_period, as_of_date, factor_categories]
       properties:
         fund_id: { type: string }
-        evaluation_period: { type: string, enum: [1M, 6M, 1Y, 3Y, 5Y] }
+        evaluation_period: { type: string, enum: [1M, 3M, 6M, 1Y, 3Y, 5Y, ALL] }
         as_of_date: { type: string, format: date }
         factor_categories:
           type: array

@@ -17,6 +17,7 @@ from fip.services.data_service.adapters.akshare.parse import (
     parse_distribution_frame,
     parse_nav_frame,
     parse_split_frame,
+    parse_yield_curve_frame,
 )
 from fip.services.data_service.batch import (
     BatchIngestResult,
@@ -41,7 +42,7 @@ from fip.services.data_service.models.governance import (
     DataProviderDataset,
     DataSourcePriority,
 )
-from fip.services.data_service.models.market import FundDistribution, FundNav
+from fip.services.data_service.models.market import FundDistribution, FundNav, RiskFreeRate
 from fip.services.data_service.models.raw import CanonicalRaw, RawPayload
 from fip.services.data_service.normalization.adjusted_nav import AdjustedNavUnavailable
 from fip.services.data_service.normalization.backfill import backfill_adjusted_nav
@@ -100,6 +101,13 @@ class _MergedEvent:
 
 _INGEST_DATASET_CODES = ("fund_nav", "fund_distribution", "fund_split")
 
+# 只有国债曲线是无风险曲线。读取侧按 (currency, tenor) 取数且不区分曲线，
+# 若把信用债曲线一并写入，R_f 会被静默替换成信用利率。
+RISK_FREE_CURVE_CODE = "CN_TREASURY"
+RISK_FREE_CURRENCY = "CNY"
+# bond_china_yield 要求单次区间小于一年。
+_YIELD_CURVE_WINDOW = dt.timedelta(days=360)
+
 
 class IngestService:
     """灌数编排。
@@ -138,9 +146,10 @@ class IngestService:
         *,
         rule_version: str,
         field_name: str = "available_at",
+        dataset_codes: Sequence[str] = _INGEST_DATASET_CODES,
     ) -> "IngestService":
         lags: dict[str, int] = {}
-        for dataset_code in _INGEST_DATASET_CODES:
+        for dataset_code in dataset_codes:
             dataset = session.execute(
                 select(DataProviderDataset)
                 .join(DataProvider, DataProvider.id == DataProviderDataset.provider_id)
@@ -740,6 +749,57 @@ class IngestService:
             )
             inserted += 1
         self._session.flush()
+        return inserted
+
+    # ---------- 无风险利率 ----------
+
+    def ingest_risk_free_rate(self, date_from: dt.date, date_to: dt.date) -> int:
+        """按不足一年的窗口抓取中债国债收益率曲线，写入 market.risk_free_rate。"""
+        if date_to < date_from:
+            raise ValueError("date_from must not be after date_to")
+        inserted = 0
+        window_start = date_from
+        while window_start <= date_to:
+            window_end = min(window_start + _YIELD_CURVE_WINDOW, date_to)
+            record = self._adapter.fetch(
+                "risk_free_rate",
+                start_date=window_start.strftime("%Y%m%d"),
+                end_date=window_end.strftime("%Y%m%d"),
+            )
+            payload = self._store_raw(record)
+            for parsed in parse_yield_curve_frame(record.payload):
+                if parsed.curve_code != RISK_FREE_CURVE_CODE:
+                    continue
+                keys = {
+                    "curve_code": parsed.curve_code,
+                    "currency": RISK_FREE_CURRENCY,
+                    "tenor": parsed.tenor,
+                    "effective_at": parsed.effective_at,
+                }
+                latest = (
+                    self._session.execute(
+                        select(RiskFreeRate)
+                        .filter_by(**keys)
+                        .order_by(RiskFreeRate.version.desc())
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+                if latest is not None and latest.rate == parsed.rate:
+                    continue  # 值未变，不产生新版本
+                self._session.add(
+                    RiskFreeRate(
+                        **keys,
+                        version=1 if latest is None else latest.version + 1,
+                        rate=parsed.rate,
+                        raw_payload_id=payload.id,
+                        **self._times("risk_free_rate", parsed.effective_at, record.ingested_at),
+                    )
+                )
+                inserted += 1
+            self._session.flush()
+            window_start = window_end + dt.timedelta(days=1)
         return inserted
 
     def rebuild_adjusted_nav(self, share_class_id: int, decision_at: dt.date) -> int:

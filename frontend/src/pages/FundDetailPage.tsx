@@ -1,5 +1,5 @@
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import type { FundFactorAnalysisEvaluationPeriod } from "../api/generated/m17.schemas";
+import { useParams, useSearchParams } from "react-router-dom";
+import type { FundAnalyticsPeriod } from "../features/funds/FactorAnalysisPanel";
 import {
   FundDetailContent,
   factorPeriods,
@@ -27,20 +27,16 @@ export const FundDetailPage = () => {
   const returnTo = validReturnTo(search.get("return_to"), asOfDate);
   const rawTab = search.get("tab");
   const tab: FundDetailTab =
-    rawTab === "evaluation" || rawTab === "score" || rawTab === "factors"
-      ? rawTab
-      : "nav";
-  const rawPeriod = search.get(
-    "factor_period",
-  ) as FundFactorAnalysisEvaluationPeriod;
+    rawTab === "drawdown" || rawTab === "rolling" ? rawTab : "nav";
+  const rawPeriod = search.get("factor_period") as FundAnalyticsPeriod;
   const factorPeriod = factorPeriods.includes(rawPeriod) ? rawPeriod : "1Y";
   return (
     <FundDetailContent
       fundId={fundId}
+      fundCode={search.get("fund_code") || undefined}
       shareClassId={search.get("share_class_id") || undefined}
       asOfDate={asOfDate}
       returnTo={returnTo}
-      actions={<Link to={returnTo}>返回基金研究</Link>}
       state={{
         tab,
         factorPeriod,
@@ -52,7 +48,6 @@ export const FundDetailPage = () => {
         },
         onFactorPeriodChange: (value) => {
           const next = new URLSearchParams(search);
-          next.set("tab", "factors");
           next.set("factor_period", value);
           setSearch(next);
         },
