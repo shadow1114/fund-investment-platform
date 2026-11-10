@@ -43,7 +43,7 @@ paths:
           schema:
             type: string
             pattern: "^[0-9]{6}$"
-        - name: company_name
+        - name: fund_company
           in: query
           description: Exact management company name; omit to include every company.
           schema:
@@ -829,7 +829,7 @@ components:
         enum:
           - fund_code
           - fund_name
-          - company_name
+          - fund_company
           - sub_status
           - inception_date
           - aum
@@ -1809,7 +1809,7 @@ components:
             - string
             - "null"
           pattern: "^[0-9]{6}$"
-        company_name:
+        fund_company:
           type:
             - string
             - "null"
@@ -1955,9 +1955,9 @@ components:
     FundManagementCompany:
       type: object
       required:
-        - company_name
+        - fund_company
       properties:
-        company_name:
+        fund_company:
           type: string
     FundManagementCompaniesMeta:
       required:

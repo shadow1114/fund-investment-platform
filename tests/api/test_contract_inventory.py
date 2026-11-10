@@ -58,14 +58,14 @@ def test_fund_company_options_contract_and_fund_list_query_fields_are_registered
             component = item["$ref"].rsplit("/", 1)[-1]
             item = document["components"]["parameters"][component]
         parameters[item["name"]] = item
-    assert {"fund_code", "company_name", "sub_status", "asset_class", "page_size"} <= set(
+    assert {"fund_code", "fund_company", "sub_status", "asset_class", "page_size"} <= set(
         parameters
     )
     assert parameters["sub_status"]["schema"]["enum"] == ["开放"]
     assert parameters["sort"]["schema"]["enum"] == [
         "fund_code",
         "fund_name",
-        "company_name",
+        "fund_company",
         "sub_status",
         "inception_date",
         "aum",
@@ -78,7 +78,7 @@ def test_fund_company_options_contract_and_fund_list_query_fields_are_registered
         "sub_status",
         "manager_ids",
     } <= set(item["required"])
-    assert item["properties"]["company_name"]["type"] == ["string", "null"]
+    assert item["properties"]["fund_company"]["type"] == ["string", "null"]
     assert item["properties"]["fund_code"]["pattern"] == "^[0-9]{6}$"
     assert item["properties"]["sub_status"]["enum"] == ["开放", "UNKNOWN"]
     assert "subscription_status_source" in schemas["FundListMeta"]["required"]

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pandas as pd
 import pytest
+from sqlalchemy import func
 
 from fip.platform.decision_data.context import (
     DecisionExecutionContext,
@@ -30,8 +31,15 @@ FIXED_NOW = dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC)
 FUND_LIST = pd.DataFrame({
     "基金代码": ["000001", "000002"],
     "基金简称": ["测试蓝筹混合A", "测试蓝筹混合C"],
-    "基金类型": ["混合型", "混合型"],
+    "基金类型": ["混合型-灵活", "混合型-灵活"],
 })
+
+
+def _detail_frame(code: str, company="测试基金管理有限公司", manager="张三 李四", aum="29.19亿"):
+    return pd.DataFrame({
+        "item": ["基金代码", "基金名称", "最新规模", "基金公司", "基金经理"],
+        "value": [code, "测试", aum, company, manager],
+    })
 
 NAV_FRAME = pd.DataFrame({
     "净值日期": ["2020-01-02", "2020-01-03"],
@@ -50,6 +58,8 @@ def _fake_caller(name, **params):
     indicator = params.get("indicator")
     if name == "fund_name_em":
         return FUND_LIST
+    if name == "fund_individual_basic_info_xq":
+        return _detail_frame(params["symbol"])
     if indicator == "单位净值走势":
         return NAV_FRAME
     if indicator == "分红送配详情":
@@ -165,6 +175,8 @@ def _merge_caller(name, **params):
     indicator = params.get("indicator")
     if name == "fund_name_em":
         return FUND_LIST
+    if name == "fund_individual_basic_info_xq":
+        return _detail_frame(params["symbol"])
     if indicator == "单位净值走势":
         return NAV_FRAME
     if indicator == "分红送配详情":
@@ -354,6 +366,8 @@ RENAMED_FUND_LIST = pd.DataFrame({
 def _renamed_caller(name, **params):
     if name == "fund_name_em":
         return RENAMED_FUND_LIST
+    if name == "fund_individual_basic_info_xq":
+        return _detail_frame(params["symbol"])
     raise AssertionError(f"未预期的调用 {name} {params}")
 
 
@@ -371,7 +385,7 @@ def test_reassignment_conflict_is_collected_not_raised(db_session, service):
     result = _renamed_service(db_session).ingest_fund_list()
 
     assert result.reassignments == ()
-    assert any("name changed" in item for item in result.classification_warnings)
+    assert any("name changed" in item for item in result.warnings)
     identity = db_session.query(ProviderFundIdentity).filter_by(
         provider_fund_id="000001", valid_to=None).one()
     assert identity.share_class_id == a.id
@@ -386,7 +400,7 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
         display_name="测试蓝筹混合A").one().id
 
     result = _renamed_service(db_session).ingest_fund_list()
-    assert any("name changed" in item for item in result.classification_warnings)
+    assert any("name changed" in item for item in result.warnings)
 
     provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     mapping = {
@@ -400,23 +414,56 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
     assert "000003" in mapping
     assert mapping["000001"] == a_id
     # raw payload 也照常留存（重跑抓到的这一份不得因冲突被丢弃）。
-    assert db_session.query(RawPayload).count() == 2
+    fund_list_payloads = [
+        payload
+        for payload in db_session.query(RawPayload).all()
+        if "symbol" not in payload.request_params
+    ]
+    assert len(fund_list_payloads) == 2
 
 
-def test_list_type_classification_has_retained_raw_and_is_idempotent(db_session, service):
-    from fip.services.data_service.classification.service import ClassificationService
-    from fip.services.data_service.models.fund import FundClassificationRevision
-
+def test_fund_list_populates_asset_type_and_snowball_details(db_session, service):
+    before = db_session.query(func.max(RawPayload.id)).scalar() or 0
     service.ingest_fund_list()
-    fund = db_session.query(Fund).first()
-    classification = ClassificationService(db_session)
-    revision = classification.latest(fund.id)
-    snapshot = classification.intervals(revision.id)[0][2]
-    assert snapshot.asset_class.value == 'MIXED'
-    assert snapshot.asset_class.evidence[0].payload_ref.startswith('raw_payload:')
-    count = db_session.query(FundClassificationRevision).count()
-    service.ingest_fund_list()
-    assert db_session.query(FundClassificationRevision).count() == count
+    share = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one()
+    fund = db_session.get(Fund, share.fund_id)
+    assert fund.asset_type == "混合型"
+    assert fund.fund_company == "测试基金管理有限公司"
+    assert fund.fund_manager == "张三 李四"
+    assert fund.fund_aum == Decimal("2919000000.00")
+    datasets = [
+        payload.request_params.get("symbol")
+        for payload in db_session.query(RawPayload).filter(RawPayload.id > before).all()
+        if payload.request_params.get("symbol")
+    ]
+    assert sorted(datasets) == ["000001", "000002"]
+
+
+def test_fund_detail_failure_only_warns_for_that_fund(db_session):
+    def caller(name, **params):
+        if name == "fund_name_em":
+            return FUND_LIST
+        if params["symbol"] == "000002":
+            raise ConnectionError("snowball down")
+        return _detail_frame(params["symbol"], aum="2177.53万")
+
+    adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=caller)
+    result = IngestService(db_session, adapter, disclosure_lag_days=1).ingest_fund_list(
+        detail_workers=2
+    )
+
+    assert result.created == 2
+    assert any(
+        item.startswith("000002: fund detail unavailable") for item in result.warnings
+    )
+    share = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one()
+    fund = db_session.get(Fund, share.fund_id)
+    assert fund.fund_aum == Decimal("21775300.00")
+
+
+def test_fund_list_rejects_invalid_detail_worker_count(service):
+    with pytest.raises(ValueError):
+        service.ingest_fund_list(detail_workers=0)
 
 
 def test_explicit_identity_reassignment_remains_reported(db_session, service):

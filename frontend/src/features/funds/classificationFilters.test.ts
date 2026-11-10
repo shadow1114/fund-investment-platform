@@ -51,7 +51,7 @@ it("round-trips the five research filters using the fund_code and asset_class AP
     ...emptyFundFilters(),
     fund_name: "Alpha",
     fund_code: "000001",
-    company_name: "永赢基金",
+    fund_company: "永赢基金",
     asset_class: "EQUITY",
     sub_status: "开放",
   };
@@ -59,14 +59,14 @@ it("round-trips the five research filters using the fund_code and asset_class AP
 
   expect(search.get("fund_name")).toBe("Alpha");
   expect(search.get("fund_code")).toBe("000001");
-  expect(search.get("company_name")).toBe("永赢基金");
+  expect(search.get("fund_company")).toBe("永赢基金");
   expect(search.get("asset_class")).toBe("EQUITY");
   expect(search.get("sub_status")).toBe("开放");
   expect(search.has("fund_type")).toBe(false);
   expect(parseParams(search)).toMatchObject({
     fund_name: "Alpha",
     fund_code: "000001",
-    company_name: "永赢基金",
+    fund_company: "永赢基金",
     asset_class: "EQUITY",
     sub_status: "开放",
   });

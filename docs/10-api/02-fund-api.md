@@ -91,7 +91,7 @@
 |---|---|---|
 | `fund_name` | string | 去首尾空白、不区分大小写的字面量子串；`%`、`_`、引号均不是查询表达式 |
 | `fund_code` | string | 恰好六位 ASCII 数字，保留前导零；匹配查询时点有效且可见的 AKSHARE 份额映射，非法值返回 422 |
-| `company_name` | string | 去首尾空白后精确匹配管理公司展示名；当前列或 PIT 快照，见下文 |
+| `fund_company` | string | 去首尾空白后精确匹配管理公司展示名；当前列或 PIT 快照，见下文 |
 | `asset_class` | enum, multi | `EQUITY / BOND / MIXED / MONEY_MARKET / FOF / REIT / COMMODITY / OTHER / UNKNOWN`；值来自当前分类目录 |
 | `sub_status` | enum | 仅支持 `开放`；其他值 422。这是占位字段，不是真实申购可用性 |
 | `fund_type` | string, multi | 保留旧单码兼容筛选，不替代 `asset_class`；与其他筛选同时应用 |
@@ -103,13 +103,13 @@
 | `aum_min` / `aum_max` | number | 当前缺少可靠规模来源，传入时明确 422；不静默忽略 |
 | `as_of_date` | date | 不传为当前视图；传入按可见修订/区间与来源快照解析 PIT，不借用未来映射或当前公司名 |
 | `page` / `page_size` | integer | 一基页码，默认 1 / 20；路由结构上限 500，实际还受全局请求上限约束（默认 200）；研究 UI 固定提供 20 / 50 / 200（200 已允许） |
-| `sort` / `order` | enum | `fund_code / fund_name / company_name / sub_status / inception_date / aum`；默认基金名称升序；`asc / desc` |
+| `sort` / `order` | enum | `fund_code / fund_name / fund_company / sub_status / inception_date / aum`；默认基金名称升序；`asc / desc` |
 
 PostgreSQL 在同一一致性快照内完成筛选、每份额唯一计数、排序与 `LIMIT/OFFSET`，不取全库后切片。主排序空值置后，同值追加产品公开 `fund_id` 升序、内部份额主键升序，以保证分页稳定。空集合及越界页返回 `data: []` 并保留真实总数；空集合 `total_pages: 0`。无有效供应商映射时 `fund_code: null`，不丢失份额；一个产品多份额及同名产品仍各有稳定 `share_class_id`。
 
-`company_name` 是产品当前展示投影，不是公司实体 ID：当前查询取 `fund.fund.company_name`。基本信息抓取从基金详情源的“基金公司”字段取值，并校验来源基金代码与请求代码一致；不得从“基金管理人”或“基金经理”字段推断。PIT 查询在每条当时可见的不可变 Basic Info History 快照内，优先取去空白后的 `normalized_fields.company_name`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；两个字段的回退不跨快照拼接，绝不回退到当前投影或未来快照。没有可用可见快照时返回 null。
+`fund_company` 是产品当前展示投影，不是公司实体 ID：当前查询取 `fund.fund.fund_company`。基本信息抓取从基金详情源的“基金公司”字段取值，并校验来源基金代码与请求代码一致；不得从“基金管理人”或“基金经理”字段推断。PIT 查询在每条当时可见的不可变 Basic Info History 快照内，优先取去空白后的 `normalized_fields.fund_company`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；两个字段的回退不跨快照拼接，绝不回退到当前投影或未来快照。没有可用可见快照时返回 null。
 
-当前列表响应的 `management_company_id` 固定为 null：尚无规范化管理公司 ID，不能由 `company_name` 推造；传入该 ID 筛选仍明确返回 422。
+当前列表响应的 `management_company_id` 固定为 null：尚无规范化管理公司 ID，不能由 `fund_company` 推造；传入该 ID 筛选仍明确返回 422。
 
 **这是 Filtering，不是 Eligibility Rules** ⚠️
 
@@ -124,7 +124,7 @@ PostgreSQL 在同一一致性快照内完成筛选、每份额唯一计数、排
       "fund_id": "000001",
       "share_class_id": "101",
       "fund_code": "000001",
-      "company_name": "示例基金管理有限公司",
+      "fund_company": "示例基金管理有限公司",
       "sub_status": "开放",
       "fund_name": "...",
       "share_class": "A",
@@ -150,7 +150,7 @@ PostgreSQL 在同一一致性快照内完成筛选、每份额唯一计数、排
 
 ### 4.1.1 GET /fund-management-companies — 独立公司选项
 
-只读端点；可选 `as_of_date` 与列表相同。返回全库范围去空、去重、按名称升序的 `data: [{"company_name": "…"}]` 及标准 meta/error，不跟随基金列表当前页或其他筛选缩小。PIT 同样读取当时可见快照，没有历史来源时不使用当前投影兜底。
+只读端点；可选 `as_of_date` 与列表相同。返回全库范围去空、去重、按名称升序的 `data: [{"fund_company": "…"}]` 及标准 meta/error，不跟随基金列表当前页或其他筛选缩小。PIT 同样读取当时可见快照，没有历史来源时不使用当前投影兜底。
 
 ### 4.2 GET /funds/{fund_id} — 基金详情
 

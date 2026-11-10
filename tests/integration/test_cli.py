@@ -269,7 +269,13 @@ def test_ingest_funds_really_commits_the_successful_part(committed_session, db_e
         share_classes = dict(
             probe.execute(text("SELECT display_name, id FROM fund.fund_share_class")).all()
         )
-        payloads = probe.execute(text("SELECT count(*) FROM raw.raw_payload")).scalar_one()
+        payloads = probe.execute(
+            text(
+                "SELECT count(*) FROM raw.raw_payload p "
+                "JOIN governance.data_provider_dataset d ON d.id = p.dataset_id "
+                "WHERE d.dataset_code = 'fund_list'"
+            )
+        ).scalar_one()
 
     assert (
         mapping["000003"] == share_classes["测试另一只混合A"]
@@ -429,6 +435,8 @@ def test_review_cli_requires_operator_allowlist(db_session, ingested, monkeypatc
 
     monkeypatch.setattr(cli, "_session", lambda: contextlib.nullcontext(db_session))
     monkeypatch.delenv("FIP_CLASSIFICATION_REVIEWERS", raising=False)
+    # ingest-funds 不再分类；复核单由独立的 classify-funds 产生。
+    cli.main(["classify-funds", "--actor", "operator", "--symbol", "000001"])
     case = db_session.query(FundClassificationReviewCase).first()
     with pytest.raises(PermissionError):
         cli.main(

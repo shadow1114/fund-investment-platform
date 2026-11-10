@@ -53,8 +53,8 @@ def test_basic_info_persists_fund_company_not_management_person_or_manager(db_se
 
     fund = db_session.get(Fund, fund_id)
     history = db_session.query(FundBasicInfoHistory).filter_by(fund_id=fund_id).one()
-    assert fund.company_name == "华夏基金"
-    assert history.normalized_fields["company_name"] == "华夏基金"
+    assert fund.fund_company == "华夏基金"
+    assert history.normalized_fields["fund_company"] == "华夏基金"
     assert history.raw_fields["基金公司"] == " 华夏基金 "
     assert "基金管理人" not in history.raw_fields
     assert "基金经理" not in history.raw_fields
@@ -70,7 +70,7 @@ def test_missing_company_never_erases_projection_and_real_change_versions_histor
     company_row["基金公司"] = "  "
 
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
-    assert db_session.get(Fund, fund_id).company_name == "公司甲"
+    assert db_session.get(Fund, fund_id).fund_company == "公司甲"
 
     company_row["基金公司"] = "公司乙"
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
@@ -80,8 +80,8 @@ def test_missing_company_never_erases_projection_and_real_change_versions_histor
         .order_by(FundBasicInfoHistory.version)
         .all()
     )
-    assert db_session.get(Fund, fund_id).company_name == "公司乙"
-    assert [row.normalized_fields.get("company_name") for row in histories] == [
+    assert db_session.get(Fund, fund_id).fund_company == "公司乙"
+    assert [row.normalized_fields.get("fund_company") for row in histories] == [
         "公司甲",
         None,
         "公司乙",
@@ -104,7 +104,7 @@ def test_repeated_identical_overview_does_not_duplicate_history_version(db_sessi
 
 
 def test_local_backfill_uses_retained_company_evidence_without_editing_snapshots(db_session):
-    from fip.services.data_service.company import backfill_fund_company_names
+    from fip.services.data_service.company import backfill_fund_companies
 
     ingest, fund_id = _ingest_service(
         db_session,
@@ -113,21 +113,21 @@ def test_local_backfill_uses_retained_company_evidence_without_editing_snapshots
     )
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
     fund = db_session.get(Fund, fund_id)
-    fund.company_name = None
+    fund.fund_company = None
     history = db_session.query(FundBasicInfoHistory).filter_by(fund_id=fund_id).one()
     original_normalized = dict(history.normalized_fields)
     original_raw = dict(history.raw_fields)
 
-    report = backfill_fund_company_names(db_session, dry_run=False)
+    report = backfill_fund_companies(db_session, dry_run=False)
 
     assert report.updated == 1
-    assert fund.company_name == "历史公司"
+    assert fund.fund_company == "历史公司"
     assert history.normalized_fields == original_normalized
     assert history.raw_fields == original_raw
 
 
 def test_local_backfill_can_resolve_legacy_raw_company_without_normalized_field(db_session):
-    from fip.services.data_service.company import backfill_fund_company_names
+    from fip.services.data_service.company import backfill_fund_companies
 
     ingest, fund_id = _ingest_service(
         db_session,
@@ -136,24 +136,24 @@ def test_local_backfill_can_resolve_legacy_raw_company_without_normalized_field(
     )
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
     fund = db_session.get(Fund, fund_id)
-    fund.company_name = None
+    fund.fund_company = None
     history = db_session.query(FundBasicInfoHistory).filter_by(fund_id=fund_id).one()
     history.normalized_fields = {
-        key: value for key, value in history.normalized_fields.items() if key != "company_name"
+        key: value for key, value in history.normalized_fields.items() if key != "fund_company"
     }
     original_normalized = dict(history.normalized_fields)
     original_raw = dict(history.raw_fields)
 
-    report = backfill_fund_company_names(db_session, dry_run=False)
+    report = backfill_fund_companies(db_session, dry_run=False)
 
     assert report.updated == 1
-    assert fund.company_name == "原始来源公司"
+    assert fund.fund_company == "原始来源公司"
     assert history.normalized_fields == original_normalized
     assert history.raw_fields == original_raw
 
 
 def test_local_backfill_dry_run_and_existing_projection_preservation(db_session):
-    from fip.services.data_service.company import backfill_fund_company_names
+    from fip.services.data_service.company import backfill_fund_companies
 
     ingest, fund_id = _ingest_service(
         db_session,
@@ -162,10 +162,10 @@ def test_local_backfill_dry_run_and_existing_projection_preservation(db_session)
     )
     ingest.ingest_fund_overview(fund_id, "000001", actor="test")
     fund = db_session.get(Fund, fund_id)
-    fund.company_name = "人工校准公司"
+    fund.fund_company = "人工校准公司"
 
-    report = backfill_fund_company_names(db_session, dry_run=True)
+    report = backfill_fund_companies(db_session, dry_run=True)
 
     assert report.updated == 0
     assert report.candidates == 0
-    assert fund.company_name == "人工校准公司"
+    assert fund.fund_company == "人工校准公司"

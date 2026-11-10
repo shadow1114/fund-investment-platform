@@ -169,7 +169,7 @@ const listEnvelope = {
       investment_eligibility: "FULLY_ELIGIBLE",
       share_class_id: "101",
       fund_code: "000001",
-      company_name: "永赢基金",
+      fund_company: "永赢基金",
       sub_status: "开放",
       manager_ids: [],
     },
@@ -193,7 +193,7 @@ const listEnvelope = {
 };
 
 const companyOptionsEnvelope = {
-  data: [{ company_name: "永赢基金" }, { company_name: "易方达基金" }],
+  data: [{ fund_company: "永赢基金" }, { fund_company: "易方达基金" }],
   meta: {
     request_id: "REQ-COMPANIES",
     as_of_date: "2026-09-16",
@@ -398,7 +398,7 @@ describe("FundResearchPage", () => {
   });
   it("maps an AG Grid block to a keyed server page and reads total count from metadata", async () => {
     const pageParams = mapGridRequestToFundParams(
-      { fund_name: "Alpha", company_name: "永赢基金", page: 3, page_size: 50 },
+      { fund_name: "Alpha", fund_company: "永赢基金", page: 3, page_size: 50 },
       {
         startRow: 100,
         endRow: 150,
@@ -407,7 +407,7 @@ describe("FundResearchPage", () => {
     );
     expect(pageParams).toMatchObject({
       fund_name: "Alpha",
-      company_name: "永赢基金",
+      fund_company: "永赢基金",
       page: 3,
       page_size: 50,
       sort: "fund_code",
@@ -426,7 +426,7 @@ describe("FundResearchPage", () => {
     for (const sort of [
       "fund_code",
       "fund_name",
-      "company_name",
+      "fund_company",
       "sub_status",
     ] as const) {
       expect(
@@ -638,7 +638,7 @@ describe("FundResearchPage", () => {
     const submitted = requests.at(-1)!.searchParams;
     expect(submitted.get("fund_name")).toBe("Alpha");
     expect(submitted.get("fund_code")).toBe("000001");
-    expect(submitted.get("company_name")).toBe("永赢基金");
+    expect(submitted.get("fund_company")).toBe("永赢基金");
     expect(submitted.get("asset_class")).toBe("EQUITY");
     expect(submitted.get("sub_status")).toBe("开放");
     expect(submitted.get("page")).toBe("1");

@@ -100,13 +100,13 @@ def list_funds(
     request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
-    sort: Literal["fund_code", "fund_name", "company_name", "sub_status", "inception_date", "aum"]
+    sort: Literal["fund_code", "fund_name", "fund_company", "sub_status", "inception_date", "aum"]
     | None = None,
     order: Literal["asc", "desc"] = "asc",
     as_of_date: date | None = None,
     fund_name: str | None = None,
     fund_code: str | None = Query(None, pattern=r"^[0-9]{6}$"),
-    company_name: str | None = None,
+    fund_company: str | None = None,
     sub_status: Literal["开放"] | None = None,
     fund_type: list[str] | None = Query(None),
     management_company_id: str | None = None,
@@ -139,7 +139,7 @@ def list_funds(
     fund_code = fund_code if fund_code else None
     if fund_code and (len(fund_code) != 6 or any(char < "0" or char > "9" for char in fund_code)):
         raise InvalidQueryError("fund_code must contain exactly six ASCII digits")
-    company_name = company_name.strip() if company_name else None
+    fund_company = fund_company.strip() if fund_company else None
     policies = [get_classification_policy()]
     allowed = {
         name: {value for policy in policies for value in policy.catalog[name]}
@@ -167,7 +167,7 @@ def list_funds(
         ),
         fund_name=fund_name,
         fund_code=fund_code,
-        company_name=company_name,
+        fund_company=fund_company,
         sub_status=sub_status,
         fund_type=_multi_values(fund_type, name="fund_type"),
         management_company_id=management_company_id,
@@ -223,7 +223,7 @@ def list_fund_management_companies(
         as_of_date=as_of_date.isoformat() if as_of_date else None
     )
     return success(
-        [{"company_name": value} for value in values],
+        [{"fund_company": value} for value in values],
         request_id=_request_id(request),
         as_of_date=as_of_date.isoformat() if as_of_date else None,
         is_point_in_time=as_of_date is not None,

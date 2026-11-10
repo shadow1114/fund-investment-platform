@@ -99,13 +99,13 @@ def test_fund_list_payload_accepts_new_list_fields_and_nullable_company() -> Non
             "investment_eligibility": "UNKNOWN",
             "share_class_id": "101",
             "fund_code": "000001",
-            "company_name": None,
+            "fund_company": None,
             "sub_status": "开放",
             "manager_ids": [],
         }
     )
 
-    assert payload.company_name is None
+    assert payload.fund_company is None
     assert payload.share_class_id == "101"
     assert payload.fund_code == "000001"
     assert FundListPayloadModel.model_validate(
@@ -127,7 +127,7 @@ def test_fund_list_payload_accepts_new_list_fields_and_nullable_company() -> Non
                 "investment_eligibility": "UNKNOWN",
                 "share_class_id": "101",
                 "fund_code": "１２３４５６",
-                "company_name": None,
+                "fund_company": None,
                 "sub_status": "开放",
                 "manager_ids": [],
             }
@@ -139,7 +139,7 @@ def test_list_only_fields_do_not_widen_generic_read_payload() -> None:
 
     from fip.api.schemas import ReadPayloadModel
 
-    assert not {"share_class_id", "fund_code", "company_name", "sub_status"} & set(
+    assert not {"share_class_id", "fund_code", "fund_company", "sub_status"} & set(
         ReadPayloadModel.model_fields
     )
     with pytest.raises(ValidationError):

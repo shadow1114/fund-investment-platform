@@ -373,7 +373,7 @@ class FundReadPayloadModel(ReadPayloadModel):
 
     share_class_id: str | None = None
     fund_code: str | None = None
-    company_name: str | None = None
+    fund_company: str | None = None
     sub_status: str | None = None
 
 
@@ -544,7 +544,7 @@ class FundListPayloadModel(StrictModel):
     ]
     share_class_id: str
     fund_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
-    company_name: str | None = None
+    fund_company: str | None = None
     sub_status: Literal["开放", "UNKNOWN"]
     manager_ids: list[str]
 
@@ -568,7 +568,7 @@ class FundListEnvelopeModel(StrictModel):
 
 
 class FundManagementCompanyPayloadModel(StrictModel):
-    company_name: str
+    fund_company: str
 
 
 class FundManagementCompaniesMetaModel(ResponseMetaModel):

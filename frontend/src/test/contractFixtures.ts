@@ -42,7 +42,7 @@ export const fundListEnvelope = {
       ...fundSummary,
       share_class_id: "101",
       fund_code: "000001",
-      company_name: "Alpha 基金管理有限公司",
+      fund_company: "Alpha 基金管理有限公司",
       sub_status: "开放",
       manager_ids: ["M-1"],
     },
@@ -61,7 +61,7 @@ export const fundListEnvelope = {
 };
 
 export const fundManagementCompaniesEnvelope = {
-  data: [{ company_name: "Alpha 基金管理有限公司" }],
+  data: [{ fund_company: "Alpha 基金管理有限公司" }],
   meta: responseMeta,
   error: null,
 };

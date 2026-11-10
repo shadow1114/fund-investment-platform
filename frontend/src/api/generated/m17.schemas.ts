@@ -558,7 +558,7 @@ export type FundListItemClassification = ClassificationPayloadModel | null;
  */
 export type FundListItemFundCode = string | null;
 
-export type FundListItemCompanyName = string | null;
+export type FundListItemFundCompany = string | null;
 
 export type FundListItemSubStatus =
   (typeof FundListItemSubStatus)[keyof typeof FundListItemSubStatus];
@@ -582,7 +582,7 @@ export interface FundListItem {
   share_class_id: string;
   /** @pattern ^[0-9]{6}$ */
   fund_code?: FundListItemFundCode;
-  company_name?: FundListItemCompanyName;
+  fund_company?: FundListItemFundCompany;
   sub_status: FundListItemSubStatus;
   manager_ids: string[];
 }
@@ -648,7 +648,7 @@ export interface FundListEnvelope {
 }
 
 export interface FundManagementCompany {
-  company_name: string;
+  fund_company: string;
 }
 
 export type FundManagementCompaniesMetaAllOf = {
@@ -2622,7 +2622,7 @@ export type FundListSortParameter =
 export const FundListSortParameter = {
   fund_code: "fund_code",
   fund_name: "fund_name",
-  company_name: "company_name",
+  fund_company: "fund_company",
   sub_status: "sub_status",
   inception_date: "inception_date",
   aum: "aum",
@@ -2682,7 +2682,7 @@ export type ListFundsParams = {
   /**
    * Exact management company name; omit to include every company.
    */
-  company_name?: string;
+  fund_company?: string;
   /**
    * Current placeholder subscription status; only open is supported.
    */

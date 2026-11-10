@@ -66,7 +66,7 @@ def handle_fund_ingestion(context: JobContext) -> JobOutcome:
             capture = _CapturingAdapter(adapter)
             with session.begin_nested():
                 if dataset == "BASIC_INFO":
-                    snapshot = IngestService(session, capture, None).ingest_fund_overview(
+                    IngestService(session, capture, None).ingest_fund_overview(
                         fund_id, symbol, actor=actor
                     )
                     from sqlalchemy import select
@@ -85,7 +85,6 @@ def handle_fund_ingestion(context: JobContext) -> JobOutcome:
                         "field_count": len(current.normalized_fields),
                         "available_at": current.available_at.isoformat(),
                         "availability_quality": current.availability_quality,
-                        "classification": snapshot.to_dict(),
                     }
                 else:
                     ingest = IngestService.from_policy(session, capture, rule_version="v1")

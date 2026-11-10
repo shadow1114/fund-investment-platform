@@ -64,13 +64,13 @@ def _nav_service(session: Session) -> IngestService:
     )
 
 
-def cmd_backfill_fund_company_names(args: argparse.Namespace) -> None:
+def cmd_backfill_fund_companies(args: argparse.Namespace) -> None:
     """Backfill only from retained snapshots; dry-run unless --apply is explicit."""
-    from fip.services.data_service.company import backfill_fund_company_names
+    from fip.services.data_service.company import backfill_fund_companies
 
     session = _session()
     try:
-        report = backfill_fund_company_names(
+        report = backfill_fund_companies(
             session, dry_run=not args.apply, batch_size=args.batch_size
         )
         if args.apply:
@@ -162,14 +162,19 @@ def _resolve(session: Session, symbol: str) -> FundShareClass:
 
 
 def cmd_ingest_funds(args: argparse.Namespace) -> None:
+    from fip.services.data_service.ingest import DEFAULT_FUND_DETAIL_WORKERS
+
     with _session() as session:
-        result = _service(session).ingest_fund_list(limit=args.limit)
+        result = _service(session).ingest_fund_list(
+            limit=args.limit,
+            detail_workers=getattr(args, "detail_workers", DEFAULT_FUND_DETAIL_WORKERS),
+        )
         # 冲突不影响本批其余部分：已成功处理的照常提交，包括本次抓到的
         # raw payload。此前 _ensure_provider_identity 直接抛 ValueError 穿出
         # 这里，整批 ingest-funds 全废 —— 一条映射冲突不该毁掉一整批已抓数据。
         session.commit()
     print(f"新建份额类别 {result.created} 个")
-    for warning in result.classification_warnings:
+    for warning in result.warnings:
         print(f"待复核：{warning}")
     if result.reassignments:
         # 响亮失败：逐条列出冲突并以非零退出码结束。绝不静默沿用旧映射
@@ -673,6 +678,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p_funds = sub.add_parser("ingest-funds", help="灌入基金列表")
     p_funds.add_argument("--limit", type=int, default=None)
+    p_funds.add_argument(
+        "--detail-workers",
+        type=int,
+        default=8,
+        dest="detail_workers",
+        help="并发抓取雪球基金详情的线程数（1-32）",
+    )
     p_funds.set_defaults(func=cmd_ingest_funds)
 
     p_nav = sub.add_parser("ingest-nav", help="灌入某只基金的净值与事件并回填复权净值")
@@ -694,12 +706,12 @@ def main(argv: list[str] | None = None) -> int:
     p_pit.set_defaults(func=cmd_pit_nav)
 
     p_company = sub.add_parser(
-        "backfill-fund-company-names",
+        "backfill-fund-companies",
         help="从本地已留存基金基本信息快照回填公司名（默认只预演）",
     )
-    p_company.add_argument("--apply", action="store_true", help="写入 company_name 投影")
+    p_company.add_argument("--apply", action="store_true", help="写入 fund_company 投影")
     p_company.add_argument("--batch-size", type=int, default=500)
-    p_company.set_defaults(func=cmd_backfill_fund_company_names)
+    p_company.set_defaults(func=cmd_backfill_fund_companies)
 
     for command in (
         "classify-funds",
@@ -734,8 +746,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--limit must be positive")
     if getattr(args, "batch_size", 1) <= 0:
         parser.error("--batch-size must be positive")
-    if args.command == "backfill-fund-company-names" and args.batch_size > 5000:
+    if args.command == "backfill-fund-companies" and args.batch_size > 5000:
         parser.error("--batch-size cannot exceed 5000")
+    if args.command == "ingest-funds" and not 1 <= args.detail_workers <= 32:
+        parser.error("--detail-workers must be between 1 and 32")
     if args.command == "classify-funds" and args.limit > 1000:
         parser.error("--limit cannot exceed 1000; classification replay must stay bounded")
     if args.command == "classify-funds" and args.batch_size > 100:

@@ -233,11 +233,21 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 
 ### 6.1.1 公司当前投影与来源历史（迁移 0040）
 
-`fund.fund.company_name VARCHAR(128) NULL` 是产品级可空当前投影，由 data-service 在基础信息抓取中同步读取基金详情“基金公司”字段，校验基金代码后规范化填充；“基金管理人”可能为自然人，禁止映射为公司。没有可信公司字段时保持原投影不变；它不是规范化公司外键，不为本字段创建新的公司实体或关系，ERD v1.3 无需变更。
+`fund.fund.fund_company VARCHAR(128) NULL` 是产品级可空当前投影，由 data-service 在基础信息抓取中同步读取基金详情“基金公司”字段，校验基金代码后规范化填充；“基金管理人”可能为自然人，禁止映射为公司。没有可信公司字段时保持原投影不变；它不是规范化公司外键，不为本字段创建新的公司实体或关系，ERD v1.3 无需变更。
 
-历史公司来自不可变 `fund_basic_info_history` 快照，继承该快照 `available_at` / `availability_quality`。当前列表/公司选项读当前投影；PIT 在每条可见快照内先取去空白后的 `normalized_fields.company_name`，缺失或为空串时只兼容同一条快照内的原始字段 `raw_fields["基金公司"]`。不从“基金管理人”或基金经理回退。排除不可用值后按 `available_at DESC, version DESC, id DESC` 选择最新可用的可见快照；字段回退不得跨快照拼接，不回退到当前列或未来快照，无可用可见快照时为 NULL。没有可靠供应商发布时间时使用抓取时间且标记 INFERRED。
+历史公司来自不可变 `fund_basic_info_history` 快照，继承该快照 `available_at` / `availability_quality`。当前列表/公司选项读当前投影；PIT 在每条可见快照内先取去空白后的 `normalized_fields.fund_company`，缺失或为空串时只兼容同一条快照内的原始字段 `raw_fields["基金公司"]`。不从“基金管理人”或基金经理回退。排除不可用值后按 `available_at DESC, version DESC, id DESC` 选择最新可用的可见快照；字段回退不得跨快照拼接，不回退到当前列或未来快照，无可用可见快照时为 NULL。没有可靠供应商发布时间时使用抓取时间且标记 INFERRED。
 
-迁移 `0040_fund_company_name.py`（上游 0039）仅新增可空列，不含数据回填，downgrade 仅删除该列。回填工具 `backfill_fund_company_names` 只使用保留在本地的基本信息快照，按最新可用可信公司值补齐 NULL 投影，默认 dry-run，分批扫描，apply 时锁定基金行并不覆盖已填值；不改写快照、历史时点或分类。执行前需审阅 dry-run 并显式指定 CLI `--apply`；本次交付没有执行生产迁移或数据回填。
+迁移 `0040_fund_company_name.py`（上游 0039）仅新增可空列，不含数据回填，downgrade 仅删除该列。回填工具 `backfill_fund_companies` 只使用保留在本地的基本信息快照，按最新可用可信公司值补齐 NULL 投影，默认 dry-run，分批扫描，apply 时锁定基金行并不覆盖已填值；不改写快照、历史时点或分类。执行前需审阅 dry-run 并显式指定 CLI `--apply`；本次交付没有执行生产迁移或数据回填。
+
+迁移 `0042_fund_company_manager_aum.py`（上游 0041）把 `company_name` 列重命名为 `fund_company`（API 查询参数、响应字段、排序键、CLI `backfill-fund-companies` 同步改名），并新增三个可空列：
+
+| 列 | 类型 | 来源 |
+|---|---|---|
+| `fund_manager` | VARCHAR(256) | 雪球详情（`fund_individual_basic_info_xq`）“基金经理”，多人以空格分隔，原样保存 |
+| `asset_type` | VARCHAR(32) | 基金列表（`fund_name_em`）“基金类型”按 `-` 分割后的前半部分，如“混合型-灵活”→“混合型” |
+| `fund_aum` | NUMERIC(24,2) | 雪球详情“最新规模”，按单位（万/亿）换算为**元**的纯数字，如 “29.19亿”→ 2919000000.00；无法解析时为 NULL |
+
+`ingest-funds` 在遍历基金列表前，按基金代码多线程（`--detail-workers`，默认 8，范围 1–32）并发抓取雪球详情，原始返回照常留存；数据库写入仍在主线程串行执行。单只基金详情抓取或解析失败只产生告警，不影响其余基金；缺失值不覆盖已知值。`ingest-funds` 不再执行分类，分类由独立的 `classify-funds` 负责。0042 之前写入的快照规范键为 `company_name`，PIT 读取按上文回退到同一快照的 `raw_fields["基金公司"]`，结果与改名前一致。
 
 ### 6.2 `provider_fund_identity`
 

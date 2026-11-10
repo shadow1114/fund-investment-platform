@@ -223,7 +223,7 @@ def test_list_page_selects_akshare_code_and_returns_unique_share_class_rows(db_s
     assert all(row["fund_id"] != str(akshare.id) for row in rows)
 
 
-def test_list_page_does_not_invent_management_company_id_or_company_name(db_session):
+def test_list_page_does_not_invent_management_company_id_or_fund_company(db_session):
     akshare = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     fund, classes = _fund(db_session, "NO-COMPANY", "No company evidence", "A")
     _identity(db_session, akshare, "000001", classes[0])
@@ -238,7 +238,7 @@ def test_list_page_does_not_invent_management_company_id_or_company_name(db_sess
 
     assert total == 1
     assert rows[0]["fund_classification"] == "UNKNOWN"
-    assert rows[0]["company_name"] is None
+    assert rows[0]["fund_company"] is None
     assert rows[0]["management_company_id"] is None
 
 
@@ -377,9 +377,9 @@ def test_list_page_accepts_supported_page_sizes_and_nulls_last_sort(page_size, d
 def test_list_page_filters_literal_name_and_current_company_and_keeps_null_code_rows(db_session):
     akshare = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     target, target_classes = _fund(db_session, "P-1", "Alpha 50%_\u91d1\\资", "A")
-    target.company_name = "管理公司甲"
+    target.fund_company = "管理公司甲"
     missing, missing_classes = _fund(db_session, "P-2", "Alpha 50ZZ金\\资", "A")
-    missing.company_name = None
+    missing.fund_company = None
     _identity(db_session, akshare, "000001", target_classes[0])
     _identity(db_session, akshare, "not-six-digit", missing_classes[0])
     db_session.flush()
@@ -391,13 +391,13 @@ def test_list_page_filters_literal_name_and_current_company_and_keeps_null_code_
         order="asc",
         fund_name="50%_金\\",
         fund_code="000001",
-        company_name="管理公司甲",
+        fund_company="管理公司甲",
     )
 
     assert total == 1
     assert rows[0]["fund_id"] == "P-1"
     assert rows[0]["fund_code"] == "000001"
-    assert rows[0]["company_name"] == "管理公司甲"
+    assert rows[0]["fund_company"] == "管理公司甲"
     assert rows[0]["sub_status"] == "开放"
 
 
@@ -978,9 +978,9 @@ def test_management_company_options_are_distinct_and_historically_visible(db_ses
     fund_b, _ = _fund(db_session, "M-2", "Fund B", "A")
     fund_c, _ = _fund(db_session, "M-3", "Fund C", "A")
     fund_d, _ = _fund(db_session, "M-4", "Fund D", "A")
-    fund_a.company_name = "当前甲"
-    fund_b.company_name = "当前甲"
-    fund_c.company_name = None
+    fund_a.fund_company = "当前甲"
+    fund_b.fund_company = "当前甲"
+    fund_c.fund_company = None
     db_session.flush()
 
     db_session.add_all(
@@ -993,13 +993,13 @@ def test_management_company_options_are_distinct_and_historically_visible(db_ses
     fallback = _basic_history(
         db_session, fund_c, "同快照原始公司", datetime(2024, 1, 1, tzinfo=UTC), 1
     )
-    fallback.normalized_fields = {"company_name": "nan"}
+    fallback.normalized_fields = {"fund_company": "nan"}
     fallback.raw_fields = {"基金公司": "同快照原始公司"}
     db_session.add(fallback)
     manager_only = _basic_history(
         db_session, fund_d, "经理姓名不可作公司", datetime(2024, 1, 1, tzinfo=UTC), 1
     )
-    manager_only.normalized_fields = {"company_name": "nan"}
+    manager_only.normalized_fields = {"fund_company": "nan"}
     manager_only.raw_fields = {"基金管理人": "王经理"}
     db_session.add(manager_only)
 
@@ -1044,7 +1044,7 @@ def _basic_history(db_session, fund, company: str, available_at: datetime, versi
         version=version,
         content_hash=f"{fund.id}-{version}",
         raw_fields={"基金公司": company},
-        normalized_fields={"company_name": company},
+        normalized_fields={"fund_company": company},
         raw_payload_id=payload.id,
         available_at=available_at,
         availability_quality="INFERRED",

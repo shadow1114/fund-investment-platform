@@ -222,7 +222,7 @@ class FundRepository(RepositoryAdapter):
         legacy_code = self._legacy_classification_code(
             revision_id, classification, visible_until, view_date
         )
-        company_name = self._company_name_expression(
+        fund_company = self._fund_company_expression(
             view_date if filters.get("as_of_date") else None, visible_until
         )
         akshare_code = (
@@ -262,9 +262,9 @@ class FundRepository(RepositoryAdapter):
             ):
                 raise InvalidQueryError("fund_code must contain exactly six ASCII digits")
             predicates.append(akshare_code == normalized_code)
-        requested_company = filters.get("company_name")
+        requested_company = filters.get("fund_company")
         if isinstance(requested_company, str) and requested_company.strip():
-            predicates.append(company_name == requested_company.strip())
+            predicates.append(fund_company == requested_company.strip())
         sub_status = filters.get("sub_status")
         if sub_status not in (None, "", "开放"):
             raise InvalidQueryError("sub_status only supports 开放")
@@ -375,8 +375,8 @@ class FundRepository(RepositoryAdapter):
                 Fund.id.label("fund_pk"),
                 Fund.fund_code.label("fund_id"),
                 Fund.product_name.label("fund_name"),
-                Fund.company_name.label("company_name_current"),
-                company_name.label("company_name"),
+                Fund.fund_company.label("fund_company_current"),
+                fund_company.label("fund_company"),
                 FundShareClass.id.label("share_class_pk"),
                 FundShareClass.share_class_code.label("share_class"),
                 FundShareClass.inception_date.label("inception_date"),
@@ -395,7 +395,7 @@ class FundRepository(RepositoryAdapter):
             in {
                 "fund_code",
                 "fund_name",
-                "company_name",
+                "fund_company",
                 "sub_status",
                 "inception_date",
                 "aum",
@@ -405,7 +405,7 @@ class FundRepository(RepositoryAdapter):
         sort_expr = {
             "fund_code": filtered.c.fund_code,
             "fund_name": filtered.c.fund_name,
-            "company_name": filtered.c.company_name,
+            "fund_company": filtered.c.fund_company,
             "sub_status": filtered.c.sub_status,
             "inception_date": filtered.c.inception_date,
             "aum": filtered.c.aum,
@@ -434,7 +434,7 @@ class FundRepository(RepositoryAdapter):
                 Fund,
                 FundShareClass,
                 page_rows.c.fund_code,
-                page_rows.c.company_name,
+                page_rows.c.fund_company,
                 page_rows.c.sub_status,
                 total.c.total_items,
             )
@@ -461,7 +461,7 @@ class FundRepository(RepositoryAdapter):
                     "fund_id": fund.fund_code,
                     "fund_code": code,
                     "fund_name": fund.product_name,
-                    "company_name": company,
+                    "fund_company": company,
                     "sub_status": status,
                     "share_class_id": str(share_class.id),
                     "share_class": share_class.share_class_code,
@@ -483,7 +483,7 @@ class FundRepository(RepositoryAdapter):
             session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
         effective_date = _query_date(as_of_date)
         visible_until = resolve_visible_until(effective_date or date.today())
-        company = self._company_name_expression(effective_date, visible_until)
+        company = self._fund_company_expression(effective_date, visible_until)
         values = session.scalars(
             select(company)
             .select_from(Fund)
@@ -493,13 +493,13 @@ class FundRepository(RepositoryAdapter):
         )
         return [str(value) for value in values if value]
 
-    def _company_name_expression(
+    def _fund_company_expression(
         self, effective_date: date | None, visible_until: datetime
     ) -> ColumnElement[Any]:
         if effective_date is None:
-            return func.nullif(func.btrim(Fund.company_name), "")
+            return func.nullif(func.btrim(Fund.fund_company), "")
         normalized = func.nullif(
-            func.btrim(FundBasicInfoHistory.normalized_fields["company_name"].as_string()), ""
+            func.btrim(FundBasicInfoHistory.normalized_fields["fund_company"].as_string()), ""
         )
         raw = func.nullif(func.btrim(FundBasicInfoHistory.raw_fields["基金公司"].as_string()), "")
         invalid_names = ("nan", "none", "null", "<na>")

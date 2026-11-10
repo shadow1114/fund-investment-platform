@@ -26,7 +26,7 @@ async function installFundResearchFixtures(page: Page, canManage = false) {
     } else if (url.pathname === "/api/v1/fund-management-companies") {
       await route.fulfill({
         json: {
-          data: [{ company_name: "测试基金管理有限公司" }],
+          data: [{ fund_company: "测试基金管理有限公司" }],
           meta: responseMeta,
           error: null,
         },
@@ -60,7 +60,7 @@ async function installFundResearchFixtures(page: Page, canManage = false) {
           share_class_id: `SC-${id}`,
           fund_classification: "EQUITY",
           management_company_id: "MC-1",
-          company_name: "测试基金管理有限公司",
+          fund_company: "测试基金管理有限公司",
           inception_date: "2020-01-01",
           lifecycle_status: "NORMAL",
           investment_eligibility: "FULLY_ELIGIBLE",

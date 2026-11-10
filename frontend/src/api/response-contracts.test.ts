@@ -41,7 +41,7 @@ describe("generated nested response contracts", () => {
   it("types the research filters and nullable fund company list field", () => {
     const filters: ListFundsParams = {
       fund_code: "000001",
-      company_name: "示例管理人",
+      fund_company: "示例管理人",
       sub_status: "开放",
     };
     const companyQuery: ListFundManagementCompaniesParams = {
@@ -58,13 +58,13 @@ describe("generated nested response contracts", () => {
       investment_eligibility: "UNKNOWN",
       share_class_id: "101",
       fund_code: "000001",
-      company_name: null,
+      fund_company: null,
       sub_status: "开放",
       manager_ids: [],
     };
     expect(filters.fund_code).toBe("000001");
     expect(companyQuery.as_of_date).toBe("2026-01-31");
-    expect(item.company_name).toBeNull();
+    expect(item.fund_company).toBeNull();
     const unknownSubscriptionStatus: FundListResponseResponse["data"][number] =
       {
         ...item,

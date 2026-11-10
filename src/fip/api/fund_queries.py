@@ -222,7 +222,7 @@ class FundQueries:
         *,
         fund_name: str | None,
         fund_code: str | None = None,
-        company_name: str | None = None,
+        fund_company: str | None = None,
         sub_status: str | None = None,
         asset_class: Sequence[str] | None = None,
         strategy: Sequence[str] | None = None,
@@ -256,8 +256,8 @@ class FundQueries:
             "classification_status": _as_tuple(classification_status),
             "fund_name": fund_name.strip() or None if isinstance(fund_name, str) else None,
             "fund_code": fund_code if isinstance(fund_code, str) and fund_code else None,
-            "company_name": company_name.strip()
-            if isinstance(company_name, str) and company_name.strip()
+            "fund_company": fund_company.strip()
+            if isinstance(fund_company, str) and fund_company.strip()
             else None,
             "sub_status": sub_status,
             "fund_type": _as_tuple(fund_type),

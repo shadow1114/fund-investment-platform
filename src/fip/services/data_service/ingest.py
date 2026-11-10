@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -25,9 +26,9 @@ from fip.services.data_service.batch import (
     BatchItemStatus,
     FundIngestSubject,
 )
-from fip.services.data_service.classification.models import ClassificationSnapshot
 from fip.services.data_service.company import (
-    company_name_from_fields,
+    fund_company_from_fields,
+    fund_detail_from_record,
     raw_fund_company_from_record,
 )
 from fip.services.data_service.grouping import split_share_class_name
@@ -85,7 +86,7 @@ class FundListIngestResult:
 
     created: int
     reassignments: tuple[IdentityReassignment, ...]
-    classification_warnings: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass
@@ -107,6 +108,19 @@ RISK_FREE_CURVE_CODE = "CN_TREASURY"
 RISK_FREE_CURRENCY = "CNY"
 # bond_china_yield 要求单次区间小于一年。
 _YIELD_CURVE_WINDOW = dt.timedelta(days=360)
+
+DEFAULT_FUND_DETAIL_WORKERS = 8
+MAX_FUND_DETAIL_WORKERS = 32
+
+
+def _asset_type(fund_type: object) -> str | None:
+    """基金类型「混合型-灵活」→ asset_type「混合型」。"""
+    if fund_type is None or (pd.api.types.is_scalar(fund_type) and pd.isna(fund_type)):
+        return None
+    head = str(fund_type).split("-", 1)[0].strip()
+    if not head or head.casefold() == "nan":
+        return None
+    return head[:32]
 
 
 class IngestService:
@@ -336,14 +350,25 @@ class IngestService:
 
     # ---------- 基金主数据 ----------
 
-    def ingest_fund_list(self, limit: int | None = None) -> FundListIngestResult:
-        """Keep provider identity stable; suffixes provide candidates only."""
+    def ingest_fund_list(
+        self, limit: int | None = None, *, detail_workers: int = DEFAULT_FUND_DETAIL_WORKERS
+    ) -> FundListIngestResult:
+        """Keep provider identity stable; suffixes provide candidates only.
+
+        基金经理 / 基金公司 / 最新规模来自雪球详情（fund_detail_xq），按基金代码
+        多线程并发抓取；数据库写入仍在当前线程串行完成（Session 非线程安全）。
+        """
+        if not 1 <= detail_workers <= MAX_FUND_DETAIL_WORKERS:
+            raise ValueError(f"detail_workers must be between 1 and {MAX_FUND_DETAIL_WORKERS}")
         record = self._adapter.fetch("fund_list")
-        payload = self._store_raw(record)
+        self._store_raw(record)
         frame = pd.read_parquet(io.BytesIO(record.payload))
         if limit is not None:
             frame = frame.head(limit)
 
+        details = self._fetch_fund_details(
+            [str(code).strip() for code in frame["基金代码"]], detail_workers
+        )
         provider = self._provider()
         created = 0
         reassignments: list[IdentityReassignment] = []
@@ -420,131 +445,62 @@ class IngestService:
                 warnings.append(
                     f"{code}: existing shared product {fund.id} requires grouping review"
                 )
-            snapshot = self.classify_fields(
-                fund.id,
-                {"formal_type": str(row.get("基金类型", "")), "基金简称": display_name},
-                payload,
-                actor="ingest-funds",
-            )
-            if count and count > 1:
-                from fip.services.data_service.classification.service import ClassificationService
-                from fip.services.data_service.models.fund import FundClassificationReviewCase
-
-                revision = ClassificationService(self._session).latest(fund.id)
-                assert revision is not None
-                existing_case = self._session.scalar(
-                    select(FundClassificationReviewCase).where(
-                        FundClassificationReviewCase.fund_id == fund.id,
-                        FundClassificationReviewCase.revision_id == revision.id,
-                        FundClassificationReviewCase.issue_key == "product_grouping",
-                    )
-                )
-                if existing_case is None:
-                    self._session.add(
-                        FundClassificationReviewCase(
-                            fund_id=fund.id,
-                            revision_id=revision.id,
-                            issue_key="product_grouping",
-                            issue_type="GROUPING_UNCONFIRMED",
-                            status="PENDING",
-                            details={
-                                "provider_code": code,
-                                "reason": "legacy multi-share grouping",
-                            },
-                            created_at=record.ingested_at,
-                        )
-                    )
-            if snapshot.review_items:
-                warnings.append(f"{code}: {','.join(snapshot.review_items)}")
+            asset_type = _asset_type(row.get("基金类型"))
+            if asset_type is not None:
+                fund.asset_type = asset_type
+            self._apply_fund_detail(fund, code, details[code], warnings)
+        self._session.flush()
         return FundListIngestResult(
             created=created,
             reassignments=tuple(reassignments),
-            classification_warnings=tuple(warnings),
+            warnings=tuple(warnings),
         )
 
-    def classify_fields(
+    def _fetch_fund_details(
+        self, codes: Sequence[str], workers: int
+    ) -> dict[str, SourceRecord | Exception]:
+        """并发抓取雪球详情。单只失败只记录异常，不影响其余基金。"""
+
+        def fetch(code: str) -> SourceRecord | Exception:
+            try:
+                return self._adapter.fetch("fund_detail_xq", symbol=code)
+            except Exception as error:  # 单只失败转为告警，见 _apply_fund_detail
+                return error
+
+        unique_codes = list(dict.fromkeys(codes))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            return dict(zip(unique_codes, executor.map(fetch, unique_codes), strict=True))
+
+    def _apply_fund_detail(
         self,
-        fund_id: int,
-        fields: Mapping[str, str],
-        payload: RawPayload,
-        *,
-        actor: str,
-        dry_run: bool = False,
-    ) -> ClassificationSnapshot:
-        from fip.services.data_service.classification import Evidence, classify, normalize_evidence
-        from fip.services.data_service.classification.service import ClassificationService
-
-        now = dt.datetime.now(dt.UTC)
-        aliases = {
-            "基金类型": "formal_type",
-            "基金全称": "name",
-            "基金简称": "name",
-            "投资范围": "investment_strategy",
-            "投资策略": "investment_strategy",
-            "跟踪标的": "tracking_target",
-        }
-        incoming = tuple(
-            normalize_evidence(
-                source="NAME" if aliases.get(key, key) == "name" else "AGGREGATOR",
-                field=aliases.get(key, key),
-                raw_field=key,
-                value=value,
-                classified_at=now,
-                payload_ref=f"raw_payload:{payload.id}",
-                locator=f"dataset:{payload.dataset_id};params:{payload.request_params}",
+        fund: Fund,
+        code: str,
+        outcome: SourceRecord | Exception,
+        warnings: list[str],
+    ) -> None:
+        """留存原始返回并写入 fund_company / fund_manager / fund_aum；缺失值不覆盖已知值。"""
+        if isinstance(outcome, Exception):
+            failed_record = getattr(outcome, "record", None)
+            if isinstance(failed_record, SourceRecord):
+                self._store_raw(failed_record)
+            warnings.append(
+                f"{code}: fund detail unavailable ({type(outcome).__name__}: {outcome})"
             )
-            for key, value in fields.items()
-            if value and value != "nan"
-        )
-        service = ClassificationService(self._session)
-        service.lock_product(fund_id)
-        latest = service.latest(fund_id)
-        retained = []
-        if latest:
-            for start, end, existing, _ in service.intervals(latest.id):
-                if start <= payload.ingested_at.date() and (
-                    end is None or payload.ingested_at.date() < end
-                ):
-                    for dimension in (
-                        "asset_class",
-                        "strategy",
-                        "geography",
-                        "product_structure",
-                        "market_attributes",
-                    ):
-                        retained.extend(getattr(existing, dimension).evidence)
+            return
+        self._store_raw(outcome)
+        try:
+            detail = fund_detail_from_record(outcome, symbol=code)
+        except ValueError as error:
+            warnings.append(f"{code}: fund detail invalid ({error})")
+            return
+        if detail.fund_company is not None:
+            fund.fund_company = detail.fund_company
+        if detail.fund_manager is not None:
+            fund.fund_manager = detail.fund_manager
+        if detail.fund_aum is not None:
+            fund.fund_aum = detail.fund_aum
 
-        def observation_key(item: Evidence) -> tuple[str, str, str]:
-            return (
-                item.source,
-                item.normalized_field or item.raw_field,
-                (item.locator or "").split(";params:")[0],
-            )
-
-        replacements = {observation_key(item) for item in incoming}
-        merged = {
-            item.model_dump_json(): item
-            for item in retained
-            if observation_key(item) not in replacements
-        }
-        merged.update({item.model_dump_json(): item for item in incoming})
-        from fip.services.data_service.classification.policy import load_policy
-
-        snapshot = classify(tuple(merged.values()), classified_at=now, policy=load_policy())
-        if not dry_run:
-            ClassificationService(self._session).write(
-                fund_id,
-                snapshot,
-                valid_from=payload.ingested_at.date(),
-                available_at=max(now, payload.ingested_at),
-                actor=actor,
-                reason="retained AKShare classification evidence",
-            )
-        return snapshot
-
-    def ingest_fund_overview(
-        self, fund_id: int, symbol: str, *, actor: str
-    ) -> ClassificationSnapshot:
+    def ingest_fund_overview(self, fund_id: int, symbol: str, *, actor: str) -> None:
         from fip.services.data_service.adapters.akshare.client import AkShareContractError
 
         try:
@@ -582,12 +538,12 @@ class IngestService:
         }
         company_record = self._adapter.fetch("fund_detail_xq", symbol=symbol)
         self._store_raw(company_record)
-        raw_company_name = raw_fund_company_from_record(company_record, symbol=symbol)
-        if raw_company_name is not None:
-            raw_fields["基金公司"] = raw_company_name
-        company_name = company_name_from_fields(normalized_fields, raw_fields)
-        if company_name is not None:
-            normalized_fields["company_name"] = company_name
+        raw_fund_company = raw_fund_company_from_record(company_record, symbol=symbol)
+        if raw_fund_company is not None:
+            raw_fields["基金公司"] = raw_fund_company
+        fund_company = fund_company_from_fields(normalized_fields, raw_fields)
+        if fund_company is not None:
+            normalized_fields["fund_company"] = fund_company
         content_hash = hashlib.sha256(
             json.dumps(
                 {"raw_fields": raw_fields, "normalized_fields": normalized_fields},
@@ -621,19 +577,8 @@ class IngestService:
             self._session.flush()
         # Current projection and immutable history are persisted in this caller's
         # transaction; missing/blank evidence never erases a known company.
-        if company_name is not None:
-            fund.company_name = company_name
-        fields: dict[str, str] = {}
-        aliases = {
-            "基金类型": "formal_type",
-            "投资范围": "investment_strategy",
-            "投资策略": "investment_strategy",
-            "跟踪标的": "tracking_target",
-            "基金全称": "name",
-        }
-        for _, row in frame.iterrows():
-            fields.update({key: str(row[key]) for key in aliases if key in row})
-        return self.classify_fields(fund_id, fields, payload, actor=actor)
+        if fund_company is not None:
+            fund.fund_company = fund_company
 
     # ---------- 净值与事件 ----------
 

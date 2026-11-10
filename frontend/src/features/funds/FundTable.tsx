@@ -42,7 +42,7 @@ export const mapGridRequestToFundParams = (
         : Math.floor(request.startRow / pageSize) + 1,
     page_size: pageSize,
     ...(sorted?.colId &&
-    ["fund_name", "fund_code", "company_name", "sub_status"].includes(
+    ["fund_name", "fund_code", "fund_company", "sub_status"].includes(
       sorted.colId,
     )
       ? { sort: sorted.colId as ListFundsParams["sort"], order: sorted.sort }
@@ -183,11 +183,11 @@ export const FundTable = ({
           ) : null,
       },
       {
-        field: "company_name",
-        colId: "company_name",
+        field: "fund_company",
+        colId: "fund_company",
         headerName: "管理公司",
         minWidth: 160,
-        sort: params.sort === "company_name" ? params.order : null,
+        sort: params.sort === "fund_company" ? params.order : null,
         valueFormatter: ({ value }) => value || "—",
       },
       {
@@ -296,7 +296,7 @@ export const FundTable = ({
         return;
       }
       if (
-        ["fund_name", "fund_code", "company_name", "sub_status"].includes(
+        ["fund_name", "fund_code", "fund_company", "sub_status"].includes(
           sorted.colId,
         ) &&
         (sorted.colId !== params.sort || sorted.sort !== params.order)
@@ -355,7 +355,7 @@ export const FundTable = ({
         requiredColumnIds={[
           "fund_code",
           "fund_name",
-          "company_name",
+          "fund_company",
           "sub_status",
           "detail",
         ]}

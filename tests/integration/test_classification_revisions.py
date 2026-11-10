@@ -250,41 +250,6 @@ def test_peer_candidate_adapter_preserves_revision_and_exclusion_reason(db_sessi
     )
 
 
-def test_partial_source_refresh_preserves_other_dimensions_and_conflicting_sources(
-    db_session, product
-):
-    from fip.services.data_service.adapters.akshare.client import AkShareSourceAdapter
-    from fip.services.data_service.ingest import IngestService
-    from fip.services.data_service.models.raw import RawPayload
-
-    ingest = IngestService(db_session, AkShareSourceAdapter(caller=lambda *a, **kw: None), None)
-    one = ingest.ensure_dataset("fund_overview")
-    two = ingest.ensure_dataset("fund_list")
-
-    def payload(dataset):
-        row = RawPayload(
-            dataset_id=dataset.id,
-            payload=b"fixture",
-            row_count=1,
-            request_params={"symbol": "1"},
-            library_version="test",
-            ingested_at=T1,
-        )
-        db_session.add(row)
-        db_session.flush()
-        return row
-
-    first = payload(one)
-    second = payload(two)
-    ingest.classify_fields(
-        product.id, {"formal_type": "股票型", "strategy": "ACTIVE"}, first, actor="test"
-    )
-    result = ingest.classify_fields(product.id, {"formal_type": "股票型"}, second, actor="test")
-    assert result.strategy.value == "ACTIVE"
-    conflict = ingest.classify_fields(product.id, {"formal_type": "债券型"}, second, actor="test")
-    assert conflict.asset_class.status == "CONFLICT"
-
-
 def test_confirmed_dimension_rejects_name_only_proof(db_session, product):
     from fip.services.data_service.classification import DimensionResult
 

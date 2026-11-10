@@ -65,7 +65,7 @@ describe("ingestion cache invalidation", () => {
     });
     const companyQueryKey = queryKeys.fundManagementCompanies({});
     client.setQueryData(companyQueryKey, {
-      data: [{ company_name: "旧公司" }],
+      data: [{ fund_company: "旧公司" }],
     });
 
     await invalidateIngestionFundData(client);

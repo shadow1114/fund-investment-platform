@@ -190,7 +190,7 @@ test("server paging 20/50/200 preserves totals, four columns, equal-name identit
   await page.getByRole("columnheader", { name: "管理公司" }).click();
   await expect
     .poll(() => requests.at(-1)?.searchParams.get("sort"))
-    .toBe("company_name");
+    .toBe("fund_company");
   expect(page.url()).toBe(browserAddress);
   const saved = page.url();
   await page.reload();
@@ -222,7 +222,7 @@ test("five research filters reach API literally without changing browser URL", a
   for (const [key, value] of Object.entries({
     fund_name: "同名_%' OR 1=1",
     fund_code: "000001",
-    company_name: "Alpha 基金管理有限公司",
+    fund_company: "Alpha 基金管理有限公司",
     asset_class: "EQUITY",
     sub_status: "开放",
     page: "1",

@@ -224,12 +224,12 @@ describe("frozen M1.7 OpenAPI projection", () => {
     expect(
       getListFundsUrl({
         fund_code: "000001",
-        company_name: "示例管理人",
+        fund_company: "示例管理人",
         sub_status: "开放",
         fund_type: ["EQUITY", "BOND"],
       }),
     ).toBe(
-      "/api/v1/funds?fund_code=000001&company_name=%E7%A4%BA%E4%BE%8B%E7%AE%A1%E7%90%86%E4%BA%BA&sub_status=%E5%BC%80%E6%94%BE&fund_type=EQUITY%2CBOND",
+      "/api/v1/funds?fund_code=000001&fund_company=%E7%A4%BA%E4%BE%8B%E7%AE%A1%E7%90%86%E4%BA%BA&sub_status=%E5%BC%80%E6%94%BE&fund_type=EQUITY%2CBOND",
     );
   });
 

@@ -64,7 +64,7 @@ def test_basic_info_ingest_stores_fund_company_but_not_manager_data(db_session):
     assert "基金经理" not in history.raw_fields
     assert "基金管理人" not in history.raw_fields
     assert history.raw_fields["基金公司"] == "华夏基金"
-    assert db_session.get(Fund, fund_id).company_name == "华夏基金"
+    assert db_session.get(Fund, fund_id).fund_company == "华夏基金"
     assert "manager_name" not in history.normalized_fields
     assert db_session.query(FundManager).count() == 0
     assert db_session.query(FundManagerAssignment).count() == 0

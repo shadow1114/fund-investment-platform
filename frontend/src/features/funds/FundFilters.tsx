@@ -9,7 +9,7 @@ import { listFundManagementCompaniesQueryOptions } from "../../api/queries";
 export type FundFilterValues = {
   fund_name: string;
   fund_code: string;
-  company_name: string;
+  fund_company: string;
   asset_class: string;
   sub_status: string;
   as_of_date: string;
@@ -31,7 +31,7 @@ export type FundFilterValues = {
 export const emptyFundFilters = (): FundFilterValues => ({
   fund_name: "",
   fund_code: "",
-  company_name: "",
+  fund_company: "",
   asset_class: "",
   sub_status: "",
   as_of_date: "",
@@ -122,11 +122,11 @@ export const FundFilters = ({
             label="管理公司"
             aria-label="管理公司"
             data={(companies.data ?? []).map((item) => ({
-              value: item.company_name,
-              label: item.company_name,
+              value: item.fund_company,
+              label: item.fund_company,
             }))}
-            value={values.company_name || null}
-            onChange={(value) => set("company_name", value)}
+            value={values.fund_company || null}
+            onChange={(value) => set("fund_company", value)}
             searchable
             clearable
             nothingFoundMessage="没有公司选项"

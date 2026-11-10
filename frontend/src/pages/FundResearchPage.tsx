@@ -41,7 +41,7 @@ export const parseParams = (search: URLSearchParams): ListFundsParams => ({
   classification_status: search.get("classification_status") || undefined,
   fund_name: search.get("fund_name") || undefined,
   fund_code: search.get("fund_code") || undefined,
-  company_name: search.get("company_name") || undefined,
+  fund_company: search.get("fund_company") || undefined,
   sub_status: (search.get("sub_status") || undefined) as
     ListFundsParams["sub_status"] | undefined,
   fund_type: asList(split(search.get("fund_type"))),
@@ -68,7 +68,7 @@ const initialFilterValues = (search: URLSearchParams): FundFilterValues => ({
   classification_status: split(search.get("classification_status")),
   fund_name: search.get("fund_name") || "",
   fund_code: search.get("fund_code") || "",
-  company_name: search.get("company_name") || "",
+  fund_company: search.get("fund_company") || "",
   sub_status: search.get("sub_status") || "",
   fund_type: split(search.get("fund_type")),
   lifecycle_status: split(search.get("lifecycle_status")),

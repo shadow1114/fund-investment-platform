@@ -38,7 +38,7 @@ def test_source_fund_contract_matches_frozen_query_and_payload_projection() -> N
             parameter = frozen["components"]["parameters"][name]
         frozen_params[parameter["name"]] = parameter
 
-    assert {"fund_code", "company_name", "sub_status", "sort"} <= set(source_params)
+    assert {"fund_code", "fund_company", "sub_status", "sort"} <= set(source_params)
     assert source_params["fund_code"]["schema"]["anyOf"][0]["pattern"] == "^[0-9]{6}$"
     assert frozen_params["fund_code"]["schema"]["pattern"] == "^[0-9]{6}$"
     assert source_params["sub_status"]["schema"]["anyOf"][0]["const"] == "开放"
@@ -52,14 +52,14 @@ def test_source_fund_contract_matches_frozen_query_and_payload_projection() -> N
     source_item = source["components"]["schemas"]["FundListPayloadModel"]["properties"]
     frozen_item = frozen["components"]["schemas"]["FundListItem"]["properties"]
     assert source_item["share_class_id"]["type"] == frozen_item["share_class_id"]["type"]
-    assert source_item["company_name"]["anyOf"][1]["type"] == "null"
-    assert frozen_item["company_name"]["type"] == ["string", "null"]
+    assert source_item["fund_company"]["anyOf"][1]["type"] == "null"
+    assert frozen_item["fund_company"]["type"] == ["string", "null"]
     source_sub_status = source_item["sub_status"]
     assert source_sub_status["enum"] == ["开放", "UNKNOWN"]
     assert frozen_item["sub_status"]["enum"] == ["开放", "UNKNOWN"]
 
     source_read = source["components"]["schemas"]["ReadPayloadModel"]["properties"]
     frozen_read = frozen["components"]["schemas"]["FundSummary"]["properties"]
-    for field in ("share_class_id", "fund_code", "company_name", "sub_status"):
+    for field in ("share_class_id", "fund_code", "fund_company", "sub_status"):
         assert field not in source_read
         assert field not in frozen_read

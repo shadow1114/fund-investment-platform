@@ -24,7 +24,7 @@ class _SeededFundRepository(FundRepository):
                 "fund_name": "Beta",
                 "share_class": "A",
                 "share_class_id": "3",
-                "company_name": "Company Two",
+                "fund_company": "Company Two",
                 "sub_status": "开放",
                 "fund_classification": "BOND",
                 "management_company_id": "manager-company-2",
@@ -40,7 +40,7 @@ class _SeededFundRepository(FundRepository):
                 "fund_name": "Alpha",
                 "share_class": "C",
                 "share_class_id": "2",
-                "company_name": "Company One",
+                "fund_company": "Company One",
                 "sub_status": "开放",
                 "fund_classification": "EQUITY",
                 "management_company_id": "manager-company-1",
@@ -56,7 +56,7 @@ class _SeededFundRepository(FundRepository):
                 "fund_name": "Alpha",
                 "share_class": "A",
                 "share_class_id": "1",
-                "company_name": "Company One",
+                "fund_company": "Company One",
                 "sub_status": "开放",
                 "fund_classification": "EQUITY",
                 "management_company_id": "manager-company-1",
@@ -80,15 +80,15 @@ class _SeededFundRepository(FundRepository):
             if _matches(row, filters)
             and (not filters.get("fund_code") or row.get("fund_code") == filters["fund_code"])
             and (
-                not filters.get("company_name")
-                or row.get("company_name") == filters["company_name"]
+                not filters.get("fund_company")
+                or row.get("fund_company") == filters["fund_company"]
             )
             and (not filters.get("sub_status") or row.get("sub_status") == filters["sub_status"])
         ]
         field = (
             sort
             if sort
-            in {"fund_code", "fund_name", "company_name", "sub_status", "inception_date", "aum"}
+            in {"fund_code", "fund_name", "fund_company", "sub_status", "inception_date", "aum"}
             else "fund_name"
         )
         rows.sort(key=lambda row: str(row.get("fund_id", "")))
@@ -102,7 +102,7 @@ class _SeededFundRepository(FundRepository):
 
     def list_management_companies(self, *, as_of_date: str | None = None) -> list[str]:
         _ = as_of_date
-        return sorted({str(row["company_name"]) for row in self.rows if row.get("company_name")})
+        return sorted({str(row["fund_company"]) for row in self.rows if row.get("fund_company")})
 
     def get(self, identifier: str) -> Mapping[str, object]:
         for row in self.rows:
@@ -212,7 +212,7 @@ def test_fund_list_filters_paginates_and_breaks_name_ties_by_fund_id() -> None:
     assert repository.list_filters == {
         "fund_name": None,
         "fund_code": None,
-        "company_name": None,
+        "fund_company": None,
         "sub_status": None,
         "fund_type": ("EQUITY",),
         "management_company_id": "manager-company-1",
@@ -246,10 +246,10 @@ def test_fund_list_accepts_code_company_status_and_page_size_200() -> None:
         "/api/v1/funds",
         params={
             "fund_code": "000001",
-            "company_name": "Company One",
+            "fund_company": "Company One",
             "sub_status": "开放",
             "page_size": 200,
-            "sort": "company_name",
+            "sort": "fund_company",
         },
     )
 
@@ -261,7 +261,7 @@ def test_fund_list_accepts_code_company_status_and_page_size_200() -> None:
     assert response.json()["meta"]["subscription_status_source"] == "PLACEHOLDER"
     assert repository.list_filters is not None
     assert repository.list_filters["fund_code"] == "000001"
-    assert repository.list_filters["company_name"] == "Company One"
+    assert repository.list_filters["fund_company"] == "Company One"
     assert repository.list_filters["sub_status"] == "开放"
 
 
@@ -314,8 +314,8 @@ def test_fund_management_company_options_have_standard_envelope_and_optional_as_
 
     assert response.status_code == 200
     assert response.json()["data"] == [
-        {"company_name": "Company One"},
-        {"company_name": "Company Two"},
+        {"fund_company": "Company One"},
+        {"fund_company": "Company Two"},
     ]
     assert response.json()["meta"]["as_of_date"] == "2025-01-31"
     assert response.json()["meta"]["is_point_in_time"] is True
@@ -325,7 +325,7 @@ def test_fund_list_and_company_options_pass_strict_runtime_contracts() -> None:
     repository = _SeededFundRepository()
     fund_without_company = next(row for row in repository.rows if row["fund_id"] == "fund-1")
     fund_without_company.update(
-        company_name=None,
+        fund_company=None,
         management_company_id=None,
         fund_classification="UNKNOWN",
         classification=None,
@@ -338,13 +338,13 @@ def test_fund_list_and_company_options_pass_strict_runtime_contracts() -> None:
     assert funds.status_code == 200
     assert funds.json()["data"][0]["share_class_id"] == "1"
     assert funds.json()["data"][0]["fund_classification"] == "UNKNOWN"
-    assert funds.json()["data"][0].get("company_name") is None
+    assert funds.json()["data"][0].get("fund_company") is None
     assert funds.json()["data"][0].get("management_company_id") is None
     assert funds.json()["meta"]["subscription_status_source"] == "PLACEHOLDER"
     assert companies.status_code == 200
     assert companies.json()["data"] == [
-        {"company_name": "Company One"},
-        {"company_name": "Company Two"},
+        {"fund_company": "Company One"},
+        {"fund_company": "Company Two"},
     ]
 
 
