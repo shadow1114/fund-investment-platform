@@ -1813,6 +1813,26 @@ components:
           type:
             - string
             - "null"
+        asset_type:
+          type:
+            - string
+            - "null"
+        fund_manager:
+          type:
+            - string
+            - "null"
+        fund_aum:
+          type:
+            - number
+            - "null"
+        fund_management_fee:
+          type:
+            - number
+            - "null"
+        fund_custody_fee:
+          type:
+            - number
+            - "null"
         sub_status:
           type: string
           enum:

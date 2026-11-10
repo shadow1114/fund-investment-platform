@@ -33,7 +33,7 @@ from fip.platform.db.types import RatioNumeric
 
 
 class Fund(Base):
-    """基金【产品】的身份。无净值、无费率 —— 那些属于 Share Class。"""
+    """基金产品身份、公司/经理和产品级规模费率；净值属于 Share Class。"""
 
     __tablename__ = "fund"
     __table_args__ = {"schema": "fund"}
@@ -47,6 +47,9 @@ class Fund(Base):
     asset_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 最新规模，统一换算为「元」。
     fund_aum: Mapped[Decimal | None] = mapped_column(Numeric(24, 2), nullable=True)
+    # 管理费 / 托管费以比率存储，如 1.20% 存为 0.012。
+    fund_management_fee: Mapped[Decimal | None] = mapped_column(RatioNumeric, nullable=True)
+    fund_custody_fee: Mapped[Decimal | None] = mapped_column(RatioNumeric, nullable=True)
     grouping_status: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

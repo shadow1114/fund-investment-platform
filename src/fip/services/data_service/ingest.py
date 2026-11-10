@@ -28,7 +28,7 @@ from fip.services.data_service.batch import (
 )
 from fip.services.data_service.company import (
     fund_company_from_fields,
-    fund_detail_from_record,
+    fund_overview_from_record,
     raw_fund_company_from_record,
 )
 from fip.services.data_service.grouping import split_share_class_name
@@ -355,7 +355,7 @@ class IngestService:
     ) -> FundListIngestResult:
         """Keep provider identity stable; suffixes provide candidates only.
 
-        基金经理 / 基金公司 / 最新规模来自雪球详情（fund_detail_xq），按基金代码
+        基金公司、经理、净资产规模和费率来自基金概况（fund_overview），按基金代码
         多线程并发抓取；数据库写入仍在当前线程串行完成（Session 非线程安全）。
         """
         if not 1 <= detail_workers <= MAX_FUND_DETAIL_WORKERS:
@@ -366,7 +366,7 @@ class IngestService:
         if limit is not None:
             frame = frame.head(limit)
 
-        details = self._fetch_fund_details(
+        details = self._fetch_fund_overviews(
             [str(code).strip() for code in frame["基金代码"]], detail_workers
         )
         provider = self._provider()
@@ -448,7 +448,7 @@ class IngestService:
             asset_type = _asset_type(row.get("基金类型"))
             if asset_type is not None:
                 fund.asset_type = asset_type
-            self._apply_fund_detail(fund, code, details[code], warnings)
+            self._apply_fund_overview(fund, code, details[code], warnings)
         self._session.flush()
         return FundListIngestResult(
             created=created,
@@ -456,42 +456,42 @@ class IngestService:
             warnings=tuple(warnings),
         )
 
-    def _fetch_fund_details(
+    def _fetch_fund_overviews(
         self, codes: Sequence[str], workers: int
     ) -> dict[str, SourceRecord | Exception]:
-        """并发抓取雪球详情。单只失败只记录异常，不影响其余基金。"""
+        """并发抓取基金概况。单只失败只记录告警，不影响其余基金。"""
 
         def fetch(code: str) -> SourceRecord | Exception:
             try:
-                return self._adapter.fetch("fund_detail_xq", symbol=code)
-            except Exception as error:  # 单只失败转为告警，见 _apply_fund_detail
+                return self._adapter.fetch("fund_overview", symbol=code)
+            except Exception as error:  # 单只失败转为告警，见 _apply_fund_overview
                 return error
 
         unique_codes = list(dict.fromkeys(codes))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             return dict(zip(unique_codes, executor.map(fetch, unique_codes), strict=True))
 
-    def _apply_fund_detail(
+    def _apply_fund_overview(
         self,
         fund: Fund,
         code: str,
         outcome: SourceRecord | Exception,
         warnings: list[str],
     ) -> None:
-        """留存原始返回并写入 fund_company / fund_manager / fund_aum；缺失值不覆盖已知值。"""
+        """留存原始概况并写入公司、经理、规模和费率；缺失值不覆盖已知值。"""
         if isinstance(outcome, Exception):
             failed_record = getattr(outcome, "record", None)
             if isinstance(failed_record, SourceRecord):
                 self._store_raw(failed_record)
             warnings.append(
-                f"{code}: fund detail unavailable ({type(outcome).__name__}: {outcome})"
+                f"{code}: fund overview unavailable ({type(outcome).__name__}: {outcome})"
             )
             return
         self._store_raw(outcome)
         try:
-            detail = fund_detail_from_record(outcome, symbol=code)
+            detail = fund_overview_from_record(outcome, symbol=code)
         except ValueError as error:
-            warnings.append(f"{code}: fund detail invalid ({error})")
+            warnings.append(f"{code}: fund overview invalid ({error})")
             return
         if detail.fund_company is not None:
             fund.fund_company = detail.fund_company
@@ -499,6 +499,10 @@ class IngestService:
             fund.fund_manager = detail.fund_manager
         if detail.fund_aum is not None:
             fund.fund_aum = detail.fund_aum
+        if detail.fund_management_fee is not None:
+            fund.fund_management_fee = detail.fund_management_fee
+        if detail.fund_custody_fee is not None:
+            fund.fund_custody_fee = detail.fund_custody_fee
 
     def ingest_fund_overview(self, fund_id: int, symbol: str, *, actor: str) -> None:
         from fip.services.data_service.adapters.akshare.client import AkShareContractError

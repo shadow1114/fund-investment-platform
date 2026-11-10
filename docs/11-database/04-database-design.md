@@ -233,9 +233,9 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 
 ### 6.1.1 公司当前投影与来源历史（迁移 0040）
 
-`fund.fund.fund_company VARCHAR(128) NULL` 是产品级可空当前投影，由 data-service 在基础信息抓取中同步读取基金详情“基金公司”字段，校验基金代码后规范化填充；“基金管理人”可能为自然人，禁止映射为公司。没有可信公司字段时保持原投影不变；它不是规范化公司外键，不为本字段创建新的公司实体或关系，ERD v1.3 无需变更。
+`fund.fund.fund_company VARCHAR(128) NULL` 是产品级可空当前投影，由 data-service 在基金列表抓取时读取 `fund_overview_em` 的“基金管理人”机构字段，校验基金代码后规范化填充；不得使用个人字段“基金经理人”。没有可信公司字段时保持原投影不变；它不是规范化公司外键，不为本字段创建新的公司实体或关系，ERD v1.3 无需变更。
 
-历史公司来自不可变 `fund_basic_info_history` 快照，继承该快照 `available_at` / `availability_quality`。当前列表/公司选项读当前投影；PIT 在每条可见快照内先取去空白后的 `normalized_fields.fund_company`，缺失或为空串时只兼容同一条快照内的原始字段 `raw_fields["基金公司"]`。不从“基金管理人”或基金经理回退。排除不可用值后按 `available_at DESC, version DESC, id DESC` 选择最新可用的可见快照；字段回退不得跨快照拼接，不回退到当前列或未来快照，无可用可见快照时为 NULL。没有可靠供应商发布时间时使用抓取时间且标记 INFERRED。
+历史公司来自不可变 `fund_basic_info_history` 快照，继承该快照 `available_at` / `availability_quality`。当前列表/公司选项读当前投影；PIT 在每条可见快照内先取去空白后的 `normalized_fields.fund_company`，缺失或为空串时兼容同一条快照内的原始字段 `raw_fields["基金公司"]`，或已知来自 `fund_overview_em` 的 `raw_fields["基金管理人"]`。不得从“基金经理人”字段回退。排除不可用值后按 `available_at DESC, version DESC, id DESC` 选择最新可用的可见快照；字段回退不得跨快照拼接，不回退到当前列或未来快照，无可用可见快照时为 NULL。没有可靠供应商发布时间时使用抓取时间且标记 INFERRED。
 
 迁移 `0040_fund_company_name.py`（上游 0039）仅新增可空列，不含数据回填，downgrade 仅删除该列。回填工具 `backfill_fund_companies` 只使用保留在本地的基本信息快照，按最新可用可信公司值补齐 NULL 投影，默认 dry-run，分批扫描，apply 时锁定基金行并不覆盖已填值；不改写快照、历史时点或分类。执行前需审阅 dry-run 并显式指定 CLI `--apply`；本次交付没有执行生产迁移或数据回填。
 
@@ -247,7 +247,9 @@ ingested_at             TIMESTAMPTZ   NOT NULL
 | `asset_type` | VARCHAR(32) | 基金列表（`fund_name_em`）“基金类型”按 `-` 分割后的前半部分，如“混合型-灵活”→“混合型” |
 | `fund_aum` | NUMERIC(24,2) | 雪球详情“最新规模”，按单位（万/亿）换算为**元**的纯数字，如 “29.19亿”→ 2919000000.00；无法解析时为 NULL |
 
-`ingest-funds` 在遍历基金列表前，按基金代码多线程（`--detail-workers`，默认 8，范围 1–32）并发抓取雪球详情，原始返回照常留存；数据库写入仍在主线程串行执行。单只基金详情抓取或解析失败只产生告警，不影响其余基金；缺失值不覆盖已知值。`ingest-funds` 不再执行分类，分类由独立的 `classify-funds` 负责。0042 之前写入的快照规范键为 `company_name`，PIT 读取按上文回退到同一快照的 `raw_fields["基金公司"]`，结果与改名前一致。
+`ingest-funds` 对每个基金代码使用线程池（`--detail-workers`，默认 8，范围 1–32）并发抓取 `fund_overview_em`，原始返回照常留存；数据库写入仍在主线程串行执行。解析“基金经理人”到 `fund_manager`、“基金管理人”到 `fund_company`、“净资产规模”到 `fund_aum`（单位统一为元）、“管理费率”到 `fund_management_fee`、“托管费率”到 `fund_custody_fee`。费率按比例存储，例如源值 `1.20%` 写为 `0.01200000`。单只基金抓取或解析失败只产生告警，不影响其他基金；缺失值不覆盖已知值。抓取范围遵从 CLI 的 `--limit`，未指定时覆盖基金列表中的全部基金。`ingest-funds` 不执行分类，分类由独立的 `classify-funds` 负责。
+
+迁移 `0043_fund_management_custody_fees.py` 新增 `fund_management_fee`、`fund_custody_fee` 两个可空 `NUMERIC(12,8)` 字段，均以比例而非百分数存储；downgrade 删除这两列。
 
 ### 6.2 `provider_fund_identity`
 
@@ -1462,7 +1464,8 @@ PostgreSQL Architecture ACCEPTED
 | 版本 | 日期 | 变更内容 | 上游依赖 |
 |---|---|---|---|
 | **v1.11** | 2026-11-04 | 同步迁移 0040 可空公司投影、不可变快照/PIT 边界、只补空值的本地回填与正确份额映射关联、SQL 唯一计数及稳定分页。受影响下游：基金查询/公司选项 API、data-service 采集与回填、数据库迁移验收 | 产品 v2.6；数据域 v1.9；PostgreSQL 规范 v1.2；ERD v1.3（实体关系未变）；技术栈 v1.5 |
-| **v1.12** | 2026-11-05 | 将公司字段来源明确为基金详情“基金公司”，从公司当前投影、快照兼容字段及 PIT 原始值回退中排除“基金管理人” | 数据域 v2.0；基金 API v1.8；data-service 基本信息采集与公司选项查询 |
+| **v1.12** | 2026-11-05 | 明确公司投影来源和 PIT 快照回退语义 | 数据域 v2.0；基金 API v1.8 |
+| **v1.13** | 2026-11-10 | `ingest-funds` 使用 `fund_overview_em` 并发抓取公司、经理、AUM 和管理/托管费率；新增迁移 0043 费率列 | 数据域 v2.1；基金 API v1.9；data-service 采集服务 |
 | **v1.10** | 2026-09-14 | 同步迁移 0027 的 Plan-3 实际七表：更正 Method / Parameter 表名与版本闭包，移除未实现的矩阵成员明细表，记录 checksummed 下三角 JSONB、canonical float64 字符串、六态 Run、独立批准布尔、Validation 审计、事务边界、年化 Stage ⑥消费契约与 Plan-3B 延期 | `0027_plan3_estimation.py`、`2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.9** | 2026-08-27 | **第二批定案（7 项）**。`DBD-2` 条件性唯一约束采用**部分唯一索引**（PostgreSQL 原生，触发器方案无法被查询计划器利用、生成列方案的哨兵值会泄漏到查询条件）；`DBD-5` **建 `position_lot` 表**（`TC-3` 的赎回费阶梯依赖持有批次）；`DBD-6` `target_weights` **行式存储不用 JSONB**（「按基金查历史权重」需索引到基金维度）；`DBD-4` `selection_condition_result` 存全部条件并带 `condition_version`；`DBD-1`/`DBD-8`/`DBD-9` 保留期见 Policy C，回测主记录 10 年、逐期明细 2 年 + 归档。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.8** | 2026-08-27 | **Policy ⑦ 同步**。§20.2 补架构层已定案的完整验收条件表达式与「已定案 vs 待压测」对照；指出本域的分区、索引、W7 读取优化都是升级路径中第①步的具体内容，**须为框架服务而非等待压测结果**。详见 `TBD-resolution.md` Policy ⑦ | `02-architecture/06-technology-stack` v1.3 |

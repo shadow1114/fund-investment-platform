@@ -61,10 +61,18 @@ describe("generated nested response contracts", () => {
       fund_company: null,
       sub_status: "开放",
       manager_ids: [],
+      asset_type: "混合型",
+      fund_manager: "张经理",
+      fund_aum: 2919000000,
+      fund_management_fee: 0.012,
+      fund_custody_fee: 0.002,
     };
     expect(filters.fund_code).toBe("000001");
     expect(companyQuery.as_of_date).toBe("2026-01-31");
     expect(item.fund_company).toBeNull();
+    expect(item.asset_type).toBe("混合型");
+    expect(item.fund_manager).toBe("张经理");
+    expect(item.fund_management_fee).toBe(0.012);
     const unknownSubscriptionStatus: FundListResponseResponse["data"][number] =
       {
         ...item,

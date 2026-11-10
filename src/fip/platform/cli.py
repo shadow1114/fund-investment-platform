@@ -683,7 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=8,
         dest="detail_workers",
-        help="并发抓取雪球基金详情的线程数（1-32）",
+        help="并发抓取基金概况的线程数（1-32）",
     )
     p_funds.set_defaults(func=cmd_ingest_funds)
 

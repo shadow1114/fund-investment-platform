@@ -156,7 +156,7 @@ for (const viewport of [
   });
 }
 
-test("server paging 20/50/200 preserves totals, four columns, equal-name identities and URL on refresh", async ({
+test("server paging 20/50/200 preserves totals, research columns, equal-name identities and URL on refresh", async ({
   page,
 }) => {
   const requests = await installFixtures(page);
@@ -166,10 +166,27 @@ test("server paging 20/50/200 preserves totals, four columns, equal-name identit
   await expect(grid.locator(".ag-header-cell-text")).toHaveText([
     "基金代码",
     "基金名称",
+    "基金类型",
     "管理公司",
-    "申购状态",
+    "基金经理",
+    "基金规模",
+    "管理费率",
+    "托管费率",
     "详情",
   ]);
+  await expect(grid.getByRole("link", { name: "同名基金" })).toHaveCount(0);
+  await expect(
+    grid.getByRole("gridcell", { name: "张经理" }).first(),
+  ).toBeVisible();
+  await expect(
+    grid.getByRole("gridcell", { name: "29.19亿" }).first(),
+  ).toBeVisible();
+  await expect(
+    grid.getByRole("gridcell", { name: "1.20%" }).first(),
+  ).toBeVisible();
+  await expect(
+    grid.getByRole("gridcell", { name: "0.20%" }).first(),
+  ).toBeVisible();
   for (const size of [50, 200, 20]) {
     await page.getByRole("combobox", { name: "Page Size" }).click();
     await page.getByRole("option", { name: String(size), exact: true }).click();

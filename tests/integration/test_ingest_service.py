@@ -1,5 +1,6 @@
 import datetime as dt
 import io
+import threading
 from decimal import Decimal
 
 import pandas as pd
@@ -28,28 +29,39 @@ pytestmark = pytest.mark.integration
 
 FIXED_NOW = dt.datetime(2026, 8, 31, 18, 0, tzinfo=dt.UTC)
 
-FUND_LIST = pd.DataFrame({
-    "基金代码": ["000001", "000002"],
-    "基金简称": ["测试蓝筹混合A", "测试蓝筹混合C"],
-    "基金类型": ["混合型-灵活", "混合型-灵活"],
-})
+FUND_LIST = pd.DataFrame(
+    {
+        "基金代码": ["000001", "000002"],
+        "基金简称": ["测试蓝筹混合A", "测试蓝筹混合C"],
+        "基金类型": ["混合型-灵活", "混合型-灵活"],
+    }
+)
 
 
 def _detail_frame(code: str, company="测试基金管理有限公司", manager="张三 李四", aum="29.19亿"):
-    return pd.DataFrame({
-        "item": ["基金代码", "基金名称", "最新规模", "基金公司", "基金经理"],
-        "value": [code, "测试", aum, company, manager],
-    })
+    return pd.DataFrame(
+        {
+            "item": ["基金代码", "基金名称", "最新规模", "基金公司", "基金经理"],
+            "value": [code, "测试", aum, company, manager],
+        }
+    )
 
-NAV_FRAME = pd.DataFrame({
-    "净值日期": ["2020-01-02", "2020-01-03"],
-    "单位净值": ["1.1000", "1.0000"],
-})
 
-DIVIDEND_FRAME = pd.DataFrame({
-    "年份": ["2020"], "权益登记日": ["2020-01-02"],
-    "除息日": ["2020-01-03"], "每10份分红": ["每10份派现金1.0000元"],
-})
+NAV_FRAME = pd.DataFrame(
+    {
+        "净值日期": ["2020-01-02", "2020-01-03"],
+        "单位净值": ["1.1000", "1.0000"],
+    }
+)
+
+DIVIDEND_FRAME = pd.DataFrame(
+    {
+        "年份": ["2020"],
+        "权益登记日": ["2020-01-02"],
+        "除息日": ["2020-01-03"],
+        "每10份分红": ["每10份派现金1.0000元"],
+    }
+)
 
 SPLIT_FRAME = pd.DataFrame({"年份": [], "拆分折算日": [], "拆分折算比例": []})
 
@@ -58,6 +70,22 @@ def _fake_caller(name, **params):
     indicator = params.get("indicator")
     if name == "fund_name_em":
         return FUND_LIST
+    if name == "fund_overview_em":
+        code = params["symbol"]
+        return pd.DataFrame(
+            [
+                {
+                    "基金代码": f"{code}（前端）",
+                    "基金全称": "测试蓝筹混合",
+                    "基金类型": "混合型-灵活",
+                    "基金经理人": "张三 李四",
+                    "基金管理人": "测试基金管理有限公司",
+                    "净资产规模": "29.19亿元（截止至：2026年09月30日）",
+                    "管理费率": "1.20%（每年）",
+                    "托管费率": "0.20%（每年）",
+                }
+            ]
+        )
     if name == "fund_individual_basic_info_xq":
         return _detail_frame(params["symbol"])
     if indicator == "单位净值走势":
@@ -106,8 +134,7 @@ def test_nav_uses_declared_lag_and_inferred_quality(db_session, service):
     service.ingest_fund_list()
     sc = db_session.query(FundShareClass).filter_by(share_class_code="A").one()
     service.ingest_nav(sc.id, "000001")
-    row = db_session.query(FundNav).filter_by(
-        effective_at=dt.date(2020, 1, 2)).one()
+    row = db_session.query(FundNav).filter_by(effective_at=dt.date(2020, 1, 2)).one()
     assert row.availability_quality == "INFERRED"
     assert row.available_at == dt.datetime(2020, 1, 3, tzinfo=dt.UTC)
 
@@ -120,14 +147,21 @@ def test_revised_value_creates_version_two(db_session, service):
 
     revised = AkShareSourceAdapter(
         clock=lambda: FIXED_NOW,
-        caller=lambda *_a, **_k: pd.DataFrame({
-            "净值日期": ["2020-01-02"], "单位净值": ["1.2000"],
-        }),
+        caller=lambda *_a, **_k: pd.DataFrame(
+            {
+                "净值日期": ["2020-01-02"],
+                "单位净值": ["1.2000"],
+            }
+        ),
     )
     IngestService(db_session, revised, disclosure_lag_days=1).ingest_nav(sc.id, "000001")
 
-    rows = db_session.query(FundNav).filter_by(
-        effective_at=dt.date(2020, 1, 2)).order_by(FundNav.version).all()
+    rows = (
+        db_session.query(FundNav)
+        .filter_by(effective_at=dt.date(2020, 1, 2))
+        .order_by(FundNav.version)
+        .all()
+    )
     assert [r.version for r in rows] == [1, 2]
     assert [r.unit_nav for r in rows] == [Decimal("1.1000"), Decimal("1.2000")]
 
@@ -141,15 +175,20 @@ def test_end_to_end_pit_query_returns_adjusted_series(db_session, service):
     service.rebuild_adjusted_nav(sc.id, dt.date(2026, 8, 31))
 
     ctx = DecisionExecutionContext(
-        decision_id="D-E2E", decision_at=dt.date(2026, 8, 31),
-        data_as_of=dt.date(2026, 8, 31), strategy_version="sv-1",
-        policy_version="pv-1", code_version="cv-1",
+        decision_id="D-E2E",
+        decision_at=dt.date(2026, 8, 31),
+        data_as_of=dt.date(2026, 8, 31),
+        strategy_version="sv-1",
+        policy_version="pv-1",
+        code_version="cv-1",
         trigger_type=TriggerType.PERIODIC,
         recompute_scope=RecomputeScope.FULL_PIPELINE,
         runtime_mode=RuntimeMode.BACKTEST,
     )
-    points = PitDataContext(context=ctx, session=db_session).navs().adjusted_nav_series(
-        sc.id, dt.date(2020, 1, 1), dt.date(2020, 12, 31)
+    points = (
+        PitDataContext(context=ctx, session=db_session)
+        .navs()
+        .adjusted_nav_series(sc.id, dt.date(2020, 1, 1), dt.date(2020, 12, 31))
     )
     # 1.10 → 除息 0.10 后 1.00：复权后收益为 0
     assert [p.adjusted_nav for p in points] == [Decimal("1.1"), Decimal("1.1")]
@@ -161,20 +200,31 @@ def test_end_to_end_pit_query_returns_adjusted_series(db_session, service):
 # 里，因此 _MergedEvent 的合并语义（对分红求和、对拆分连乘）此前只由阅读证明。
 # 下面这组 fixture 让同一个 effective_at 同时出现分红与拆分。
 
-MERGE_DIVIDEND_FRAME = pd.DataFrame({
-    "年份": ["2020"], "权益登记日": ["2020-01-02"],
-    "除息日": ["2020-01-03"], "每10份分红": ["每10份派现金1.0000元"],
-})
+MERGE_DIVIDEND_FRAME = pd.DataFrame(
+    {
+        "年份": ["2020"],
+        "权益登记日": ["2020-01-02"],
+        "除息日": ["2020-01-03"],
+        "每10份分红": ["每10份派现金1.0000元"],
+    }
+)
 
-MERGE_SPLIT_FRAME = pd.DataFrame({
-    "年份": ["2020"], "拆分折算日": ["2020-01-03"], "拆分折算比例": ["2.0000"],
-})
+MERGE_SPLIT_FRAME = pd.DataFrame(
+    {
+        "年份": ["2020"],
+        "拆分折算日": ["2020-01-03"],
+        "拆分折算比例": ["2.0000"],
+    }
+)
 
 
 def _merge_caller(name, **params):
     indicator = params.get("indicator")
     if name == "fund_name_em":
         return FUND_LIST
+    if name == "fund_overview_em":
+        code = params["symbol"]
+        return pd.DataFrame([{"基金代码": code, "基金全称": "测试", "基金类型": "混合型"}])
     if name == "fund_individual_basic_info_xq":
         return _detail_frame(params["symbol"])
     if indicator == "单位净值走势":
@@ -217,12 +267,13 @@ def test_same_day_dividend_and_split_merge_into_one_row(db_session, merge_servic
     assert len(rows) == 1
     row = rows[0]
     assert row.effective_at == dt.date(2020, 1, 3)
-    assert row.dividend_per_unit == Decimal("0.1")   # 求和没吃掉拆分
-    assert row.split_ratio == Decimal("2")           # 连乘没吃掉分红
+    assert row.dividend_per_unit == Decimal("0.1")  # 求和没吃掉拆分
+    assert row.split_ratio == Decimal("2")  # 连乘没吃掉分红
     assert row.available_at == dt.datetime(2020, 1, 6, tzinfo=dt.UTC)
 
 
 # --- 重复灌入不得产生新版本 ---------------------------------------------
+
 
 def test_repeated_distribution_ingest_does_not_create_new_versions(db_session, service):
     """重跑是预期的日常增量用法，不得把整部分红史重新插一遍新版本。
@@ -239,9 +290,12 @@ def test_repeated_distribution_ingest_does_not_create_new_versions(db_session, s
 
     assert first == 1
     assert second == 0, "第二次灌入同一份 fixture 不得插入任何行"
-    rows = db_session.query(FundDistribution).filter_by(
-        share_class_id=sc.id, effective_at=dt.date(2020, 1, 3)
-    ).order_by(FundDistribution.version).all()
+    rows = (
+        db_session.query(FundDistribution)
+        .filter_by(share_class_id=sc.id, effective_at=dt.date(2020, 1, 3))
+        .order_by(FundDistribution.version)
+        .all()
+    )
     assert [r.version for r in rows] == [1]
 
 
@@ -254,26 +308,34 @@ def test_revised_distribution_still_creates_new_version(db_session, service):
     revised = AkShareSourceAdapter(
         clock=lambda: FIXED_NOW,
         caller=lambda name, **params: (
-            FUND_LIST if name == "fund_name_em"
-            else pd.DataFrame({
-                "年份": ["2020"], "权益登记日": ["2020-01-02"],
-                "除息日": ["2020-01-03"], "每10份分红": ["每10份派现金2.0000元"],
-            }) if params.get("indicator") == "分红送配详情"
+            FUND_LIST
+            if name == "fund_name_em"
+            else pd.DataFrame(
+                {
+                    "年份": ["2020"],
+                    "权益登记日": ["2020-01-02"],
+                    "除息日": ["2020-01-03"],
+                    "每10份分红": ["每10份派现金2.0000元"],
+                }
+            )
+            if params.get("indicator") == "分红送配详情"
             else SPLIT_FRAME
         ),
     )
-    IngestService(db_session, revised, disclosure_lag_days=1).ingest_distributions(
-        sc.id, "000001"
-    )
+    IngestService(db_session, revised, disclosure_lag_days=1).ingest_distributions(sc.id, "000001")
 
-    rows = db_session.query(FundDistribution).filter_by(
-        share_class_id=sc.id, effective_at=dt.date(2020, 1, 3)
-    ).order_by(FundDistribution.version).all()
+    rows = (
+        db_session.query(FundDistribution)
+        .filter_by(share_class_id=sc.id, effective_at=dt.date(2020, 1, 3))
+        .order_by(FundDistribution.version)
+        .all()
+    )
     assert [r.version for r in rows] == [1, 2]
     assert [r.dividend_per_unit for r in rows] == [Decimal("0.1"), Decimal("0.2")]
 
 
 # --- provider 标识映射 ---------------------------------------------------
+
 
 def test_fund_list_registers_provider_identity(db_session, service):
     """ingest_fund_list 必须把 AKShare 代码登记成 provider_fund_identity。
@@ -288,9 +350,7 @@ def test_fund_list_registers_provider_identity(db_session, service):
 
     mapping = {
         row.provider_fund_id: row.share_class_id
-        for row in db_session.query(ProviderFundIdentity).filter_by(
-            provider_id=provider.id
-        ).all()
+        for row in db_session.query(ProviderFundIdentity).filter_by(provider_id=provider.id).all()
     }
     assert mapping == {"000001": a.id, "000002": c.id}
 
@@ -323,6 +383,7 @@ def test_provider_identity_registration_is_idempotent(db_session, service):
 # None` 里）的理由：映射可能是上一轮遗漏的、也可能被人工清理过，
 # 「份额类别已存在」不蕴含「映射已存在」。
 
+
 def test_missing_mapping_is_registered_even_when_share_class_exists(db_session, service):
     """删掉映射后重跑：份额类别一个不新建，映射必须被补回来。"""
     service.ingest_fund_list()
@@ -337,9 +398,7 @@ def test_missing_mapping_is_registered_even_when_share_class_exists(db_session, 
     provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     mapping = {
         row.provider_fund_id: row.share_class_id
-        for row in db_session.query(ProviderFundIdentity).filter_by(
-            provider_id=provider.id
-        ).all()
+        for row in db_session.query(ProviderFundIdentity).filter_by(provider_id=provider.id).all()
     }
     a = db_session.query(FundShareClass).filter_by(share_class_code="A").one()
     c = db_session.query(FundShareClass).filter_by(share_class_code="C").one()
@@ -353,19 +412,24 @@ def test_missing_mapping_is_registered_even_when_share_class_exists(db_session, 
 # split_share_class_name 归到另一个 product_name 就会触发。
 # 方向保持（响亮失败优于静默沿用旧映射），但改为收集全部冲突、跑完再统一报告。
 
-RENAMED_FUND_LIST = pd.DataFrame({
-    # 000001 的简称改了名，split_share_class_name 会把它归到另一个
-    # product_name，于是解析到一个新的份额类别 —— 这就是一次重指派冲突。
-    # 000003 是全新的代码，必须照常登记。
-    "基金代码": ["000001", "000003"],
-    "基金简称": ["测试改名混合A", "测试另一只混合A"],
-    "基金类型": ["混合型", "混合型"],
-})
+RENAMED_FUND_LIST = pd.DataFrame(
+    {
+        # 000001 的简称改了名，split_share_class_name 会把它归到另一个
+        # product_name，于是解析到一个新的份额类别 —— 这就是一次重指派冲突。
+        # 000003 是全新的代码，必须照常登记。
+        "基金代码": ["000001", "000003"],
+        "基金简称": ["测试改名混合A", "测试另一只混合A"],
+        "基金类型": ["混合型", "混合型"],
+    }
+)
 
 
 def _renamed_caller(name, **params):
     if name == "fund_name_em":
         return RENAMED_FUND_LIST
+    if name == "fund_overview_em":
+        code = params["symbol"]
+        return pd.DataFrame([{"基金代码": code, "基金全称": "测试", "基金类型": "混合型"}])
     if name == "fund_individual_basic_info_xq":
         return _detail_frame(params["symbol"])
     raise AssertionError(f"未预期的调用 {name} {params}")
@@ -379,15 +443,17 @@ def _renamed_service(session) -> IngestService:
 def test_reassignment_conflict_is_collected_not_raised(db_session, service):
     """冲突逐条收集并如实报告，而不是抛异常炸掉整批。"""
     service.ingest_fund_list()
-    a = db_session.query(FundShareClass).filter_by(
-        display_name="测试蓝筹混合A").one()
+    a = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one()
 
     result = _renamed_service(db_session).ingest_fund_list()
 
     assert result.reassignments == ()
     assert any("name changed" in item for item in result.warnings)
-    identity = db_session.query(ProviderFundIdentity).filter_by(
-        provider_fund_id="000001", valid_to=None).one()
+    identity = (
+        db_session.query(ProviderFundIdentity)
+        .filter_by(provider_fund_id="000001", valid_to=None)
+        .one()
+    )
     assert identity.share_class_id == a.id
 
 
@@ -396,8 +462,7 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
     service.ingest_fund_list()
     # 改名后的批次里也会出现 share_class_code == "A" 的新份额类别，
     # 因此这里必须在第二批之前把「原来那一条」记下来。
-    a_id = db_session.query(FundShareClass).filter_by(
-        display_name="测试蓝筹混合A").one().id
+    a_id = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one().id
 
     result = _renamed_service(db_session).ingest_fund_list()
     assert any("name changed" in item for item in result.warnings)
@@ -405,9 +470,7 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
     provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     mapping = {
         row.provider_fund_id: row.share_class_id
-        for row in db_session.query(ProviderFundIdentity).filter_by(
-            provider_id=provider.id
-        ).all()
+        for row in db_session.query(ProviderFundIdentity).filter_by(provider_id=provider.id).all()
     }
     # 000003 是本批新代码，必须已登记；
     # 000001 的旧映射必须【原样保留】，绝不静默改指向新份额类别。
@@ -422,7 +485,7 @@ def test_conflict_does_not_discard_the_rest_of_the_batch(db_session, service):
     assert len(fund_list_payloads) == 2
 
 
-def test_fund_list_populates_asset_type_and_snowball_details(db_session, service):
+def test_fund_list_populates_asset_type_and_overview_metadata(db_session, service):
     before = db_session.query(func.max(RawPayload.id)).scalar() or 0
     service.ingest_fund_list()
     share = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one()
@@ -439,13 +502,81 @@ def test_fund_list_populates_asset_type_and_snowball_details(db_session, service
     assert sorted(datasets) == ["000001", "000002"]
 
 
-def test_fund_detail_failure_only_warns_for_that_fund(db_session):
+def test_fund_list_concurrently_ingests_every_overview_field(db_session):
+    codes = [f"{code:06d}" for code in range(1, 13)]
+    fund_list = pd.DataFrame(
+        {
+            "基金代码": codes,
+            "基金简称": [f"测试基金{code}A" for code in codes],
+            "基金类型": ["混合型-灵活"] * len(codes),
+        }
+    )
+    two_concurrent_calls = threading.Barrier(2)
+    overview_codes: list[str] = []
+    observed_lock = threading.Lock()
+
+    def caller(name, **params):
+        if name == "fund_name_em":
+            return fund_list
+        if name == "fund_overview_em":
+            code = params["symbol"]
+            with observed_lock:
+                overview_codes.append(code)
+            two_concurrent_calls.wait(timeout=2)
+            return pd.DataFrame(
+                [
+                    {
+                        "基金代码": f"{code}（前端）",
+                        "基金全称": f"测试全称{code}",
+                        "基金类型": "混合型-灵活",
+                        "基金经理人": "经理甲、经理乙",
+                        "基金管理人": "华夏基金",
+                        "净资产规模": "29.19亿元（截止至：2026年09月30日）",
+                        "管理费率": "1.20%（每年）",
+                        "托管费率": "0.20%（每年）",
+                    }
+                ]
+            )
+        raise AssertionError(f"unexpected source call: {name}")
+
+    ingest = IngestService(
+        db_session,
+        AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=caller),
+        disclosure_lag_days=1,
+    )
+
+    result = ingest.ingest_fund_list(detail_workers=4)
+
+    assert result.created == 12
+    assert sorted(overview_codes) == codes
+    share = db_session.query(FundShareClass).filter_by(display_name="测试基金000001A").one()
+    fund = db_session.get(Fund, share.fund_id)
+    assert fund.fund_manager == "经理甲、经理乙"
+    assert fund.fund_company == "华夏基金"
+    assert fund.fund_aum == Decimal("2919000000.00")
+    assert fund.fund_management_fee == Decimal("0.01200000")
+    assert fund.fund_custody_fee == Decimal("0.00200000")
+
+
+def test_fund_overview_failure_only_warns_for_that_fund(db_session):
     def caller(name, **params):
         if name == "fund_name_em":
             return FUND_LIST
         if params["symbol"] == "000002":
-            raise ConnectionError("snowball down")
-        return _detail_frame(params["symbol"], aum="2177.53万")
+            raise ConnectionError("overview source down")
+        code = params["symbol"]
+        return pd.DataFrame(
+            [
+                {
+                    "基金代码": code,
+                    "基金全称": "测试",
+                    "基金类型": "混合型",
+                    "基金管理人": "测试公司",
+                    "基金经理人": "测试经理",
+                    "净资产规模": "2177.53万元",
+                }
+            ]
+        )
 
     adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=caller)
     result = IngestService(db_session, adapter, disclosure_lag_days=1).ingest_fund_list(
@@ -453,9 +584,7 @@ def test_fund_detail_failure_only_warns_for_that_fund(db_session):
     )
 
     assert result.created == 2
-    assert any(
-        item.startswith("000002: fund detail unavailable") for item in result.warnings
-    )
+    assert any(item.startswith("000002: fund overview unavailable") for item in result.warnings)
     share = db_session.query(FundShareClass).filter_by(display_name="测试蓝筹混合A").one()
     fund = db_session.get(Fund, share.fund_id)
     assert fund.fund_aum == Decimal("21775300.00")
@@ -468,22 +597,30 @@ def test_fund_list_rejects_invalid_detail_worker_count(service):
 
 def test_explicit_identity_reassignment_remains_reported(db_session, service):
     service.ingest_fund_list()
-    provider = db_session.query(DataProvider).filter_by(provider_code='AKSHARE').one()
+    provider = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     shares = db_session.query(FundShareClass).order_by(FundShareClass.id).all()
-    identity = db_session.query(ProviderFundIdentity).filter_by(provider_fund_id='000001').one()
+    identity = db_session.query(ProviderFundIdentity).filter_by(provider_fund_id="000001").one()
     other = next(share for share in shares if share.id != identity.share_class_id)
-    conflict = service._ensure_provider_identity(provider, '000001', other.id, FIXED_NOW)
+    conflict = service._ensure_provider_identity(provider, "000001", other.id, FIXED_NOW)
     assert conflict.existing_share_class_id == identity.share_class_id
     assert conflict.incoming_share_class_id == other.id
-    assert db_session.query(ProviderFundIdentity).filter_by(provider_fund_id='000001').count() == 1
+    assert db_session.query(ProviderFundIdentity).filter_by(provider_fund_id="000001").count() == 1
 
 
-YIELD_FRAME = pd.DataFrame({
-    "曲线名称": ["中债国债收益率曲线", "中债商业银行普通债收益率曲线(AAA)"],
-    "日期": ["2024-01-02", "2024-01-02"],
-    "3月": [1.80, 2.30], "6月": [1.90, 2.40], "1年": [2.00, 2.50], "3年": [2.20, 2.60],
-    "5年": [2.30, 2.70], "7年": [2.40, 2.80], "10年": [2.56, 2.89], "30年": [2.80, 3.00],
-})
+YIELD_FRAME = pd.DataFrame(
+    {
+        "曲线名称": ["中债国债收益率曲线", "中债商业银行普通债收益率曲线(AAA)"],
+        "日期": ["2024-01-02", "2024-01-02"],
+        "3月": [1.80, 2.30],
+        "6月": [1.90, 2.40],
+        "1年": [2.00, 2.50],
+        "3年": [2.20, 2.60],
+        "5年": [2.30, 2.70],
+        "7年": [2.40, 2.80],
+        "10年": [2.56, 2.89],
+        "30年": [2.80, 3.00],
+    }
+)
 
 
 def _risk_free_service(db_session, frame, calls):
@@ -516,11 +653,10 @@ def test_risk_free_ingest_splits_windows_and_is_idempotent(db_session):
     calls: list[dict] = []
     service = _risk_free_service(db_session, YIELD_FRAME, calls)
     service.ingest_risk_free_rate(dt.date(2022, 1, 1), dt.date(2024, 1, 10))
+
     def _day(value: str) -> dt.date:
         return dt.datetime.strptime(value, "%Y%m%d").date()
 
-    assert all(
-        _day(c["end_date"]) - _day(c["start_date"]) < dt.timedelta(days=365) for c in calls
-    )
+    assert all(_day(c["end_date"]) - _day(c["start_date"]) < dt.timedelta(days=365) for c in calls)
     assert calls[0]["start_date"] == "20220101" and calls[-1]["end_date"] == "20240110"
     assert service.ingest_risk_free_rate(dt.date(2024, 1, 1), dt.date(2024, 1, 10)) == 0

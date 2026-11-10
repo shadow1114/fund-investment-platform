@@ -16,7 +16,8 @@ from fip.services.data_service.models.fund import Fund, FundBasicInfoHistory
 
 _PLACEHOLDERS = {"nan", "none", "null", "<na>", "--", "-", "暂无"}
 _AUM_UNITS = {"": Decimal(1), "万": Decimal(10_000), "亿": Decimal(100_000_000)}
-_AUM_PATTERN = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*(万|亿)?元?")
+_AUM_PATTERN = re.compile(r"^\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(亿|万)?元?\s*(?:[（(].*[）)])?\s*$")
+_PERCENT_RATE_PATTERN = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:[（(].*[）)])?\s*$")
 _DETAIL_LABELS = {"基金公司": "company", "基金经理": "manager", "最新规模": "aum"}
 
 
@@ -38,7 +39,7 @@ def _usable_fund_company(value: Any) -> str | None:
 
 
 def parse_fund_aum(value: Any) -> Decimal | None:
-    """把雪球「最新规模」（如 29.19亿、2177.53万）换算为以元为单位的纯数字。"""
+    """把基金规模换算为以元为单位的纯数字。"""
     text_value = _usable_text(value, max_length=64, label="fund aum")
     if text_value is None:
         return None
@@ -46,10 +47,24 @@ def parse_fund_aum(value: Any) -> Decimal | None:
     if match is None:
         return None
     try:
-        amount = Decimal(match.group(1)) * _AUM_UNITS[match.group(2) or ""]
+        amount = Decimal(match.group(1).replace(",", "")) * _AUM_UNITS[match.group(2) or ""]
     except InvalidOperation:
         return None
     return amount.quantize(Decimal("0.01"))
+
+
+def parse_fund_fee_rate(value: Any) -> Decimal | None:
+    """Parse a displayed percentage into a unit ratio (1.20% -> 0.01200000)."""
+    text_value = _usable_text(value, max_length=64, label="fund fee rate")
+    if text_value is None:
+        return None
+    match = _PERCENT_RATE_PATTERN.fullmatch(text_value.replace(",", ""))
+    if match is None:
+        return None
+    try:
+        return (Decimal(match.group(1)) / Decimal(100)).quantize(Decimal("0.00000001"))
+    except InvalidOperation:
+        return None
 
 
 def fund_company_from_fields(
@@ -117,6 +132,48 @@ class SnowballFundDetail:
     fund_company: str | None
     fund_manager: str | None
     fund_aum: Decimal | None
+
+
+@dataclass(frozen=True)
+class FundOverviewDetail:
+    fund_company: str | None
+    fund_manager: str | None
+    fund_aum: Decimal | None
+    fund_management_fee: Decimal | None
+    fund_custody_fee: Decimal | None
+
+
+def fund_overview_from_record(record: SourceRecord, *, symbol: str) -> FundOverviewDetail:
+    """Extract company, manager, assets and fees from an identity-checked fund overview."""
+    if (
+        record.dataset != "fund_overview"
+        or record.request_params.get("symbol") != symbol
+        or re.fullmatch(r"[0-9]{6}", symbol) is None
+    ):
+        raise ValueError("fund overview source identity mismatch")
+    try:
+        frame = pd.read_parquet(io.BytesIO(record.payload))
+    except Exception as exc:
+        raise ValueError("fund overview source payload is not valid parquet") from exc
+    if not frame.columns.is_unique or len(frame) != record.row_count:
+        raise ValueError("fund overview source columns or row count are invalid")
+    if frame.empty or "基金代码" not in frame:
+        raise ValueError("fund overview source returned no identifiable fund row")
+    if len(frame) != 1:
+        raise ValueError("fund overview source returned multiple fund rows")
+
+    returned_codes = re.findall(r"(?<![0-9])[0-9]{6}(?![0-9])", str(frame.iloc[0]["基金代码"]))
+    if symbol not in returned_codes:
+        raise ValueError("fund overview source fund code does not match request")
+
+    row = frame.iloc[0]
+    return FundOverviewDetail(
+        fund_company=_usable_fund_company(row.get("基金管理人")),
+        fund_manager=_usable_text(row.get("基金经理人"), max_length=256, label="fund manager"),
+        fund_aum=parse_fund_aum(row.get("净资产规模")),
+        fund_management_fee=parse_fund_fee_rate(row.get("管理费率")),
+        fund_custody_fee=parse_fund_fee_rate(row.get("托管费率")),
+    )
 
 
 def fund_detail_from_record(record: SourceRecord, *, symbol: str) -> SnowballFundDetail:

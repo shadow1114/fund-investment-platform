@@ -61,6 +61,11 @@ async function installFundResearchFixtures(page: Page, canManage = false) {
           fund_classification: "EQUITY",
           management_company_id: "MC-1",
           fund_company: "测试基金管理有限公司",
+          asset_type: "混合型",
+          fund_manager: "测试经理",
+          fund_aum: 2919000000,
+          fund_management_fee: 0.012,
+          fund_custody_fee: 0.002,
           inception_date: "2020-01-01",
           lifecycle_status: "NORMAL",
           investment_eligibility: "FULLY_ELIGIBLE",
@@ -185,10 +190,7 @@ test("authorized basic-info actions remain inside the research grid", async ({
   const grid = page.getByRole("grid", { name: "基金研究结果" });
   await expect(
     grid.getByRole("columnheader", { name: "基本信息" }),
-  ).toBeVisible();
-  await expect(
-    grid.getByRole("link", { name: "在数据中心抓取基本信息" }).first(),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "基金研究结果区" }).locator(":scope > *"),
   ).toHaveCount(1);

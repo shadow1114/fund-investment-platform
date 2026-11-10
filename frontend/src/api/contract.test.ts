@@ -369,4 +369,19 @@ describe("frozen M1.7 OpenAPI projection", () => {
       "UNKNOWN",
     ]);
   });
+
+  it("includes the research grid's product detail fields", () => {
+    const item = loadOpenApi("frontend/openapi/m17.yaml").components.schemas
+      .FundListItem;
+
+    expect(item.properties).toEqual(
+      expect.objectContaining({
+        asset_type: expect.any(Object),
+        fund_manager: expect.any(Object),
+        fund_aum: expect.any(Object),
+        fund_management_fee: expect.any(Object),
+        fund_custody_fee: expect.any(Object),
+      }),
+    );
+  });
 });

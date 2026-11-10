@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ActionIcon } from "@mantine/core";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -11,7 +10,6 @@ import type {
   ListFundsParams,
   OrderParameter,
 } from "../api/generated/m17.schemas";
-import { getSessionQueryOptions } from "../api/queries";
 import {
   FundFilters,
   emptyFundFilters,
@@ -93,7 +91,6 @@ export const FundResearchPage = () => {
   const [search, setSearch] = useSearchParams();
   const [detailFund, setDetailFund] = useState<FundListItem | null>(null);
   const [queryCollapsed, setQueryCollapsed] = useState(false);
-  const session = useQuery(getSessionQueryOptions());
   const serializedSearch = search.toString();
   const params = useMemo(
     () => parseParams(new URLSearchParams(serializedSearch)),
@@ -175,10 +172,6 @@ export const FundResearchPage = () => {
               key={serializedSearch}
               params={params}
               onOpenDetail={setDetailFund}
-              returnTo={"/funds?" + search.toString()}
-              canManageIngestion={
-                session.data?.capabilities?.can_manage_data_ingestion ?? false
-              }
               onPageChange={changePagination}
               onSortChange={changeSort}
             />

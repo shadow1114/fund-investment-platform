@@ -10,6 +10,7 @@ from fip.services.data_service.company import (
     fund_company_from_fields,
     fund_detail_from_record,
     parse_fund_aum,
+    parse_fund_fee_rate,
     raw_fund_company_from_record,
 )
 from fip.services.data_service.ingest import _asset_type
@@ -92,6 +93,7 @@ def test_detail_source_rejects_duplicate_company_fields():
     ("value", "expected"),
     [
         ("29.19亿", Decimal("2919000000.00")),
+        ("29.19亿元（截止至：2026年09月30日）", Decimal("2919000000.00")),
         ("2177.53万", Decimal("21775300.00")),
         ("1,234.5", Decimal("1234.50")),
         ("1234.5元", Decimal("1234.50")),
@@ -103,6 +105,21 @@ def test_detail_source_rejects_duplicate_company_fields():
 )
 def test_parse_fund_aum_returns_plain_yuan(value, expected):
     assert parse_fund_aum(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1.20%（每年）", Decimal("0.01200000")),
+        ("0.20%", Decimal("0.00200000")),
+        ("0.00%（每年）", Decimal("0.00000000")),
+        ("---（每年）", None),
+        ("1.20（每年）", None),
+        (None, None),
+    ],
+)
+def test_parse_fund_fee_rate_returns_decimal_ratio(value, expected):
+    assert parse_fund_fee_rate(value) == expected
 
 
 @pytest.mark.parametrize(

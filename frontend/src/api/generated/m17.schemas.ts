@@ -560,6 +560,16 @@ export type FundListItemFundCode = string | null;
 
 export type FundListItemFundCompany = string | null;
 
+export type FundListItemAssetType = string | null;
+
+export type FundListItemFundManager = string | null;
+
+export type FundListItemFundAum = number | null;
+
+export type FundListItemFundManagementFee = number | null;
+
+export type FundListItemFundCustodyFee = number | null;
+
 export type FundListItemSubStatus =
   (typeof FundListItemSubStatus)[keyof typeof FundListItemSubStatus];
 
@@ -583,6 +593,11 @@ export interface FundListItem {
   /** @pattern ^[0-9]{6}$ */
   fund_code?: FundListItemFundCode;
   fund_company?: FundListItemFundCompany;
+  asset_type?: FundListItemAssetType;
+  fund_manager?: FundListItemFundManager;
+  fund_aum?: FundListItemFundAum;
+  fund_management_fee?: FundListItemFundManagementFee;
+  fund_custody_fee?: FundListItemFundCustodyFee;
   sub_status: FundListItemSubStatus;
   manager_ids: string[];
 }

@@ -35,6 +35,7 @@ def test_basic_info_ingest_stores_fund_company_but_not_manager_data(db_session):
             return FUND_LIST
         if name == "fund_overview_em":
             fields: dict[str, list[str | None]] = {
+                "基金代码": [params["symbol"]],
                 "基金全称": ["测试蓝筹混合"],
                 "基金类型": ["混合型"],
             }

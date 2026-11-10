@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef } from "react";
 import type { MutableRefObject } from "react";
 import type { IDatasource, IGetRowsParams, ColDef } from "ag-grid-community";
-import { Link } from "react-router-dom";
 
 import type {
   FundListItem,
@@ -12,12 +11,9 @@ import type {
 } from "../../api/generated/m17.schemas";
 import { fundPageQueryOptions, queryKeys } from "../../api/queries";
 import { ResearchDataTable } from "../../components/ResearchDataTable";
-import { FundBasicInfoRefreshButton } from "./FundIngestionPanel";
 
 type Props = {
   params: ListFundsParams;
-  returnTo: string;
-  canManageIngestion?: boolean;
   onOpenDetail: (fund: FundListItem) => void;
   onPageChange: (page: number, pageSize: number) => void;
   onSortChange: (sort: string, order: "asc" | "desc") => void;
@@ -51,6 +47,19 @@ export const mapGridRequestToFundParams = (
 };
 
 export type FundPageResult = { rows: FundListItem[]; meta: FundListMeta };
+
+const formatAum = (value?: number | null) => {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const unit =
+    value >= 100_000_000 ? 100_000_000 : value >= 10_000 ? 10_000 : 1;
+  const suffix = unit === 100_000_000 ? "亿" : unit === 10_000 ? "万" : "元";
+  return `${Number((value / unit).toFixed(2))}${suffix}`;
+};
+
+const formatRate = (value?: number | null) =>
+  value == null || !Number.isFinite(value)
+    ? "—"
+    : `${(value * 100).toFixed(2)}%`;
 
 export const createFundPageDatasource = ({
   params,
@@ -116,8 +125,6 @@ export const createFundPageDatasource = ({
 
 export const FundTable = ({
   params,
-  returnTo,
-  canManageIngestion = false,
   onOpenDetail,
   onPageChange,
   onSortChange,
@@ -173,14 +180,15 @@ export const FundTable = ({
         headerName: "基金名称",
         minWidth: 180,
         sort: params.sort === "fund_name" ? params.order : null,
-        cellRenderer: ({ data }: { data?: FundListItem }) =>
-          data ? (
-            <Link
-              to={`/funds/${data.fund_id}?share_class_id=${encodeURIComponent(data.share_class_id)}&return_to=${encodeURIComponent(returnTo)}${data.fund_code ? `&fund_code=${encodeURIComponent(data.fund_code)}` : ""}${params.as_of_date ? `&as_of_date=${encodeURIComponent(params.as_of_date)}` : ""}`}
-            >
-              {data.fund_name}
-            </Link>
-          ) : null,
+        cellRenderer: ({ value }: { value?: string }) => value || "—",
+      },
+      {
+        field: "asset_type",
+        colId: "asset_type",
+        headerName: "基金类型",
+        minWidth: 120,
+        sortable: false,
+        valueFormatter: ({ value }) => value || "—",
       },
       {
         field: "fund_company",
@@ -191,13 +199,36 @@ export const FundTable = ({
         valueFormatter: ({ value }) => value || "—",
       },
       {
-        field: "sub_status",
-        colId: "sub_status",
-        headerName: "申购状态",
-        minWidth: 130,
-        sort: params.sort === "sub_status" ? params.order : null,
-        valueFormatter: ({ value }) =>
-          value === "开放" ? "开放（占位）" : "未知",
+        field: "fund_manager",
+        colId: "fund_manager",
+        headerName: "基金经理",
+        minWidth: 140,
+        sortable: false,
+        valueFormatter: ({ value }) => value || "—",
+      },
+      {
+        field: "fund_aum",
+        colId: "fund_aum",
+        headerName: "基金规模",
+        minWidth: 120,
+        sortable: false,
+        valueFormatter: ({ value }) => formatAum(value),
+      },
+      {
+        field: "fund_management_fee",
+        colId: "fund_management_fee",
+        headerName: "管理费率",
+        minWidth: 110,
+        sortable: false,
+        valueFormatter: ({ value }) => formatRate(value),
+      },
+      {
+        field: "fund_custody_fee",
+        colId: "fund_custody_fee",
+        headerName: "托管费率",
+        minWidth: 110,
+        sortable: false,
+        valueFormatter: ({ value }) => formatRate(value),
       },
       {
         colId: "detail",
@@ -217,32 +248,8 @@ export const FundTable = ({
             </Button>
           ) : null,
       },
-      ...(canManageIngestion
-        ? [
-            {
-              colId: "basic_info",
-              headerName: "基本信息",
-              sortable: false,
-              minWidth: 130,
-              cellRenderer: ({ data }: { data?: FundListItem }) =>
-                data ? (
-                  <FundBasicInfoRefreshButton
-                    fundId={data.fund_id}
-                    canManage={canManageIngestion}
-                  />
-                ) : null,
-            },
-          ]
-        : []),
     ],
-    [
-      canManageIngestion,
-      onOpenDetail,
-      params.as_of_date,
-      params.order,
-      params.sort,
-      returnTo,
-    ],
+    [onOpenDetail, params.order, params.sort],
   );
 
   const paginationChanged = useCallback(
@@ -355,8 +362,12 @@ export const FundTable = ({
         requiredColumnIds={[
           "fund_code",
           "fund_name",
+          "asset_type",
           "fund_company",
-          "sub_status",
+          "fund_manager",
+          "fund_aum",
+          "fund_management_fee",
+          "fund_custody_fee",
           "detail",
         ]}
         emptyMessage="没有符合条件的基金。"

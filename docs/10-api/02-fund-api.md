@@ -4,7 +4,7 @@
 > 业务语义来源：docs/05-fund-evaluation/（01 v1.3、02 v1.4、03/04 v1.2、05 v1.1）、docs/03-data/02-data-domain-model.md（v2.0）
 > 本域上游：docs/10-api/01-api-overview.md（v1.3）
 >
-> **文档版本**：v1.8 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.9 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -105,9 +105,11 @@
 | `page` / `page_size` | integer | 一基页码，默认 1 / 20；路由结构上限 500，实际还受全局请求上限约束（默认 200）；研究 UI 固定提供 20 / 50 / 200（200 已允许） |
 | `sort` / `order` | enum | `fund_code / fund_name / fund_company / sub_status / inception_date / aum`；默认基金名称升序；`asc / desc` |
 
+列表数据同时返回 `asset_type`、`fund_manager`、`fund_aum`（元）、`fund_management_fee` 和 `fund_custody_fee`。两项费率使用比例值（如 `0.012` 表示 `1.20%`）；基金研究页面负责格式化显示。字段为空时为 null。
+
 PostgreSQL 在同一一致性快照内完成筛选、每份额唯一计数、排序与 `LIMIT/OFFSET`，不取全库后切片。主排序空值置后，同值追加产品公开 `fund_id` 升序、内部份额主键升序，以保证分页稳定。空集合及越界页返回 `data: []` 并保留真实总数；空集合 `total_pages: 0`。无有效供应商映射时 `fund_code: null`，不丢失份额；一个产品多份额及同名产品仍各有稳定 `share_class_id`。
 
-`fund_company` 是产品当前展示投影，不是公司实体 ID：当前查询取 `fund.fund.fund_company`。基本信息抓取从基金详情源的“基金公司”字段取值，并校验来源基金代码与请求代码一致；不得从“基金管理人”或“基金经理”字段推断。PIT 查询在每条当时可见的不可变 Basic Info History 快照内，优先取去空白后的 `normalized_fields.fund_company`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；两个字段的回退不跨快照拼接，绝不回退到当前投影或未来快照。没有可用可见快照时返回 null。
+`fund_company` 是产品当前展示投影，不是公司实体 ID：当前查询取 `fund.fund.fund_company`。基金列表抓取从 `fund_overview_em` 的机构字段“基金管理人”取值，并校验来源基金代码与请求代码一致；不得从个人字段“基金经理人”推断。PIT 查询在每条当时可见的不可变 Basic Info History 快照内，优先取去空白后的 `normalized_fields.fund_company`；该字段缺失或为空串时，只兼容同一条快照内已验证的原始字段 `raw_fields["基金公司"]`，或确认来自 `fund_overview_em` 的 `raw_fields["基金管理人"]`。不回退到经理人字段。排除不可用值后，按 `available_at`、`version`、`id` 降序选择最新可用的可见快照；字段回退不跨快照拼接，绝不回退到当前投影或未来快照。没有可用可见快照时返回 null。
 
 当前列表响应的 `management_company_id` 固定为 null：尚无规范化管理公司 ID，不能由 `fund_company` 推造；传入该 ID 筛选仍明确返回 422。
 
@@ -1030,6 +1032,7 @@ GET /api/v1/funds/F999/evaluations?evaluation_period=3Y&as_of_date=2015-01-01
 |---|---|---|---|
 | **v1.7** | 2026-11-04 | 同步份额行身份、六位代码、公司来源/独立选项、SQL 稳定分页与占位申购状态；保留旧筛选与资源路径兼容。受影响下游：冻结 OpenAPI/严格响应模型、Orval 客户端、基金研究/详情/抓取入口 | 产品 v2.6；数据域 v1.9；API 总纲 v1.3；M1.7 契约 v1.2；`frontend/openapi/m17.yaml` |
 | **v1.8** | 2026-11-05 | 明确基金公司列只由已核对身份的“基金公司”字段提供；PIT 原始值回退同样限定为该字段，不再把“基金管理人”作为公司 | 数据域 v2.0；物理设计 v1.12；研究页公司列、公司筛选与独立公司选项 |
+| **v1.9** | 2026-11-10 | 基金列表返回类型、经理、规模和管理/托管费率，供研究 grid 展示 | 数据域 v2.1；物理设计 v1.13；冻结 OpenAPI、严格响应模型与生成客户端 |
 | **v1.6** | 2026-09-16 | 冻结 M1.7 基金检索/详情、净值、评价/评分与候选池端点路径；保留未纳入前端范围的路径待定 | `06-m17-frontend-contracts.md` |
 | **v1.5** | 2026-09-08 | `weight_source` 第一版枚举改为 `PROFILE_FIXED_V1`；保留 `VALIDATION_PENDING`，明确 OOS 检验决定使用资格而非权重 | Plan-2 设计 v1.0、`05-fund-evaluation/02` v1.3 |
 | **v1.4** | 2026-08-27 | **Policy ⑥ 同步（后由 2026-09-08 决策替代权重来源）**。§4.5 归因新增 `weight_source` 与 `effectiveness_verdict`，示例补一条 `EXCLUDED` 因子；新增 §4.5.3 —— `INVALID` 因子须在归因中留痕，`EXCLUDED`（因子无效，全体一致）与 `UNAVAILABLE`（该基金缺数据）是不同状态；新增 §4.5.4 —— 检验未产出时 `score_status = VALIDATION_PENDING` 且不返回分数。M1 当前 `weight_source` 固定为 `PROFILE_FIXED_V1`。 | `05-fund-evaluation/02` v1.1 |

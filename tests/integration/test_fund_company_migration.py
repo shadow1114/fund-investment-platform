@@ -2,7 +2,7 @@ import os
 import subprocess
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 pytestmark = pytest.mark.integration
 
@@ -57,3 +57,15 @@ def test_0040_adds_nullable_projection_to_old_fund_and_reverses_cleanly(db_engin
             connection.execute(
                 text("DELETE FROM fund.fund WHERE id=:fund_id"), {"fund_id": fund_id}
             )
+
+
+def test_0043_adds_nullable_fund_management_and_custody_fee_columns(db_engine):
+    columns = {
+        column["name"]: column for column in inspect(db_engine).get_columns("fund", schema="fund")
+    }
+
+    for name in ("fund_management_fee", "fund_custody_fee"):
+        assert name in columns
+        assert columns[name]["nullable"] is True
+        assert columns[name]["type"].precision == 12
+        assert columns[name]["type"].scale == 8

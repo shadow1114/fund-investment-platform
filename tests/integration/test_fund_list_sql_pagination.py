@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete
@@ -378,6 +379,11 @@ def test_list_page_filters_literal_name_and_current_company_and_keeps_null_code_
     akshare = db_session.query(DataProvider).filter_by(provider_code="AKSHARE").one()
     target, target_classes = _fund(db_session, "P-1", "Alpha 50%_\u91d1\\资", "A")
     target.fund_company = "管理公司甲"
+    target.asset_type = "混合型"
+    target.fund_manager = "张经理"
+    target.fund_aum = Decimal("2919000000")
+    target.fund_management_fee = Decimal("0.012")
+    target.fund_custody_fee = Decimal("0.002")
     missing, missing_classes = _fund(db_session, "P-2", "Alpha 50ZZ金\\资", "A")
     missing.fund_company = None
     _identity(db_session, akshare, "000001", target_classes[0])
@@ -398,6 +404,11 @@ def test_list_page_filters_literal_name_and_current_company_and_keeps_null_code_
     assert rows[0]["fund_id"] == "P-1"
     assert rows[0]["fund_code"] == "000001"
     assert rows[0]["fund_company"] == "管理公司甲"
+    assert rows[0]["asset_type"] == "混合型"
+    assert rows[0]["fund_manager"] == "张经理"
+    assert rows[0]["fund_aum"] == Decimal("2919000000.00")
+    assert rows[0]["fund_management_fee"] == Decimal("0.01200000")
+    assert rows[0]["fund_custody_fee"] == Decimal("0.00200000")
     assert rows[0]["sub_status"] == "开放"
 
 

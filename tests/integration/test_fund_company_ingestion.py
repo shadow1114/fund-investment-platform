@@ -20,7 +20,8 @@ def _ingest_service(db_session, overview_row, fund_company_row=None):
         if name == "fund_name_em":
             return FUND_LIST
         if name == "fund_overview_em":
-            return pd.DataFrame([overview_row])
+            row = {"基金代码": params["symbol"], **overview_row}
+            return pd.DataFrame([row])
         if name == "fund_individual_basic_info_xq":
             rows = [("基金代码", params["symbol"])]
             if fund_company_row is not None:

@@ -545,6 +545,11 @@ class FundListPayloadModel(StrictModel):
     share_class_id: str
     fund_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
     fund_company: str | None = None
+    asset_type: str | None = None
+    fund_manager: str | None = None
+    fund_aum: float | None = None
+    fund_management_fee: float | None = None
+    fund_custody_fee: float | None = None
     sub_status: Literal["开放", "UNKNOWN"]
     manager_ids: list[str]
 
