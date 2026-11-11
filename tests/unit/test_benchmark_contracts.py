@@ -1,4 +1,5 @@
 from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 
 from fip.services.data_service.models.benchmark import (
     BenchmarkComponent,
@@ -20,6 +21,16 @@ def test_benchmark_index_types_are_explicit_and_complete():
         if isinstance(constraint, CheckConstraint)
     }
     assert constraints == {"ck_benchmark_index_type"}
+
+
+def test_benchmark_index_source_metadata_and_seed_fields_allow_nulls():
+    columns = BenchmarkIndex.__table__.c
+    assert columns.source.nullable is True
+    assert columns.api.nullable is True
+    assert columns.param.nullable is True
+    assert isinstance(columns.param.type, JSONB)
+    for name in ("provider_symbol", "currency", "index_type"):
+        assert columns[name].nullable is True
 
 
 def test_components_and_mappings_have_required_contract_constraints():

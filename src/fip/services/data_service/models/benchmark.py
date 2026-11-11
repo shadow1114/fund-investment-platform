@@ -8,9 +8,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from fip.platform.db.base import Base
@@ -55,10 +57,13 @@ class BenchmarkIndex(Base):
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     provider_code: Mapped[str] = mapped_column(String(64), nullable=False)
-    provider_symbol: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider_symbol: Mapped[str | None] = mapped_column(String(128), nullable=True)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    currency: Mapped[str] = mapped_column(String(8), nullable=False)
-    index_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    index_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    api: Mapped[str | None] = mapped_column(Text, nullable=True)
+    param: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
 
 class BenchmarkComponent(Base):

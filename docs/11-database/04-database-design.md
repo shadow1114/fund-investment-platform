@@ -4,7 +4,7 @@
 > 本域上游：docs/11-database/01-postgresql.md（v1.2）、03-erd.md（v1.3）
 > 架构依赖：docs/02-architecture/06-technology-stack.md（v1.5）§4.6 Workload Matrix
 >
-> **文档版本**：v1.12 ｜ **产品阶段**：第一阶段
+> **文档版本**：v1.14 ｜ **产品阶段**：第一阶段
 
 ---
 
@@ -420,7 +420,13 @@ CHECK (
 | **`benchmark_index_value`** | **百万级** | **✅ 按 `effective_at` 年分区** | 指数行情序列 |
 | `benchmark_mapping` | 数万级 | ❌ | **基金 ↔ 基准，版本化** |
 
-#### 7.2.1 `benchmark_component` 的权重约束
+#### 7.2.1 基准指数来源与请求参数（迁移 0044）
+
+`market.benchmark_index` 增加可空的 `source`、`api`、`param JSONB`，分别记录供应商来源、行情接口和请求参数。CSV 的 `Source`/`api`/`query_param` 分别写入这三列；空字符串按 NULL 写入。用于初始化的 `provider_code` 对应 CSV `code`，`display_name` 对应 `lookup_name`。迁移 0044 按 `display_name` 去重写入初始化数据；组件映射配置以 CSV `component_name` 为键，映射到实际存在的 `provider_code`。
+
+`provider_symbol`、`currency`、`index_type` 当前允许 NULL，以支持源索引登记时尚未补齐的字段。指数行情与基金基准关系仍须补充可用的指数类型和权重后才能用于 PIT 计算。由 `tools/generate_benchmark_db_artifacts.py` 根据 `docs/benchmark.csv` 生成迁移 0044 中的基准数据和 `config/benchmark/component_provider_codes.yaml`。
+
+#### 7.2.2 `benchmark_component` 的权重约束
 
 ```
 CHECK (weight >= 0 AND weight <= 1)
@@ -1466,6 +1472,7 @@ PostgreSQL Architecture ACCEPTED
 | **v1.11** | 2026-11-04 | 同步迁移 0040 可空公司投影、不可变快照/PIT 边界、只补空值的本地回填与正确份额映射关联、SQL 唯一计数及稳定分页。受影响下游：基金查询/公司选项 API、data-service 采集与回填、数据库迁移验收 | 产品 v2.6；数据域 v1.9；PostgreSQL 规范 v1.2；ERD v1.3（实体关系未变）；技术栈 v1.5 |
 | **v1.12** | 2026-11-05 | 明确公司投影来源和 PIT 快照回退语义 | 数据域 v2.0；基金 API v1.8 |
 | **v1.13** | 2026-11-10 | `ingest-funds` 使用 `fund_overview_em` 并发抓取公司、经理、AUM 和管理/托管费率；新增迁移 0043 费率列 | 数据域 v2.1；基金 API v1.9；data-service 采集服务 |
+| **v1.14** | 2026-11-12 | 基准指数增加来源/接口/JSON 参数列；登记字段允许初始化阶段为空；按 CSV 生成迁移内的去重基准数据与组件到 provider_code 配置 | 迁移 0044；`docs/benchmark.csv`；benchmark 初始化与后续基金基准映射 |
 | **v1.10** | 2026-09-14 | 同步迁移 0027 的 Plan-3 实际七表：更正 Method / Parameter 表名与版本闭包，移除未实现的矩阵成员明细表，记录 checksummed 下三角 JSONB、canonical float64 字符串、六态 Run、独立批准布尔、Validation 审计、事务边界、年化 Stage ⑥消费契约与 Plan-3B 延期 | `0027_plan3_estimation.py`、`2026-09-10-plan3-return-risk-estimation-design.md` |
 | **v1.9** | 2026-08-27 | **第二批定案（7 项）**。`DBD-2` 条件性唯一约束采用**部分唯一索引**（PostgreSQL 原生，触发器方案无法被查询计划器利用、生成列方案的哨兵值会泄漏到查询条件）；`DBD-5` **建 `position_lot` 表**（`TC-3` 的赎回费阶梯依赖持有批次）；`DBD-6` `target_weights` **行式存储不用 JSONB**（「按基金查历史权重」需索引到基金维度）；`DBD-4` `selection_condition_result` 存全部条件并带 `condition_version`；`DBD-1`/`DBD-8`/`DBD-9` 保留期见 Policy C，回测主记录 10 年、逐期明细 2 年 + 归档。 详见 `TBD-resolution-2.md` | `TBD-resolution-2.md` v1.0 |
 | **v1.8** | 2026-08-27 | **Policy ⑦ 同步**。§20.2 补架构层已定案的完整验收条件表达式与「已定案 vs 待压测」对照；指出本域的分区、索引、W7 读取优化都是升级路径中第①步的具体内容，**须为框架服务而非等待压测结果**。详见 `TBD-resolution.md` Policy ⑦ | `02-architecture/06-technology-stack` v1.3 |

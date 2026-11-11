@@ -78,7 +78,7 @@ def benchmark_history(db_session):
     )
     indexes = (
         BenchmarkIndex(
-            id=101,
+            id=10101,
             provider_code="TEST",
             provider_symbol="TR-101",
             display_name="TR 101",
@@ -86,7 +86,7 @@ def benchmark_history(db_session):
             index_type="TOTAL_RETURN",
         ),
         BenchmarkIndex(
-            id=202,
+            id=10202,
             provider_code="TEST",
             provider_symbol="FP-202",
             display_name="FP 202",
@@ -94,7 +94,7 @@ def benchmark_history(db_session):
             index_type="FULL_PRICE",
         ),
         BenchmarkIndex(
-            id=303,
+            id=10303,
             provider_code="TEST",
             provider_symbol="TR-303",
             display_name="TR 303",
@@ -102,7 +102,7 @@ def benchmark_history(db_session):
             index_type="TOTAL_RETURN",
         ),
         BenchmarkIndex(
-            id=404,
+            id=10404,
             provider_code="TEST",
             provider_symbol="FP-404",
             display_name="FP 404",
@@ -114,10 +114,10 @@ def benchmark_history(db_session):
     db_session.flush()
     db_session.add_all(
         (
-            BenchmarkComponent(benchmark_id=fallback.id, index_id=101, weight=Decimal("0.6")),
-            BenchmarkComponent(benchmark_id=fallback.id, index_id=202, weight=Decimal("0.4")),
-            BenchmarkComponent(benchmark_id=direct.id, index_id=303, weight=Decimal("0.7")),
-            BenchmarkComponent(benchmark_id=direct.id, index_id=404, weight=Decimal("0.3")),
+            BenchmarkComponent(benchmark_id=fallback.id, index_id=10101, weight=Decimal("0.6")),
+            BenchmarkComponent(benchmark_id=fallback.id, index_id=10202, weight=Decimal("0.4")),
+            BenchmarkComponent(benchmark_id=direct.id, index_id=10303, weight=Decimal("0.7")),
+            BenchmarkComponent(benchmark_id=direct.id, index_id=10404, weight=Decimal("0.3")),
             BenchmarkMapping(
                 benchmark_id=fallback.id,
                 share_class_id=None,
@@ -165,35 +165,35 @@ def benchmark_history(db_session):
     db_session.add_all(
         (
             BenchmarkIndexValue(
-                index_id=101,
+                index_id=10101,
                 effective_at=dt.date(2025, 1, 2),
                 version=1,
                 value=Decimal("100"),
                 **_times(_utc(2025, 1, 3)),
             ),
             BenchmarkIndexValue(
-                index_id=101,
+                index_id=10101,
                 effective_at=dt.date(2025, 1, 2),
                 version=2,
                 value=Decimal("101"),
                 **_times(_utc(2025, 7, 2)),
             ),
             BenchmarkIndexValue(
-                index_id=202,
+                index_id=10202,
                 effective_at=dt.date(2025, 1, 2),
                 version=1,
                 value=Decimal("200"),
                 **_times(_utc(2025, 1, 3)),
             ),
             BenchmarkIndexValue(
-                index_id=303,
+                index_id=10303,
                 effective_at=dt.date(2025, 4, 2),
                 version=3,
                 value=Decimal("300"),
                 **_times(_utc(2025, 4, 3)),
             ),
             BenchmarkIndexValue(
-                index_id=404,
+                index_id=10404,
                 effective_at=dt.date(2025, 4, 2),
                 version=4,
                 value=Decimal("400"),
@@ -220,8 +220,8 @@ def test_resolve_history_obeys_effective_and_available_time(db_session, benchmar
         (dt.date(2025, 4, 1), dt.date(2025, 7, 1)),
     ]
     assert [(item.index_id, item.weight) for item in segments[0].components] == [
-        (101, Decimal("0.6")),
-        (202, Decimal("0.4")),
+        (10101, Decimal("0.6")),
+        (10202, Decimal("0.4")),
     ]
     assert segments[0].mapping_version == "fallback-v1"
     assert segments[1].mapping_version == "direct-v1"
@@ -229,15 +229,15 @@ def test_resolve_history_obeys_effective_and_available_time(db_session, benchmar
         (item.index_id, item.effective_at, item.version)
         for item in segments[0].index_versions
     ] == [
-        (101, dt.date(2025, 1, 2), 1),
-        (202, dt.date(2025, 1, 2), 1),
+        (10101, dt.date(2025, 1, 2), 1),
+        (10202, dt.date(2025, 1, 2), 1),
     ]
     assert [
         (item.index_id, item.effective_at, item.version)
         for item in segments[1].index_versions
     ] == [
-        (303, dt.date(2025, 4, 2), 3),
-        (404, dt.date(2025, 4, 2), 4),
+        (10303, dt.date(2025, 4, 2), 3),
+        (10404, dt.date(2025, 4, 2), 4),
     ]
 
 
