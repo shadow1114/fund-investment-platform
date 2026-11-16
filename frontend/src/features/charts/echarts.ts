@@ -1,5 +1,5 @@
 import * as echarts from "echarts/core";
-import { LineChart } from "echarts/charts";
+import { BarChart, LineChart } from "echarts/charts";
 import {
   AriaComponent,
   GridComponent,
@@ -8,6 +8,7 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 
 echarts.use([
+  BarChart,
   LineChart,
   GridComponent,
   TooltipComponent,

@@ -1,11 +1,47 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from fip.api.app import create_app
 from fip.services.data_service.models.fund import Fund
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def clean_committed_fund_ingestion_fixtures(db_engine):
+    """These API integration tests commit through a separate engine connection."""
+    yield
+    with db_engine.begin() as connection:
+        operation_ids = connection.execute(
+            text(
+                "SELECT execution_id FROM governance.calculation_job "
+                "WHERE job_type IN ('fund_basic_info_ingest', 'fund_nav_ingest')"
+            )
+        ).scalars().all()
+        if operation_ids:
+            connection.execute(
+                text(
+                    "DELETE FROM governance.fund_ingestion_run_item "
+                    "WHERE operation_id = ANY(:operation_ids)"
+                ),
+                {"operation_ids": operation_ids},
+            )
+            connection.execute(
+                text(
+                    "DELETE FROM governance.calculation_job "
+                    "WHERE execution_id = ANY(:operation_ids)"
+                ),
+                {"operation_ids": operation_ids},
+            )
+        connection.execute(text("DELETE FROM governance.fund_ingestion_preview"))
+        connection.execute(
+            text(
+                "DELETE FROM fund.fund WHERE fund_code IN "
+                "('SCOPE-UNMAPPED', 'RETRY', 'STALE', 'RENAMED', 'UNIVERSE', 'NO-SHARES')"
+            )
+        )
 
 
 def test_preview_freezes_unmapped_fund_and_submission_is_idempotent(db_engine):

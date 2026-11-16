@@ -834,7 +834,7 @@ class FundRepository(RepositoryAdapter):
         ).current(fund.id)
         benchmark = SqlBenchmarkPitRepository(
             self._session(), resolve_visible_until(view_date)
-        ).resolve(
+        ).configured_mapping(
             share_class.id, classification.classification_code if classification else "UNKNOWN"
         )
         fees = SqlFeePitRepository(self._session(), resolve_visible_until(view_date)).current(
@@ -847,17 +847,23 @@ class FundRepository(RepositoryAdapter):
             ),
             "manager_ids": self._manager_ids(fund.id, view_date),
             "benchmark": {
-                "benchmark_id": str(benchmark.benchmark_id)
-                if benchmark.benchmark_id is not None
-                else "UNKNOWN",
-                "benchmark_name": "UNKNOWN",
-                "benchmark_type": "UNKNOWN",
-                "mapping_version": benchmark.mapping_version or "UNKNOWN",
+                "benchmark_id": str(benchmark.benchmark_id) if benchmark else "UNKNOWN",
+                "benchmark_name": benchmark.benchmark_name if benchmark else "UNKNOWN",
+                "benchmark_type": benchmark.benchmark_type if benchmark else "UNKNOWN",
+                "mapping_version": benchmark.mapping_version if benchmark else "UNKNOWN",
                 "components": [
-                    {"benchmark_id": str(item.index_id), "weight": item.weight}
+                    {
+                        "benchmark_id": str(item.index_id),
+                        "benchmark_name": item.benchmark_name,
+                        "weight": item.weight,
+                    }
                     for item in benchmark.components
-                ],
-                "status": benchmark.status,
+                ]
+                if benchmark
+                else [],
+                "status": "AVAILABLE"
+                if benchmark and benchmark.components
+                else "BENCHMARK_UNAVAILABLE",
             },
             "fee_structure": [
                 {
@@ -882,7 +888,7 @@ class FundRepository(RepositoryAdapter):
         as_of_date: str | None,
     ) -> Mapping[str, object]:
         _ = frequency
-        _fund, share_class = self._required_share_class(identifier)
+        fund, share_class = self._required_share_class(identifier)
         view_date = _query_date(as_of_date) or date.today()
         visible_until = resolve_visible_until(view_date)
         start = (
@@ -978,8 +984,37 @@ class FundRepository(RepositoryAdapter):
                 )
                 buckets[key] = point
             data = list(buckets.values())
+        classification = SqlClassificationPitRepository(self._session(), visible_until).current(
+            fund.id
+        )
+        benchmark_repository = SqlBenchmarkPitRepository(self._session(), visible_until)
+        benchmark = benchmark_repository.configured_mapping(
+            share_class.id, classification.classification_code if classification else "UNKNOWN"
+        )
+        # 保留全部底层日频点位，由前端按收益率合成，不直接加权指数点位。
+        benchmark_series = (
+            [
+                {
+                    "benchmark_id": str(component.index_id),
+                    "benchmark_name": component.benchmark_name,
+                    "weight": float(component.weight),
+                    "points": [
+                        {
+                            "date": day.isoformat(),
+                            "value": float(value) if value is not None else None,
+                        }
+                        for day, value, _version, _quality in benchmark_repository.index_series(
+                            component.index_id, start, end
+                        )
+                    ],
+                }
+                for component in benchmark.components
+            ]
+            if benchmark
+            else []
+        )
         return {
-            "data": {"fund_id": identifier, "points": data},
+            "data": {"fund_id": identifier, "points": data, "benchmark_series": benchmark_series},
             "meta": {
                 "adjustment_rule_version": "UNKNOWN",
                 "unavailable_count": sum(1 for point in data if point["nav"] is None),
@@ -998,10 +1033,9 @@ class FundRepository(RepositoryAdapter):
         from fip.services.fund_service.policy import load_evaluation_policy
 
         periods_months = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60}
-        view_date = _query_date(as_of_date) or date.today()
-        visible_until = resolve_visible_until(view_date)
         session = self._session()
         fund, share_class = self._required_share_class(identifier)
+        view_date, visible_until = _factor_analysis_as_of_date(session, share_class.id, as_of_date)
         if evaluation_period == "ALL":
             start = (
                 share_class.inception_date
@@ -1608,6 +1642,26 @@ def _query_date(value: object) -> date | None:
     if isinstance(value, str):
         return date.fromisoformat(value)
     raise TypeError("Expected ISO date")
+
+
+def _factor_analysis_as_of_date(
+    session: Session,
+    share_class_id: int,
+    as_of_date: str | None,
+) -> tuple[date, datetime]:
+    requested_date = _query_date(as_of_date)
+    if requested_date is not None:
+        return requested_date, resolve_visible_until(requested_date)
+
+    availability_date = date.today()
+    visible_until = resolve_visible_until(availability_date)
+    latest_nav_date = session.scalar(
+        select(func.max(FundNav.effective_at)).where(
+            FundNav.share_class_id == share_class_id,
+            FundNav.available_at <= visible_until,
+        )
+    )
+    return latest_nav_date or availability_date, visible_until
 
 
 def _integer_identifier(identifier: str) -> int:

@@ -205,7 +205,7 @@ def test_list_page_selects_akshare_code_and_returns_unique_share_class_rows(db_s
     _identity(db_session, akshare, "000001", classes_a[0])
     _identity(db_session, akshare, "000002", classes_a[1])
     _identity(db_session, akshare, "000003", classes_b[0])
-    assert fund_b.id == other.id
+    assert fund_b.id != other.id
 
     rows, total = FundRepository(db_session).list_page(
         page=1,

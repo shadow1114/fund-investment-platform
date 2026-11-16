@@ -2,12 +2,26 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from fip.api.app import create_app
 from fip.platform.jobs.models import CalculationJob
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def clean_committed_history_jobs(db_engine):
+    yield
+    with db_engine.begin() as connection:
+        connection.execute(
+            text(
+                "DELETE FROM governance.calculation_job WHERE execution_id IN "
+                "('history-time-26', 'history-time-27', 'history-time-28', "
+                "'later-finish', 'later-submit', 'last-microsecond', 'next-midnight')"
+            )
+        )
 
 
 def test_history_filters_dates_before_count_and_pagination(db_engine):

@@ -10,6 +10,8 @@ RESPONSE_COMPONENT_REGISTRY: dict[str, str] = {
     "listFundIngestionItems": "FundIngestionItemsEnvelope",
     "cancelFundIngestion": "FundIngestionEnvelope",
     "retryFundIngestionFailures": "FundIngestionSubmissionEnvelope",
+    "listBenchmarkIndexes": "BenchmarkIndexPageEnvelope",
+    "submitBenchmarkIngestion": "FundIngestionSubmissionEnvelope",
     "submitFundIngestion": "FundIngestionSubmissionEnvelope",
     "submitFundIngestionBatch": "FundIngestionSubmissionEnvelope",
     "listFundIngestions": "FundIngestionListEnvelope",

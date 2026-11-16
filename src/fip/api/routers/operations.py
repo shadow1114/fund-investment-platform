@@ -39,6 +39,7 @@ def get_operation(
             if record is not None and record.kind in {
                 "fund_basic_info_ingest",
                 "fund_nav_ingest",
+                "benchmark_index_ingest",
             }:
                 job = session.execute(
                     select(CalculationJob).where(CalculationJob.execution_id == operation_id)

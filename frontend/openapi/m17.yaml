@@ -244,7 +244,7 @@ paths:
             }
         - name: dataset
           in: query
-          schema: { type: string, enum: [BASIC_INFO, NAV] }
+          schema: { type: string, enum: [BASIC_INFO, NAV, BENCHMARK] }
         - name: scope_type
           in: query
           schema: { type: string, enum: [SINGLE, SELECTED, ALL] }
@@ -316,6 +316,48 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/FundIngestionJobRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/FundIngestionSubmissionResponse"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/benchmark-indexes:
+    get:
+      operationId: listBenchmarkIndexes
+      description: 基准指数列表（需要数据抓取权限），用于选择要抓取行情的指数。
+      parameters:
+        - name: q
+          in: query
+          description: 按 display_name / provider_code 模糊匹配，不区分大小写。
+          schema: { type: string, maxLength: 128 }
+        - name: source
+          in: query
+          schema: { type: string, enum: [csindex, chinabond, akshare] }
+        - $ref: "#/components/parameters/Page"
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Paginated benchmark indexes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BenchmarkIndexPageEnvelope"
+        default:
+          $ref: "#/components/responses/ErrorResponse"
+  /api/v1/benchmark-ingestion-jobs:
+    post:
+      operationId: submitBenchmarkIngestion
+      description: 提交基准行情数据抓取任务；数据源不受支持的指数直接记为 SKIPPED。
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BenchmarkIngestionRequest"
       responses:
         "202":
           $ref: "#/components/responses/FundIngestionSubmissionResponse"
@@ -1416,10 +1458,22 @@ components:
     FundIngestionRunItem:
       type: object
       additionalProperties: false
-      required: [id, fund_id, status, attempts]
+      required: [id, status, attempts]
       properties:
         id: { type: integer }
-        fund_id: { type: string }
+        fund_id:
+          type: [string, "null"]
+          description: 基金项的基金代码；基准项为空。
+        subject_type:
+          type: string
+          enum: [FUND, BENCHMARK]
+          default: FUND
+        subject_name:
+          type: [string, "null"]
+          description: 基金名称或基准指数名称。
+        benchmark_index_id:
+          type: [string, "null"]
+          description: 基准项的 benchmark_index ID；基金项为空。
         share_class_id: { type: [integer, "null"] }
         symbol: { type: [string, "null"] }
         status:
@@ -1519,6 +1573,7 @@ components:
           enum:
             - BASIC_INFO
             - NAV
+            - BENCHMARK
         status:
           type: string
           enum:
@@ -1530,6 +1585,66 @@ components:
     FundIngestionItem:
       type: object
       additionalProperties: true
+    BenchmarkIndex:
+      type: object
+      additionalProperties: false
+      required: [benchmark_index_id, display_name, provider_code]
+      properties:
+        benchmark_index_id: { type: string }
+        display_name: { type: string }
+        provider_code: { type: string }
+        source: { type: [string, "null"] }
+        latest_value_date:
+          type: [string, "null"]
+          format: date
+          description: 当前可见的最新行情日期；从未抓取时为空。
+    BenchmarkSourceCounts:
+      type: object
+      additionalProperties: false
+      required: [csindex, chinabond, akshare]
+      properties:
+        csindex: { type: integer }
+        chinabond: { type: integer }
+        akshare: { type: integer }
+    BenchmarkIndexPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, page_size, total, source_counts]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BenchmarkIndex" }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+        source_counts:
+          $ref: "#/components/schemas/BenchmarkSourceCounts"
+    BenchmarkIndexPageEnvelope:
+      type: object
+      required: [data, meta, error]
+      properties:
+        data: { $ref: "#/components/schemas/BenchmarkIndexPage" }
+        meta: { $ref: "#/components/schemas/ResponseMeta" }
+        error: { type: "null" }
+    BenchmarkIngestionRequest:
+      type: object
+      additionalProperties: false
+      required: [benchmark_index_ids]
+      properties:
+        benchmark_index_ids:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { type: string, pattern: "^[0-9]{1,18}$" }
+          description: 重复 ID 会被去重。
+        start_date:
+          type: [string, "null"]
+          format: date
+          description: 为空表示不限起点（中证从指数基日起，中债 / AKShare 取上游全量）。
+        end_date:
+          type: [string, "null"]
+          format: date
+          description: 为空时取提交当天（北京时间）；start_date 晚于 end_date 返回 400。
     FundIngestionTask:
       type: object
       additionalProperties: false
@@ -1558,6 +1673,7 @@ components:
           enum:
             - BASIC_INFO
             - NAV
+            - BENCHMARK
         source:
           type: string
         actor:
@@ -1598,6 +1714,14 @@ components:
           enum: [SINGLE, SELECTED, ALL, null]
         parent_operation_id:
           type: [string, "null"]
+        start_date:
+          type: [string, "null"]
+          format: date
+          description: 抓取区间起点（基准任务；基金任务为空）。
+        end_date:
+          type: [string, "null"]
+          format: date
+          description: 抓取区间终点（基准任务；基金任务为空）。
         created_at:
           type: string
           format: date-time
@@ -1850,6 +1974,8 @@ components:
       properties:
         benchmark_id:
           type: string
+        benchmark_name:
+          type: [string, "null"]
         weight:
           type: number
     Benchmark:
@@ -2072,6 +2198,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NavPoint"
+        benchmark_series:
+          type: array
+          default: []
+          items:
+            $ref: "#/components/schemas/BenchmarkIndexSeries"
+    BenchmarkIndexSeries:
+      type: object
+      required: [benchmark_id, benchmark_name, weight, points]
+      properties:
+        benchmark_id:
+          type: string
+        benchmark_name:
+          type: string
+        weight:
+          type: number
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/BenchmarkIndexPoint"
+    BenchmarkIndexPoint:
+      type: object
+      required: [date, value]
+      properties:
+        date:
+          type: string
+          format: date
+        value:
+          type: [number, "null"]
     NavSeriesMeta:
       allOf:
         - $ref: "#/components/schemas/ResponseMeta"

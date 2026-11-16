@@ -94,4 +94,12 @@ DATASETS: dict[str, DatasetSpec] = {
         # 曲线」，而 RiskFreeRate 的主键第一列正是 curve_code。
         required_columns=frozenset({"曲线名称", "日期"}) | YIELD_TENOR_COLUMNS,
     ),
+    # 港股指数日行情（东方财富）。AKShare 1.18.94 源码返回列为
+    # [date, open, high, low, latest]，其中 latest 为收盘点位。
+    # 基准指数种子的 api 字段存的是 callable_name，按它反查本数据集。
+    "hk_index_daily": DatasetSpec(
+        code="hk_index_daily",
+        callable_name="stock_hk_index_daily_em",
+        required_columns=frozenset({"date", "open", "high", "low", "latest"}),
+    ),
 }

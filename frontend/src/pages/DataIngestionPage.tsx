@@ -1,31 +1,35 @@
-import { Button, Stack, Text } from "@mantine/core";
+import { Button, Modal, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { CircleCheck } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { FundIngestionPreview } from "../api/generated/m17.schemas";
-import {
-  getSessionQueryOptions,
-  getLatestIngestionQueryOptions,
-} from "../api/queries";
+
+import type { FundIngestionSubmission } from "../api/generated/m17.schemas";
+import { getSessionQueryOptions } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { PageHeader } from "../components/PageHeader";
+import styles from "../features/ingestion/DataIngestion.module.css";
 import { IngestionHistoryTable } from "../features/ingestion/IngestionHistoryTable";
-import { IngestionScopeForm } from "../features/ingestion/IngestionScopeForm";
+import {
+  datasetLabels,
+  IngestionScopeForm,
+} from "../features/ingestion/IngestionScopeForm";
 import { IngestionTaskDetail } from "../features/ingestion/IngestionTaskDetail";
-import styles from "./DataIngestionPage.module.css";
 
 export const DataIngestionPage = () => {
   const session = useQuery(getSessionQueryOptions());
   const [search, setSearch] = useSearchParams();
-  const latestQuery = useQuery({
-    ...getLatestIngestionQueryOptions(true),
-    enabled:
-      session.isSuccess &&
-      session.data.capabilities.can_manage_data_ingestion === true,
-  });
-  const latest = latestQuery.data?.items[0];
-  const [preview, setPreview] = useState<FundIngestionPreview>();
+  const [submitted, setSubmitted] = useState<FundIngestionSubmission>();
   const operationId = search.get("operation_id");
+  // 打开或关闭日志时只改 operation_id，保留新建表单的预填参数。
+  const setOperation = (id: string | null) =>
+    setSearch((current) => {
+      const next = new URLSearchParams(current);
+      if (id) next.set("operation_id", id);
+      else next.delete("operation_id");
+      return next;
+    });
+
   if (session.isPending)
     return <Text role="status">正在读取数据抓取权限…</Text>;
   if (session.isError)
@@ -35,17 +39,14 @@ export const DataIngestionPage = () => {
         onRetry={() => void session.refetch()}
       />
     );
-  if (
-    !session.isSuccess ||
-    session.data.capabilities.can_manage_data_ingestion !== true
-  )
+  if (session.data.capabilities.can_manage_data_ingestion !== true)
     return (
       <Stack>
         <PageHeader
           title="403 · 无数据抓取权限"
-          breadcrumbs={[{ label: "基金数据中心" }]}
+          breadcrumbs={[{ label: "数据抓取" }]}
         />
-        <Text>当前身份没有管理基金数据抓取的权限，请联系工作区管理员。</Text>
+        <Text>当前身份没有管理数据抓取的权限，请联系工作区管理员。</Text>
         <Button component={Link} to="/home" w="fit-content">
           返回工作台
         </Button>
@@ -53,51 +54,60 @@ export const DataIngestionPage = () => {
     );
   const canManageAll =
     session.data.capabilities.can_manage_full_universe_ingestion === true;
+
   return (
-    <Stack className={styles.page} gap="lg">
-      <PageHeader
-        title="基金数据中心"
-        breadcrumbs={[{ label: "基金数据中心" }]}
-        context={
-          <Text size="sm" c="dimmed">
-            数据源：
-            {(!operationId && preview?.source) ||
-              latest?.source ||
-              "暂不可用"}{" "}
-            · 最近更新时间：
-            {latest?.finished_at
-              ? new Date(latest.finished_at).toLocaleString("zh-CN")
-              : latestQuery.isError
-                ? "暂不可用"
-                : latestQuery.isPending
-                  ? "正在读取…"
-                  : "暂无已完成任务"}
-          </Text>
-        }
+    <div className={styles.page}>
+      <h1 className={styles.visuallyHidden}>数据抓取</h1>
+      <IngestionScopeForm
+        initialSearch={search}
+        canManageAll={canManageAll}
+        actor={session.data.user_id}
+        onSubmitted={setSubmitted}
       />
-      <Text>
-        单只、多只和平台基金库快照统一在此提交；任务由后台持续执行，离开页面后可通过任务链接恢复。
-      </Text>
-      {operationId ? (
-        <IngestionTaskDetail
-          key={operationId}
-          operationId={operationId}
-          canManageAll={canManageAll}
-          onOperation={(id) => setSearch({ operation_id: id })}
-        />
-      ) : (
-        <IngestionScopeForm
-          key={search.toString()}
-          initialSearch={search}
-          canManageAll={canManageAll}
-          actor={session.data.user_id}
-          onPreview={setPreview}
-          onSubmitted={(submission) =>
-            setSearch({ operation_id: submission.operation_id })
-          }
-        />
+      {submitted && (
+        <div className={styles.card}>
+          <div
+            className={styles.footer}
+            style={{ border: 0, padding: "10px 16px" }}
+          >
+            <span className={styles.summary} role="status">
+              <CircleCheck size={14} aria-hidden="true" />
+              已提交
+              {datasetLabels[submitted.dataset as keyof typeof datasetLabels] ??
+                ""}
+              任务 <strong>{submitted.operation_id}</strong>
+              ，后台持续执行，离开页面不影响进度。
+            </span>
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => setOperation(submitted.operation_id)}
+            >
+              查看执行日志
+            </Button>
+          </div>
+        </div>
       )}
-      <IngestionHistoryTable />
-    </Stack>
+      <IngestionHistoryTable
+        canManageAll={canManageAll}
+        onOpen={setOperation}
+      />
+      <Modal
+        opened={Boolean(operationId)}
+        onClose={() => setOperation(null)}
+        title={`执行日志 · ${operationId ?? ""}`}
+        size="xl"
+        centered
+      >
+        {operationId && (
+          <IngestionTaskDetail
+            key={operationId}
+            operationId={operationId}
+            canManageAll={canManageAll}
+            onOperation={setOperation}
+          />
+        )}
+      </Modal>
+    </div>
   );
 };

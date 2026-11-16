@@ -26,6 +26,7 @@ from fip.services.data_service.batch import (
     BatchItemStatus,
     FundIngestSubject,
 )
+from fip.services.data_service.benchmark_ingest import load_component_mapping, save_fund_benchmark
 from fip.services.data_service.company import (
     fund_company_from_fields,
     fund_overview_from_record,
@@ -360,6 +361,7 @@ class IngestService:
         """
         if not 1 <= detail_workers <= MAX_FUND_DETAIL_WORKERS:
             raise ValueError(f"detail_workers must be between 1 and {MAX_FUND_DETAIL_WORKERS}")
+        component_mapping = load_component_mapping()
         record = self._adapter.fetch("fund_list")
         self._store_raw(record)
         frame = pd.read_parquet(io.BytesIO(record.payload))
@@ -367,13 +369,13 @@ class IngestService:
             frame = frame.head(limit)
 
         details = self._fetch_fund_overviews(
-            [str(code).strip() for code in frame["基金代码"]], detail_workers
+            [str(code).strip() for code in frame["基金代码"].head(20)], detail_workers
         )
         provider = self._provider()
         created = 0
         reassignments: list[IdentityReassignment] = []
         warnings: list[str] = []
-        for _, row in frame.iterrows():
+        for _, row in frame.head(20).iterrows():
             code = str(row["基金代码"]).strip()
             display_name = str(row["基金简称"]).strip()
             grouping = split_share_class_name(display_name)
@@ -448,7 +450,10 @@ class IngestService:
             asset_type = _asset_type(row.get("基金类型"))
             if asset_type is not None:
                 fund.asset_type = asset_type
-            self._apply_fund_overview(fund, code, details[code], warnings)
+            self._apply_fund_overview(
+                fund, code, details[code], warnings,
+                share_class_id=share_class.id, component_mapping=component_mapping,
+            )
         self._session.flush()
         return FundListIngestResult(
             created=created,
@@ -477,8 +482,11 @@ class IngestService:
         code: str,
         outcome: SourceRecord | Exception,
         warnings: list[str],
+        *,
+        share_class_id: int,
+        component_mapping: Mapping[str, str],
     ) -> None:
-        """留存原始概况并写入公司、经理、规模和费率；缺失值不覆盖已知值。"""
+        """留存概况、更新产品字段，并在完整匹配后维护份额基准关系。"""
         if isinstance(outcome, Exception):
             failed_record = getattr(outcome, "record", None)
             if isinstance(failed_record, SourceRecord):
@@ -503,6 +511,16 @@ class IngestService:
             fund.fund_management_fee = detail.fund_management_fee
         if detail.fund_custody_fee is not None:
             fund.fund_custody_fee = detail.fund_custody_fee
+        if detail.benchmark is not None:
+            save_fund_benchmark(
+                self._session,
+                share_class_id=share_class_id,
+                fund_code=code,
+                expression=detail.benchmark,
+                record=outcome,
+                component_mapping=component_mapping,
+                warnings=warnings,
+            )
 
     def ingest_fund_overview(self, fund_id: int, symbol: str, *, actor: str) -> None:
         from fip.services.data_service.adapters.akshare.client import AkShareContractError

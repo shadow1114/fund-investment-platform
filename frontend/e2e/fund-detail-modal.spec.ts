@@ -195,6 +195,88 @@ async function installFixtures(page: Page, dashboard = false) {
 
 const row = (page: Page, id: string) => page.locator(`.ag-row[row-id="${id}"]`);
 
+for (const width of [1440, 390]) {
+  test(`基准切换与曲线显隐 ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await installFixtures(page, true);
+    const dates = ["2026-09-15", "2026-09-16"];
+    await page.route("**/api/v1/funds/101?**", (route) =>
+      route.fulfill({
+        json: {
+          ...fundDetailEnvelope,
+          data: {
+            ...fundDetailEnvelope.data,
+            fund_name: "Alpha A",
+            benchmark: {
+              benchmark_id: "501",
+              benchmark_name: "指数A*70%+指数B*30%",
+              benchmark_type: "COMPOSITE",
+              mapping_version: "v1",
+              components: [
+                { benchmark_id: "201", benchmark_name: "指数A", weight: 0.7 },
+                { benchmark_id: "202", benchmark_name: "指数B", weight: 0.3 },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    await page.route("**/api/v1/funds/101/nav-series?**", (route) =>
+      route.fulfill({
+        json: {
+          ...fundNavEnvelope,
+          data: {
+            fund_id: "101",
+            points: dates.map((date, i) => ({
+              date,
+              nav: 1 + i * 0.2,
+              nav_status: "VALID",
+              nav_reason: null,
+            })),
+            benchmark_series: [
+              {
+                benchmark_id: "201",
+                benchmark_name: "指数A",
+                weight: 0.7,
+                points: dates.map((date, i) => ({ date, value: 100 + i * 10 })),
+              },
+              {
+                benchmark_id: "202",
+                benchmark_name: "指数B",
+                weight: 0.3,
+                points: dates.map((date) => ({ date, value: 1000 })),
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/funds/000001?share_class_id=101&as_of_date=2026-09-16");
+    const select = page.getByRole("combobox", { name: "对比基准" });
+    await expect(select.locator("option")).toHaveCount(3);
+    await page.getByText("查看数值表", { exact: true }).click();
+    const table = page.getByRole("region", { name: "净值数值表" });
+    await expect(table).toContainText("7.00");
+    await select.selectOption("index:201");
+    await expect(table).toContainText("10.00");
+    const checkbox = page.getByRole("checkbox", { name: "指数A (%)" });
+    await checkbox.uncheck();
+    await expect(checkbox).not.toBeChecked();
+    await checkbox.check();
+    await select.selectOption("configured");
+    await expect(table).toContainText("7.00");
+    await expect(page.locator("canvas").first()).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
 test("double-click opens the exact share class; local tabs preserve background URL/scroll, close restores focus", async ({
   page,
 }) => {

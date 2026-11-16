@@ -1,0 +1,50 @@
+[
+  {
+    "provider_code": "000012",
+    "display_name": "上证国债",
+    "source": "csindex",
+    "api": null,
+    "param": null
+  },
+  {
+    "provider_code": "931463",
+    "display_name": "300ESG",
+    "source": "csindex",
+    "api": null,
+    "param": null
+  },
+  {
+    "provider_code": "931650",
+    "display_name": "800ESG",
+    "source": "csindex",
+    "api": null,
+    "param": null
+  },
+  {
+    "provider_code": "2c90818811d3f4fa01123837e6b30d4a",
+    "display_name": "中债企业债总全价(总值)",
+    "source": "chinabond",
+    "api": null,
+    "param": {
+      "index_type": "QJZS",
+      "period_type": "00"
+    }
+  },
+  {
+    "provider_code": "2c9081e50e8767dc010e879acb220021",
+    "display_name": "中债国债总全价(总值)",
+    "source": "chinabond",
+    "api": null,
+    "param": {
+      "index_type": "QJZS",
+      "period_type": "00"
+    }
+  },
+  {
+    "provider_code": "HQCKLL",
+    "display_name": "活期存款基准利率",
+    "source": "static",
+    "api": null,
+    "param": null
+  }
+]

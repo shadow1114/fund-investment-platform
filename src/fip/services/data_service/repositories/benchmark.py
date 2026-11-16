@@ -1,4 +1,5 @@
 import datetime as dt
+from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -25,6 +26,15 @@ _MAPPING_SQL = text("""
              valid_from DESC, available_at DESC, id DESC
     LIMIT 1
 """)
+_DEFINITION_SQL = text("""
+    SELECT display_name FROM market.benchmark_definition WHERE id = :benchmark_id
+""")
+_CONFIGURED_COMPONENT_SQL = text("""
+    SELECT component.index_id, component.weight, index.display_name
+    FROM market.benchmark_component AS component
+    JOIN market.benchmark_index AS index ON index.id = component.index_id
+    WHERE component.benchmark_id = :benchmark_id ORDER BY component.index_id
+""")
 _COMPONENT_SQL = text("""
     SELECT component.index_id, component.weight, index.index_type
     FROM market.benchmark_component AS component
@@ -50,10 +60,71 @@ _SERIES_SQL = text("""
 """)
 
 
+@dataclass(frozen=True)
+class ConfiguredBenchmarkComponent:
+    index_id: int
+    benchmark_name: str
+    weight: Decimal
+
+
+@dataclass(frozen=True)
+class ConfiguredBenchmark:
+    benchmark_id: int
+    benchmark_name: str
+    mapping_version: str
+    components: tuple[ConfiguredBenchmarkComponent, ...]
+
+    @property
+    def benchmark_type(self) -> str:
+        # 定义表没有类型列，展示类型由配置的底层指数数量确定。
+        return "COMPOSITE" if len(self.components) > 1 else "INDEX"
+
+
 class SqlBenchmarkPitRepository:
     def __init__(self, session: Session, visible_until: dt.datetime) -> None:
         self._session = session
         self._visible_until = visible_until
+
+    def configured_mapping(
+        self, share_class_id: int, classification_code: str
+    ) -> ConfiguredBenchmark | None:
+        """读取当前 PIT 可见展示配置，不放宽评价计算的指数类型验证。"""
+        row = (
+            self._session.execute(
+                _MAPPING_SQL,
+                {
+                    "share_class_id": share_class_id,
+                    "classification_code": classification_code,
+                    "effective_at": self._visible_until.date(),
+                    "visible_until": self._visible_until,
+                },
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return None
+        definition = (
+            self._session.execute(_DEFINITION_SQL, {"benchmark_id": row["benchmark_id"]})
+            .mappings()
+            .first()
+        )
+        if definition is None:
+            return None
+        components = (
+            self._session.execute(_CONFIGURED_COMPONENT_SQL, {"benchmark_id": row["benchmark_id"]})
+            .mappings()
+            .all()
+        )
+        return ConfiguredBenchmark(
+            benchmark_id=row["benchmark_id"],
+            benchmark_name=definition["display_name"],
+            mapping_version=row["mapping_version"],
+            components=tuple(
+                ConfiguredBenchmarkComponent(item["index_id"], item["display_name"], item["weight"])
+                for item in components
+            ),
+        )
 
     def resolve(self, share_class_id: int, classification_code: str) -> BenchmarkResolution:
         row = (

@@ -141,6 +141,7 @@ class FundOverviewDetail:
     fund_aum: Decimal | None
     fund_management_fee: Decimal | None
     fund_custody_fee: Decimal | None
+    benchmark: str | None = None
 
 
 def fund_overview_from_record(record: SourceRecord, *, symbol: str) -> FundOverviewDetail:
@@ -173,6 +174,7 @@ def fund_overview_from_record(record: SourceRecord, *, symbol: str) -> FundOverv
         fund_aum=parse_fund_aum(row.get("净资产规模")),
         fund_management_fee=parse_fund_fee_rate(row.get("管理费率")),
         fund_custody_fee=parse_fund_fee_rate(row.get("托管费率")),
+        benchmark=_usable_text(row.get("业绩比较基准"), max_length=10000, label="基金基准"),
     )
 
 

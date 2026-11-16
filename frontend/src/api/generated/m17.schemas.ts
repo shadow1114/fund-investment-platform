@@ -264,6 +264,30 @@ export interface FundIngestionPreviewEnvelope {
   error: null;
 }
 
+/**
+ * 基金项的基金代码；基准项为空。
+ */
+export type FundIngestionRunItemFundId = string | null;
+
+export type FundIngestionRunItemSubjectType =
+  (typeof FundIngestionRunItemSubjectType)[keyof typeof FundIngestionRunItemSubjectType];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const FundIngestionRunItemSubjectType = {
+  FUND: "FUND",
+  BENCHMARK: "BENCHMARK",
+} as const;
+
+/**
+ * 基金名称或基准指数名称。
+ */
+export type FundIngestionRunItemSubjectName = string | null;
+
+/**
+ * 基准项的 benchmark_index ID；基金项为空。
+ */
+export type FundIngestionRunItemBenchmarkIndexId = string | null;
+
 export type FundIngestionRunItemShareClassId = number | null;
 
 export type FundIngestionRunItemSymbol = string | null;
@@ -293,7 +317,13 @@ export type FundIngestionRunItemFinishedAt = string | null;
 
 export interface FundIngestionRunItem {
   id: number;
-  fund_id: string;
+  /** 基金项的基金代码；基准项为空。 */
+  fund_id?: FundIngestionRunItemFundId;
+  subject_type?: FundIngestionRunItemSubjectType;
+  /** 基金名称或基准指数名称。 */
+  subject_name?: FundIngestionRunItemSubjectName;
+  /** 基准项的 benchmark_index ID；基金项为空。 */
+  benchmark_index_id?: FundIngestionRunItemBenchmarkIndexId;
   share_class_id?: FundIngestionRunItemShareClassId;
   symbol?: FundIngestionRunItemSymbol;
   status: FundIngestionRunItemStatus;
@@ -368,6 +398,7 @@ export type FundIngestionSubmissionDataset =
 export const FundIngestionSubmissionDataset = {
   BASIC_INFO: "BASIC_INFO",
   NAV: "NAV",
+  BENCHMARK: "BENCHMARK",
 } as const;
 
 export type FundIngestionSubmissionStatus =
@@ -394,6 +425,65 @@ export interface FundIngestionItem {
   [key: string]: unknown;
 }
 
+export type BenchmarkIndexSource = string | null;
+
+/**
+ * 当前可见的最新行情日期；从未抓取时为空。
+ */
+export type BenchmarkIndexLatestValueDate = string | null;
+
+export interface BenchmarkIndex {
+  benchmark_index_id: string;
+  display_name: string;
+  provider_code: string;
+  source?: BenchmarkIndexSource;
+  /** 当前可见的最新行情日期；从未抓取时为空。 */
+  latest_value_date?: BenchmarkIndexLatestValueDate;
+}
+
+export interface BenchmarkSourceCounts {
+  csindex: number;
+  chinabond: number;
+  akshare: number;
+}
+
+export interface BenchmarkIndexPage {
+  items: BenchmarkIndex[];
+  page: number;
+  page_size: number;
+  total: number;
+  source_counts: BenchmarkSourceCounts;
+}
+
+export interface BenchmarkIndexPageEnvelope {
+  data: BenchmarkIndexPage;
+  meta: ResponseMeta;
+  error: null;
+}
+
+/**
+ * 为空表示不限起点（中证从指数基日起，中债 / AKShare 取上游全量）。
+ */
+export type BenchmarkIngestionRequestStartDate = string | null;
+
+/**
+ * 为空时取提交当天（北京时间）；start_date 晚于 end_date 返回 400。
+ */
+export type BenchmarkIngestionRequestEndDate = string | null;
+
+export interface BenchmarkIngestionRequest {
+  /**
+   * 重复 ID 会被去重。
+   * @minItems 1
+   * @maxItems 200
+   */
+  benchmark_index_ids: string[];
+  /** 为空表示不限起点（中证从指数基日起，中债 / AKShare 取上游全量）。 */
+  start_date?: BenchmarkIngestionRequestStartDate;
+  /** 为空时取提交当天（北京时间）；start_date 晚于 end_date 返回 400。 */
+  end_date?: BenchmarkIngestionRequestEndDate;
+}
+
 export type FundIngestionTaskDataset =
   (typeof FundIngestionTaskDataset)[keyof typeof FundIngestionTaskDataset];
 
@@ -401,6 +491,7 @@ export type FundIngestionTaskDataset =
 export const FundIngestionTaskDataset = {
   BASIC_INFO: "BASIC_INFO",
   NAV: "NAV",
+  BENCHMARK: "BENCHMARK",
 } as const;
 
 export type FundIngestionTaskStatus =
@@ -430,6 +521,16 @@ export type FundIngestionTaskScopeType = "SINGLE" | "SELECTED" | "ALL" | null;
 
 export type FundIngestionTaskParentOperationId = string | null;
 
+/**
+ * 抓取区间起点（基准任务；基金任务为空）。
+ */
+export type FundIngestionTaskStartDate = string | null;
+
+/**
+ * 抓取区间终点（基准任务；基金任务为空）。
+ */
+export type FundIngestionTaskEndDate = string | null;
+
 export type FundIngestionTaskStartedAt = string | null;
 
 export type FundIngestionTaskFinishedAt = string | null;
@@ -452,6 +553,10 @@ export interface FundIngestionTask {
   cancelled_count?: FundIngestionTaskCancelledCount;
   scope_type?: FundIngestionTaskScopeType;
   parent_operation_id?: FundIngestionTaskParentOperationId;
+  /** 抓取区间起点（基准任务；基金任务为空）。 */
+  start_date?: FundIngestionTaskStartDate;
+  /** 抓取区间终点（基准任务；基金任务为空）。 */
+  end_date?: FundIngestionTaskEndDate;
   created_at: string;
   started_at?: FundIngestionTaskStartedAt;
   finished_at?: FundIngestionTaskFinishedAt;
@@ -602,8 +707,11 @@ export interface FundListItem {
   manager_ids: string[];
 }
 
+export type BenchmarkComponentBenchmarkName = string | null;
+
 export interface BenchmarkComponent {
   benchmark_id: string;
+  benchmark_name?: BenchmarkComponentBenchmarkName;
   weight: number;
 }
 
@@ -706,6 +814,21 @@ export interface NavPoint {
 export interface NavSeries {
   fund_id: string;
   points: NavPoint[];
+  benchmark_series?: BenchmarkIndexSeries[];
+}
+
+export interface BenchmarkIndexSeries {
+  benchmark_id: string;
+  benchmark_name: string;
+  weight: number;
+  points: BenchmarkIndexPoint[];
+}
+
+export type BenchmarkIndexPointValue = number | null;
+
+export interface BenchmarkIndexPoint {
+  date: string;
+  value: BenchmarkIndexPointValue;
 }
 
 export type NavSeriesMetaAllOfNavType =
@@ -2814,6 +2937,7 @@ export type ListFundIngestionHistoryDataset =
 export const ListFundIngestionHistoryDataset = {
   BASIC_INFO: "BASIC_INFO",
   NAV: "NAV",
+  BENCHMARK: "BENCHMARK",
 } as const;
 
 export type ListFundIngestionHistoryScopeType =
@@ -2833,6 +2957,34 @@ export type ListFundIngestionHistorySort =
 export const ListFundIngestionHistorySort = {
   created_at: "created_at",
   finished_at: "finished_at",
+} as const;
+
+export type ListBenchmarkIndexesParams = {
+  /**
+   * 按 display_name / provider_code 模糊匹配，不区分大小写。
+   * @maxLength 128
+   */
+  q?: string;
+  source?: ListBenchmarkIndexesSource;
+  /**
+   * @minimum 1
+   */
+  page?: PageParameter;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  page_size?: number;
+};
+
+export type ListBenchmarkIndexesSource =
+  (typeof ListBenchmarkIndexesSource)[keyof typeof ListBenchmarkIndexesSource];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ListBenchmarkIndexesSource = {
+  csindex: "csindex",
+  chinabond: "chinabond",
+  akshare: "akshare",
 } as const;
 
 export type ListFundIngestionItemsParams = {

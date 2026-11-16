@@ -9,6 +9,10 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from fip.platform.jobs.benchmark_ingestion import (
+    BENCHMARK_INGESTION_JOB_TYPE,
+    handle_benchmark_ingestion,
+)
 from fip.platform.jobs.executor import JobExecutor
 from fip.platform.jobs.fund_classification import handle_fund_classification
 from fip.platform.jobs.fund_ingestion import handle_fund_ingestion
@@ -22,6 +26,7 @@ def _job_executor() -> JobExecutor:
             "fund_nav_ingest": handle_fund_ingestion,
             "fund_classification_refresh": handle_fund_classification,
             "fund_classification_index_sets": handle_fund_classification,
+            BENCHMARK_INGESTION_JOB_TYPE: handle_benchmark_ingestion,
         },
         lease_seconds=settings.worker_lease_seconds,
     )

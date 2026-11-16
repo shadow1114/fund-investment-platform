@@ -14,6 +14,8 @@ import type {
   BacktestRunResponseResponse,
   BacktestStatusResponseResponse,
   BacktestValidationResponseResponse,
+  BenchmarkIndexPageEnvelope,
+  BenchmarkIngestionRequest,
   DecisionResponseResponse,
   DecisionReviewRequest,
   DecisionReviewResponseResponse,
@@ -44,6 +46,7 @@ import type {
   GetFundNavSeriesParams,
   GetFundParams,
   GetFundScoresParams,
+  ListBenchmarkIndexesParams,
   ListClassificationReviewsParams,
   ListFundIngestionHistoryParams,
   ListFundIngestionItemsParams,
@@ -649,6 +652,107 @@ export const submitScopedFundIngestion = async (
       method: "POST",
       headers: { "Content-Type": "application/json", ...options?.headers },
       body: JSON.stringify(fundIngestionJobRequest),
+    },
+  );
+};
+
+/**
+ * 基准指数列表（需要数据抓取权限），用于选择要抓取行情的指数。
+ */
+export type listBenchmarkIndexesResponse200 = {
+  data: BenchmarkIndexPageEnvelope;
+  status: 200;
+};
+
+export type listBenchmarkIndexesResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 200>;
+};
+
+export type listBenchmarkIndexesResponseSuccess =
+  listBenchmarkIndexesResponse200 & {
+    headers: Headers;
+  };
+export type listBenchmarkIndexesResponseError =
+  listBenchmarkIndexesResponseDefault & {
+    headers: Headers;
+  };
+
+export type listBenchmarkIndexesResponse =
+  listBenchmarkIndexesResponseSuccess | listBenchmarkIndexesResponseError;
+
+export const getListBenchmarkIndexesUrl = (
+  params?: ListBenchmarkIndexesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/benchmark-indexes?${stringifiedParams}`
+    : `/api/v1/benchmark-indexes`;
+};
+
+export const listBenchmarkIndexes = async (
+  params?: ListBenchmarkIndexesParams,
+  options?: RequestInit,
+): Promise<listBenchmarkIndexesResponse> => {
+  return apiFetch<listBenchmarkIndexesResponse>(
+    getListBenchmarkIndexesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+/**
+ * 提交基准行情数据抓取任务；数据源不受支持的指数直接记为 SKIPPED。
+ */
+export type submitBenchmarkIngestionResponse202 = {
+  data: FundIngestionSubmissionResponseResponse;
+  status: 202;
+};
+
+export type submitBenchmarkIngestionResponseDefault = {
+  data: ErrorResponseResponse;
+  status: Exclude<HTTPStatusCodes, 202>;
+};
+
+export type submitBenchmarkIngestionResponseSuccess =
+  submitBenchmarkIngestionResponse202 & {
+    headers: Headers;
+  };
+export type submitBenchmarkIngestionResponseError =
+  submitBenchmarkIngestionResponseDefault & {
+    headers: Headers;
+  };
+
+export type submitBenchmarkIngestionResponse =
+  | submitBenchmarkIngestionResponseSuccess
+  | submitBenchmarkIngestionResponseError;
+
+export const getSubmitBenchmarkIngestionUrl = () => {
+  return `/api/v1/benchmark-ingestion-jobs`;
+};
+
+export const submitBenchmarkIngestion = async (
+  benchmarkIngestionRequest: BenchmarkIngestionRequest,
+  options?: RequestInit,
+): Promise<submitBenchmarkIngestionResponse> => {
+  return apiFetch<submitBenchmarkIngestionResponse>(
+    getSubmitBenchmarkIngestionUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(benchmarkIngestionRequest),
     },
   );
 };

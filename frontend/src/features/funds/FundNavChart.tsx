@@ -1,4 +1,11 @@
 import ReactEChartsCore from "echarts-for-react/lib/core";
+import { useState } from "react";
+import { useComputedColorScheme } from "@mantine/core";
+
+import {
+  benchmarkComparison,
+  type BenchmarkSeries,
+} from "./benchmarkComparison";
 
 import type {
   FundFactorAnalysis,
@@ -14,6 +21,7 @@ export const FundNavChart = ({
   frequency = "DAILY",
   benchmarkName = "基准",
   colorMode = "CN",
+  benchmarkSeries = [],
 }: {
   points: NavPoint[];
   mode?: "nav" | "drawdown" | "rolling";
@@ -21,7 +29,16 @@ export const FundNavChart = ({
   frequency?: "DAILY" | "WEEKLY" | "MONTHLY";
   benchmarkName?: string;
   colorMode?: "CN" | "INTL";
+  benchmarkSeries?: BenchmarkSeries[];
 }) => {
+  const [hidden, setHidden] = useState<string[]>([]);
+  const scheme = useComputedColorScheme("light");
+  const colors =
+    scheme === "dark"
+      ? ["#3987e5", "#d95926", "#199e70"]
+      : ["#2a78d6", "#eb6834", "#1baf7a"];
+  const ink = scheme === "dark" ? "#c3c2b7" : "#52514e";
+  const comparison = benchmarkComparison(points, benchmarkSeries);
   const factors =
     analysis?.factor_categories.flatMap((category) => category.factors) ?? [];
   const sharpe =
@@ -78,15 +95,17 @@ export const FundNavChart = ({
     data: (number | null)[],
     color: string,
     axis = 0,
+    type: "line" | "bar" = "line",
   ) => ({
     name,
-    type: "line",
+    type,
     showSymbol: false,
     connectNulls: false,
     data: indexes.map((index) => [dates[index], data[index]]),
     yAxisIndex: axis,
     lineStyle: { color, width: 2 },
     itemStyle: { color },
+    ...(type === "bar" ? { barMaxWidth: 8, barMinWidth: 2 } : {}),
   });
   const series =
     mode === "rolling"
@@ -110,29 +129,36 @@ export const FundNavChart = ({
       : mode === "drawdown"
         ? [
             {
-              ...line("动态回撤率 (%)", values, "#e03131"),
+              ...line(
+                "动态回撤率 (%)",
+                values,
+                colorMode === "CN" ? "#e03131" : "#059669",
+              ),
               areaStyle: { color: "#e03131", opacity: 0.12 },
             },
           ]
         : [
-            {
-              ...line("本基金收益率 (%)", values, "#0891b2"),
-              areaStyle: { color: "#0891b2", opacity: 0.06 },
-            },
+            line(
+              "本基金收益率 (%)",
+              comparison.map((p) => p.fund),
+              colors[0],
+            ),
             {
               ...line(
                 `${benchmarkName} (%)`,
-                dates.map(() => null),
-                "#94a3b8",
+                comparison.map((p) => p.benchmark),
+                colors[1],
               ),
-              lineStyle: { color: "#94a3b8", type: "dashed", width: 1.5 },
+              lineStyle: { color: colors[1], type: "dashed", width: 2 },
             },
             {
-              name: "超额收益 (%)",
-              type: "bar",
-              data: dates.map(() => null),
-              yAxisIndex: 1,
-              itemStyle: { color: colorMode === "CN" ? "#e03131" : "#059669" },
+              ...line(
+                "超额收益 (%)",
+                comparison.map((p) => p.excess),
+                colors[2],
+                0,
+                "bar",
+              ),
             },
           ];
   const option = {
@@ -151,12 +177,8 @@ export const FundNavChart = ({
       valueFormatter: (value: unknown) =>
         typeof value === "number" ? value.toFixed(2) : "—",
     },
-    grid: { left: 56, right: 56, top: 36, bottom: 30 },
-    legend: {
-      top: 0,
-      textStyle: { fontSize: 11 },
-      data: series.map((item) => item.name),
-    },
+    grid: { left: 56, right: 24, top: 20, bottom: 30 },
+    textStyle: { color: ink },
     xAxis: {
       type: "category",
       data: indexes.map((index) => dates[index]),
@@ -171,24 +193,100 @@ export const FundNavChart = ({
           fontSize: 10,
         },
       },
-      {
-        type: "value",
-        position: "right",
-        axisLabel: { formatter: "{value}%", fontSize: 10 },
-        splitLine: { show: false },
-      },
+      ...(mode === "rolling"
+        ? [
+            {
+              type: "value",
+              position: "right",
+              axisLabel: { formatter: "{value}%", fontSize: 10 },
+              splitLine: { show: false },
+            },
+          ]
+        : []),
     ],
-    series,
+    series: series.map((item, index) =>
+      hidden.includes(String(index)) ? { ...item, data: [] } : item,
+    ),
   };
   return (
-    <div className={styles.chartCanvas} aria-label="基金趋势图">
-      <ReactEChartsCore
-        echarts={echarts}
-        option={option}
-        notMerge
-        autoResize
-        style={{ width: "100%", height: "100%" }}
-      />
+    <div>
+      <div
+        className={styles.curveControls}
+        role="group"
+        aria-label="曲线显示控制"
+      >
+        {series.map((item, index) => (
+          <label key={index}>
+            <input
+              type="checkbox"
+              checked={!hidden.includes(String(index))}
+              onChange={() =>
+                setHidden((current) =>
+                  current.includes(String(index))
+                    ? current.filter((key) => key !== String(index))
+                    : [...current, String(index)],
+                )
+              }
+            />
+            <span
+              aria-hidden="true"
+              className={styles.seriesMark}
+              style={{
+                borderColor: item.lineStyle.color,
+                borderTopStyle: index === 1 ? "dashed" : "solid",
+                backgroundColor:
+                  item.type === "bar" ? item.itemStyle.color : "transparent",
+              }}
+            />
+            {item.name}
+          </label>
+        ))}
+      </div>
+      {mode === "nav" &&
+        !comparison.some((point) => point.benchmark !== null) && (
+          <p className={styles.chartNote}>
+            所选基准暂无可对齐的有效行情，基准及超额收益不展示。
+          </p>
+        )}
+      <div className={styles.chartCanvas} aria-label="基金趋势图">
+        <ReactEChartsCore
+          echarts={echarts}
+          option={option}
+          notMerge
+          autoResize
+          style={{ width: "100%", height: "100%" }}
+        />
+      </div>
+      <details className={styles.chartTable}>
+        <summary>查看数值表</summary>
+        <div role="region" aria-label="净值数值表" tabIndex={0}>
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                {series.map((item) => (
+                  <th key={item.name}>{item.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {indexes.map((index) => (
+                <tr key={dates[index]}>
+                  <td>{dates[index]}</td>
+                  {series.map((item) => {
+                    const value = item.data[indexes.indexOf(index)]?.[1];
+                    return (
+                      <td key={item.name}>
+                        {typeof value === "number" ? value.toFixed(2) : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 };

@@ -11,6 +11,7 @@ from fip.api.auth import get_principal
 from fip.api.context import Principal
 from fip.api.contracts import success
 from fip.api.errors import (
+    BadRequestError,
     ConflictError,
     ForbiddenError,
     InvalidQueryError,
@@ -18,6 +19,10 @@ from fip.api.errors import (
     ServiceUnavailableError,
 )
 from fip.api.schemas import (
+    BenchmarkIndexModel,
+    BenchmarkIndexPage,
+    BenchmarkIngestionRequest,
+    BenchmarkSourceCountsModel,
     FundBasicInfoHistoryModel,
     FundIngestionHistoryPage,
     FundIngestionItemModel,
@@ -37,6 +42,13 @@ from fip.platform.jobs.submitter import JobSubmitter
 # ruff: noqa: B008
 
 router = APIRouter()
+
+FUND_INGESTION_JOB_TYPES = ("fund_basic_info_ingest", "fund_nav_ingest")
+BENCHMARK_INGESTION_JOB_TYPE = "benchmark_index_ingest"
+# 任务查询 / 取消 / 重试 / 明细接口共同覆盖的任务类型。
+INGESTION_JOB_TYPES = (*FUND_INGESTION_JOB_TYPES, BENCHMARK_INGESTION_JOB_TYPE)
+TaskStatus = Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
+DatasetName = Literal["BASIC_INFO", "NAV", "BENCHMARK"]
 
 
 class FundIngestionRequest(StrictModel):
@@ -61,11 +73,21 @@ def _can_read_job(principal: Principal, job: CalculationJob) -> bool:
     return principal.can_manage_data_ingestion or payload.get("actor") == principal.user_id
 
 
+def _payload_date(value: object) -> date | None:
+    """任务载荷里的日期以 ISO 字符串保存；无法解析时视为空，不阻断任务展示。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _task_model(job: CalculationJob) -> FundIngestionTaskModel:
     payload = job.job_payload or {}
     result = job.result_payload or {}
     dataset = payload.get("dataset")
-    if dataset not in {"BASIC_INFO", "NAV"}:
+    if dataset not in {"BASIC_INFO", "NAV", "BENCHMARK"}:
         raise ConflictError("Stored ingestion job has an unsupported dataset")
     raw_fund_ids = payload.get("fund_ids", [])
     raw_subjects = payload.get("subjects", [])
@@ -88,7 +110,7 @@ def _task_model(job: CalculationJob) -> FundIngestionTaskModel:
         operation_id=job.execution_id,
         fund_id=str(job.resource_id or ""),
         fund_ids=[str(value) for value in raw_fund_ids] if isinstance(raw_fund_ids, list) else [],
-        dataset=cast(Literal["BASIC_INFO", "NAV"], dataset),
+        dataset=cast(DatasetName, dataset),
         source=str(payload.get("source") or "AKSHARE"),
         actor=str(payload.get("actor") or "UNKNOWN"),
         status=cast(
@@ -103,6 +125,8 @@ def _task_model(job: CalculationJob) -> FundIngestionTaskModel:
         cancelled_count=raw_cancelled_count if isinstance(raw_cancelled_count, int) else None,
         scope_type=cast(Any, payload.get("scope_type")),
         parent_operation_id=cast(str | None, payload.get("parent_operation_id")),
+        start_date=_payload_date(payload.get("start_date")),
+        end_date=_payload_date(payload.get("end_date")),
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -456,7 +480,7 @@ def get_fund_ingestion(
         job = session.execute(
             select(CalculationJob).where(
                 CalculationJob.execution_id == operation_id,
-                CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest")),
+                CalculationJob.job_type.in_(INGESTION_JOB_TYPES),
             )
         ).scalar_one_or_none()
         if job is None:
@@ -774,7 +798,7 @@ def _authorized_scoped_job(
 ) -> CalculationJob:
     stmt = select(CalculationJob).where(
         CalculationJob.execution_id == operation_id,
-        CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest")),
+        CalculationJob.job_type.in_(INGESTION_JOB_TYPES),
     )
     if write:
         stmt = stmt.with_for_update()
@@ -796,6 +820,7 @@ def _authorized_scoped_job(
     "/ingestions/{operation_id}/items",
     operation_id="listFundIngestionItems",
     response_model=TypedEnvelope[FundIngestionItemsPage],
+    response_model_exclude={"data": {"items": {"__all__": {"fund_id"}}}},
 )
 def list_ingestion_items(
     operation_id: str,
@@ -808,11 +833,18 @@ def list_ingestion_items(
 ) -> dict[str, Any]:
     from sqlalchemy import func
 
+    from fip.services.data_service.models.fund import Fund
     from fip.services.data_service.models.fund_ingestion import FundIngestionRunItem
 
     session = _session(request)
     try:
-        _authorized_scoped_job(session, operation_id, principal)
+        job = _authorized_scoped_job(session, operation_id, principal)
+        if job.job_type == BENCHMARK_INGESTION_JOB_TYPE:
+            page_model = _benchmark_items_page(session, operation_id, page, page_size, item_status)
+            page_data = page_model.model_dump(mode="json")
+            for item in page_data["items"]:
+                item.pop("fund_id", None)
+            return success(page_data, request_id=request.state.request_id)
         where = [FundIngestionRunItem.operation_id == operation_id]
         if item_status is not None:
             where.append(FundIngestionRunItem.status == item_status)
@@ -820,17 +852,20 @@ def list_ingestion_items(
             session.scalar(select(func.count()).select_from(FundIngestionRunItem).where(*where))
             or 0
         )
-        rows = session.scalars(
-            select(FundIngestionRunItem)
+        rows = session.execute(
+            select(FundIngestionRunItem, Fund.product_name)
+            .join(Fund, Fund.id == FundIngestionRunItem.fund_id)
             .where(*where)
             .order_by(FundIngestionRunItem.id)
             .offset((page - 1) * page_size)
             .limit(page_size)
-        )
+        ).all()
         items = [
             FundIngestionItemModel(
                 id=row.id,
                 fund_id=row.public_fund_id,
+                subject_type="FUND",
+                subject_name=fund_name,
                 share_class_id=row.share_class_id,
                 symbol=row.symbol,
                 status=cast(Any, row.status),
@@ -840,7 +875,7 @@ def list_ingestion_items(
                 started_at=row.started_at,
                 finished_at=row.finished_at,
             )
-            for row in rows
+            for row, fund_name in rows
         ]
         data = FundIngestionItemsPage(items=items, page=page, page_size=page_size, total=total)
         return success(data.model_dump(mode="json"), request_id=request.state.request_id)
@@ -897,7 +932,7 @@ def list_ingestion_history(
     job_status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"] | None = Query(
         None, alias="status"
     ),
-    dataset: Literal["BASIC_INFO", "NAV"] | None = None,
+    dataset: DatasetName | None = None,
     scope_type: Literal["SINGLE", "SELECTED", "ALL"] | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
@@ -915,9 +950,7 @@ def list_ingestion_history(
         raise InvalidQueryError("created_from must be before or equal to created_to")
     session = _session(request)
     try:
-        where: list[ColumnElement[bool]] = [
-            CalculationJob.job_type.in_(("fund_basic_info_ingest", "fund_nav_ingest"))
-        ]
+        where: list[ColumnElement[bool]] = [CalculationJob.job_type.in_(INGESTION_JOB_TYPES)]
         owner = CalculationJob.job_payload["actor"].astext == principal.user_id
         if principal.can_manage_data_ingestion:
             where.append(or_(owner, CalculationJob.job_payload["scoped_items"].astext.is_(None)))
@@ -981,6 +1014,17 @@ def retry_ingestion_failures(
         parent = _authorized_scoped_job(session, operation_id, principal, write=True)
         if not (parent.job_payload or {}).get("scoped_items") or parent.status == "RUNNING":
             raise ConflictError("Only finished scoped operations can be retried")
+        if parent.job_type == BENCHMARK_INGESTION_JOB_TYPE:
+            retry_job = _retry_benchmark_failures(session, parent, principal, idempotency_key)
+            session.commit()
+            data = FundIngestionSubmissionModel(
+                operation_id=retry_job.execution_id,
+                fund_id="SCOPED",
+                fund_ids=[],
+                dataset="BENCHMARK",
+                status=cast(TaskStatus, retry_job.status),
+            )
+            return success(data.model_dump(mode="json"), request_id=request.state.request_id)
         key = f"fund-ingestion-retry|{principal.user_id}|{idempotency_key}"
         existing = session.scalar(
             select(CalculationJob).where(CalculationJob.idempotency_key == key)
@@ -1057,5 +1101,377 @@ def retry_ingestion_failures(
             status=cast(Any, job.status),
         )
         return success(data.model_dump(mode="json"), request_id=request.state.request_id)
+    finally:
+        session.close()
+
+
+# ---------- 基准行情数据抓取 ----------
+
+
+def _benchmark_items_page(
+    session: Session,
+    operation_id: str,
+    page: int,
+    page_size: int,
+    item_status: str | None,
+) -> FundIngestionItemsPage:
+    """基准任务的项明细来自 benchmark_ingestion_run_item，映射到统一的项模型。"""
+    from sqlalchemy import func
+
+    from fip.services.data_service.models.benchmark import BenchmarkIndex
+    from fip.services.data_service.models.fund_ingestion import BenchmarkIngestionRunItem
+
+    where = [BenchmarkIngestionRunItem.operation_id == operation_id]
+    if item_status is not None:
+        where.append(BenchmarkIngestionRunItem.status == item_status)
+    total = (
+        session.scalar(select(func.count()).select_from(BenchmarkIngestionRunItem).where(*where))
+        or 0
+    )
+    rows = session.execute(
+        select(BenchmarkIngestionRunItem, BenchmarkIndex.display_name, BenchmarkIndex.provider_code)
+        .join(BenchmarkIndex, BenchmarkIndex.id == BenchmarkIngestionRunItem.benchmark_index_id)
+        .where(*where)
+        .order_by(BenchmarkIngestionRunItem.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    items = [
+        FundIngestionItemModel(
+            id=row.id,
+            fund_id=None,
+            subject_type="BENCHMARK",
+            subject_name=display_name,
+            benchmark_index_id=str(row.benchmark_index_id),
+            share_class_id=None,
+            symbol=provider_code,
+            status=cast(Any, row.status),
+            attempts=row.attempts,
+            result=row.result,
+            error=row.error,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+        for row, display_name, provider_code in rows
+    ]
+    return FundIngestionItemsPage(items=items, page=page, page_size=page_size, total=total)
+
+
+def _retry_benchmark_failures(
+    session: Session, parent: CalculationJob, principal: Principal, idempotency_key: str
+) -> CalculationJob:
+    """只为父任务中 FAILED 的基准项新建任务，区间与父任务一致。"""
+    from fip.services.data_service.models.fund_ingestion import BenchmarkIngestionRunItem
+    from fip.services.data_service.models.governance import AuditLog
+
+    operation_id = parent.execution_id
+    key = f"benchmark-ingestion-retry|{principal.user_id}|{idempotency_key}"
+    existing = session.scalar(select(CalculationJob).where(CalculationJob.idempotency_key == key))
+    if existing is not None:
+        if (existing.job_payload or {}).get("parent_operation_id") != operation_id:
+            raise ConflictError("Idempotency key was used for another operation")
+        return existing
+    failed = list(
+        session.scalars(
+            select(BenchmarkIngestionRunItem)
+            .where(
+                BenchmarkIngestionRunItem.operation_id == operation_id,
+                BenchmarkIngestionRunItem.status == "FAILED",
+            )
+            .order_by(BenchmarkIngestionRunItem.id)
+        )
+    )
+    if not failed:
+        raise ConflictError("No failed items to retry")
+    payload = {
+        **(parent.job_payload or {}),
+        "actor": principal.user_id,
+        "parent_operation_id": operation_id,
+        "benchmark_index_ids": [str(item.benchmark_index_id) for item in failed],
+    }
+    payload.pop("cancel_requested", None)
+    job = JobSubmitter(session).submit(
+        job_type=BENCHMARK_INGESTION_JOB_TYPE,
+        idempotency_key=key,
+        resource_id="SCOPED",
+        job_payload=payload,
+    )
+    if (job.job_payload or {}).get("parent_operation_id") != operation_id:
+        raise ConflictError("Idempotency key was used for another operation")
+    if not session.scalar(
+        select(BenchmarkIngestionRunItem.id)
+        .where(BenchmarkIngestionRunItem.operation_id == job.execution_id)
+        .limit(1)
+    ):
+        for item in failed:
+            session.add(
+                BenchmarkIngestionRunItem(
+                    operation_id=job.execution_id,
+                    benchmark_index_id=item.benchmark_index_id,
+                    status="PENDING",
+                    attempts=0,
+                )
+            )
+        job.result_ref = f"/api/v1/ingestions/{job.execution_id}"
+        job.result_payload = {
+            "dataset": "BENCHMARK",
+            "requested_count": len(failed),
+            "success_count": 0,
+            "failure_count": 0,
+            "skipped_count": 0,
+        }
+        session.add(
+            AuditLog(
+                resource_type="benchmark_ingestion",
+                resource_id=job.execution_id,
+                action="RETRY",
+                operator=principal.user_id,
+                detail={"parent_operation_id": operation_id},
+            )
+        )
+    return job
+
+
+def _like_pattern(value: str) -> str:
+    """把用户输入转为 ILIKE 子串模式，转义通配符。"""
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+@router.get(
+    "/benchmark-indexes",
+    operation_id="listBenchmarkIndexes",
+    response_model=TypedEnvelope[BenchmarkIndexPage],
+)
+def list_benchmark_indexes(
+    request: Request,
+    q: str | None = Query(None, max_length=128),
+    source: Literal["csindex", "chinabond", "akshare"] | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    principal: Principal = Depends(get_principal),
+) -> dict[str, Any]:
+    from sqlalchemy import func
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from fip.services.data_service.models.benchmark import BenchmarkIndex, BenchmarkIndexValue
+
+    if not principal.can_manage_data_ingestion:
+        raise ForbiddenError("Data ingestion permission is required")
+    session = _session(request)
+    try:
+        text_filter: list[ColumnElement[bool]] = []
+        keyword = (q or "").strip()
+        if keyword:
+            pattern = _like_pattern(keyword)
+            text_filter.append(
+                or_(
+                    BenchmarkIndex.display_name.ilike(pattern, escape="\\"),
+                    BenchmarkIndex.provider_code.ilike(pattern, escape="\\"),
+                )
+            )
+        counts: dict[str | None, int] = {
+            row_source: int(count)
+            for row_source, count in session.execute(
+                select(BenchmarkIndex.source, func.count())
+                .where(*text_filter)
+                .group_by(BenchmarkIndex.source)
+            ).all()
+        }
+        where = [*text_filter]
+        if source is not None:
+            where.append(BenchmarkIndex.source == source)
+        total = session.scalar(select(func.count()).select_from(BenchmarkIndex).where(*where)) or 0
+        # 当前可见：available_at 不晚于现在的版本才计入最新行情日期。
+        latest = (
+            select(
+                BenchmarkIndexValue.index_id.label("index_id"),
+                func.max(BenchmarkIndexValue.effective_at).label("latest_value_date"),
+            )
+            .where(BenchmarkIndexValue.available_at <= datetime.now(UTC))
+            .group_by(BenchmarkIndexValue.index_id)
+            .subquery()
+        )
+        rows = session.execute(
+            select(BenchmarkIndex, latest.c.latest_value_date)
+            .outerjoin(latest, latest.c.index_id == BenchmarkIndex.id)
+            .where(*where)
+            .order_by(BenchmarkIndex.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        data = BenchmarkIndexPage(
+            items=[
+                BenchmarkIndexModel(
+                    benchmark_index_id=str(index.id),
+                    display_name=index.display_name,
+                    provider_code=index.provider_code,
+                    source=index.source,
+                    latest_value_date=latest_value_date,
+                )
+                for index, latest_value_date in rows
+            ],
+            page=page,
+            page_size=page_size,
+            total=total,
+            source_counts=BenchmarkSourceCountsModel(
+                csindex=counts.get("csindex", 0),
+                chinabond=counts.get("chinabond", 0),
+                akshare=counts.get("akshare", 0),
+            ),
+        )
+        return success(data.model_dump(mode="json"), request_id=request.state.request_id)
+    finally:
+        session.close()
+
+
+def _same_benchmark_request(
+    stored: dict[str, Any],
+    ids: list[str],
+    start_date: date | None,
+    end_date: date | None,
+) -> bool:
+    """幂等重放判定：ID 列表与起始日一致；结束日仅在显式传入时比较（缺省值随日期变化）。"""
+    if stored.get("dataset") != "BENCHMARK" or stored.get("benchmark_index_ids") != ids:
+        return False
+    if stored.get("start_date") != (start_date.isoformat() if start_date else None):
+        return False
+    return end_date is None or stored.get("end_date") == end_date.isoformat()
+
+
+def _initial_benchmark_item(source: str | None) -> tuple[str, str | None]:
+    """数据源不受支持的指数直接 SKIPPED，并给出原因。"""
+    from fip.services.data_service.benchmark_values import SUPPORTED_BENCHMARK_SOURCES
+
+    if source in SUPPORTED_BENCHMARK_SOURCES:
+        return "PENDING", None
+    return "SKIPPED", f"不支持的基准数据源 source={source}"
+
+
+def _beijing_today() -> date:
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date()
+
+
+@router.post(
+    "/benchmark-ingestion-jobs",
+    operation_id="submitBenchmarkIngestion",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=TypedEnvelope[FundIngestionSubmissionModel],
+)
+def submit_benchmark_ingestion(
+    request: Request,
+    payload: BenchmarkIngestionRequest = Body(...),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=128),
+    principal: Principal = Depends(get_principal),
+) -> dict[str, Any]:
+    from fip.services.data_service.models.benchmark import BenchmarkIndex
+    from fip.services.data_service.models.fund_ingestion import BenchmarkIngestionRunItem
+    from fip.services.data_service.models.governance import AuditLog
+
+    if not principal.can_manage_data_ingestion:
+        raise ForbiddenError("Data ingestion permission is required")
+    end_date = payload.end_date or _beijing_today()
+    if payload.start_date is not None and payload.start_date > end_date:
+        raise BadRequestError("start_date 不能晚于 end_date")
+    if not getattr(request.app.state, "persistent_operations", False):
+        raise ServiceUnavailableError("Durable data ingestion workers are not enabled")
+    ids = payload.benchmark_index_ids
+    session = _session(request)
+    try:
+        scoped_key = f"benchmark-ingestion|{principal.user_id}|{idempotency_key}"
+        existing = session.scalar(
+            select(CalculationJob).where(CalculationJob.idempotency_key == scoped_key)
+        )
+        if existing is not None:
+            if existing.job_type != BENCHMARK_INGESTION_JOB_TYPE or not _same_benchmark_request(
+                existing.job_payload or {}, ids, payload.start_date, payload.end_date
+            ):
+                raise ConflictError("Idempotency key was used for another request")
+            job = existing
+        else:
+            indexes = {
+                index.id: index
+                for index in session.scalars(
+                    select(BenchmarkIndex).where(BenchmarkIndex.id.in_([int(v) for v in ids]))
+                )
+            }
+            missing = [value for value in ids if int(value) not in indexes]
+            if missing:
+                raise NotFoundError("benchmark index", ",".join(missing))
+            job = JobSubmitter(session).submit(
+                job_type=BENCHMARK_INGESTION_JOB_TYPE,
+                idempotency_key=scoped_key,
+                resource_id="SCOPED",
+                result_ref=None,
+                job_payload={
+                    "dataset": "BENCHMARK",
+                    "actor": principal.user_id,
+                    "source": "MULTI",
+                    "scope_type": "SELECTED",
+                    "scoped_items": True,
+                    "start_date": payload.start_date.isoformat() if payload.start_date else None,
+                    "end_date": end_date.isoformat(),
+                    "benchmark_index_ids": ids,
+                },
+            )
+            # 并发提交可能抢先占用同一幂等键。
+            if not _same_benchmark_request(
+                job.job_payload or {}, ids, payload.start_date, payload.end_date
+            ):
+                raise ConflictError("Idempotency key was used for another request")
+            if not session.scalar(
+                select(BenchmarkIngestionRunItem.id)
+                .where(BenchmarkIngestionRunItem.operation_id == job.execution_id)
+                .limit(1)
+            ):
+                skipped = 0
+                for value in ids:
+                    index = indexes[int(value)]
+                    item_status, error = _initial_benchmark_item(index.source)
+                    skipped += item_status == "SKIPPED"
+                    session.add(
+                        BenchmarkIngestionRunItem(
+                            operation_id=job.execution_id,
+                            benchmark_index_id=index.id,
+                            status=item_status,
+                            attempts=0,
+                            error=error,
+                            finished_at=datetime.now(UTC) if item_status == "SKIPPED" else None,
+                        )
+                    )
+                job.result_ref = f"/api/v1/ingestions/{job.execution_id}"
+                job.progress = skipped
+                job.result_payload = {
+                    "dataset": "BENCHMARK",
+                    "requested_count": len(ids),
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "skipped_count": skipped,
+                }
+                session.add(
+                    AuditLog(
+                        resource_type="benchmark_ingestion",
+                        resource_id=job.execution_id,
+                        action="SUBMITTED",
+                        operator=principal.user_id,
+                        detail={
+                            "benchmark_index_ids": ids,
+                            "start_date": (job.job_payload or {}).get("start_date"),
+                            "end_date": (job.job_payload or {}).get("end_date"),
+                            "skipped_count": skipped,
+                        },
+                    )
+                )
+        session.commit()
+        model = FundIngestionSubmissionModel(
+            operation_id=job.execution_id,
+            fund_id="SCOPED",
+            fund_ids=[],
+            dataset="BENCHMARK",
+            status=cast(TaskStatus, job.status),
+        )
+        return success(model.model_dump(mode="json"), request_id=request.state.request_id)
     finally:
         session.close()

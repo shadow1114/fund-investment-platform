@@ -18,6 +18,14 @@ def _alembic(*arguments: str) -> None:
 
 
 def test_0017_backfills_existing_share_classes_before_not_null(db_engine):
+    # Earlier integration tests can commit worker rows to the shared disposable DB.
+    # Clear worker timestamps so the intentional 0037 downgrade guard does not block
+    # this isolated legacy-schema migration check.
+    with db_engine.begin() as connection:
+        # This is a migration-only test against a disposable database. Remove all
+        # durable worker fixtures committed by earlier API integration tests so
+        # irreversible-data downgrade guards do not inherit unrelated test state.
+        connection.execute(text("DELETE FROM governance.calculation_job"))
     _alembic("downgrade", "0016")
     try:
         with db_engine.begin() as connection:

@@ -22,6 +22,7 @@ PROBE_PARAMS: dict[str, dict[str, str]] = {
     "fund_distribution": {"symbol": "161725"},
     "fund_split": {"symbol": "161725"},
     "risk_free_rate": {"start_date": "20240101", "end_date": "20240110"},
+    "hk_index_daily": {"symbol": "HSI"},
 }
 
 

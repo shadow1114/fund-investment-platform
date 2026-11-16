@@ -101,6 +101,19 @@ def test_review_403_success_409_and_pit_stability(seeded):
         "expected_revision": rev.id,
         "reason": "官方策略确认",
         "decisions": {
+            "asset_class": {
+                "action": "OVERRIDE",
+                "value": "EQUITY",
+                "evidence": [
+                    normalize_evidence(
+                        source="OFFICIAL",
+                        field="asset_class",
+                        value="EQUITY",
+                        classified_at=dt.datetime.now(dt.UTC),
+                        locator="prospectus §1",
+                    ).model_dump(mode="json")
+                ],
+            },
             "strategy": {
                 "action": "OVERRIDE",
                 "value": "ACTIVE",
@@ -108,7 +121,7 @@ def test_review_403_success_409_and_pit_stability(seeded):
             }
         },
     }
-    assert client.post(url, json=body).status_code == 403
+    assert client.post(url, json=body, headers={"X-Roles": "Researcher"}).status_code == 403
     response = client.post(url, json=body, headers={"X-Roles": "Reviewer"})
     assert response.status_code == 200, response.text
     assert response.json()["data"]["version"] == 2

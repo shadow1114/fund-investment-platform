@@ -134,6 +134,7 @@ def test_review_is_compare_and_swap_audited_and_refresh_protected(db_session, pr
         case.id,
         expected_revision=first.id,
         decisions={
+            "asset_class": ReviewDecision(action="OVERRIDE", value="EQUITY", evidence=(evidence,)),
             "strategy": ReviewDecision(action="OVERRIDE", value="ACTIVE", evidence=(evidence,))
         },
         actor="reviewer",
@@ -246,7 +247,7 @@ def test_peer_candidate_adapter_preserves_revision_and_exclusion_reason(db_sessi
     assert candidates[0].classification_revision_id == first.id
     assert build_peer_groups(candidates, {"ACTIVE_EQUITY": "Active"}) == ()
     assert excluded_candidates(candidates, {"ACTIVE_EQUITY": "Active"})[0].reason == (
-        "UNSUPPORTED_COMBINATION"
+        "STRATEGY_UNCONFIRMED"
     )
 
 
@@ -289,7 +290,8 @@ def test_refresh_review_only_changes_explicit_interval_and_audits_rejection(db_s
     )
     case = db_session.scalars(
         select(FundClassificationReviewCase).where(
-            FundClassificationReviewCase.issue_type == "NEW_EVIDENCE_AFTER_REVIEW"
+            FundClassificationReviewCase.issue_type == "NEW_EVIDENCE_AFTER_REVIEW",
+            FundClassificationReviewCase.issue_key.like("%:asset_class"),
         )
     ).one()
     assert case.details["valid_from"] == "2026-03-01"
@@ -304,7 +306,8 @@ def test_refresh_review_only_changes_explicit_interval_and_audits_rejection(db_s
         case.id,
         expected_revision=current.id,
         decisions={
-            "asset_class": ReviewDecision(action="OVERRIDE", value="MIXED", evidence=(proof,))
+            "asset_class": ReviewDecision(action="OVERRIDE", value="MIXED", evidence=(proof,)),
+            "strategy": ReviewDecision(action="REJECT", evidence=(proof,)),
         },
         actor="reviewer",
         reason="confirmed transformation",
@@ -330,7 +333,10 @@ def test_refresh_review_only_changes_explicit_interval_and_audits_rejection(db_s
     service.review(
         pending.id,
         expected_revision=reviewed.id,
-        decisions={"strategy": ReviewDecision(action="REJECT", evidence=(proof,))},
+        decisions={
+            "asset_class": ReviewDecision(action="OVERRIDE", value="MIXED", evidence=(proof,)),
+            "strategy": ReviewDecision(action="REJECT", evidence=(proof,)),
+        },
         actor="reviewer",
         reason="unsupported candidate",
         can_review=True,
@@ -433,7 +439,7 @@ def test_review_preserves_other_incoming_proposals_on_new_baseline(db_session, p
         .where(FundClassificationReviewCase.status == "PENDING")
         .order_by(FundClassificationReviewCase.id)
     ).all()
-    assert len(proposals) == 2
+    assert len(proposals) == 6
     proof = normalize_evidence(
         source="OFFICIAL",
         field="asset_class",
@@ -445,7 +451,8 @@ def test_review_preserves_other_incoming_proposals_on_new_baseline(db_session, p
         proposals[0].id,
         expected_revision=baseline.id,
         decisions={
-            "asset_class": ReviewDecision(action="OVERRIDE", value="MIXED", evidence=(proof,))
+            "asset_class": ReviewDecision(action="OVERRIDE", value="MIXED", evidence=(proof,)),
+            "strategy": ReviewDecision(action="REJECT", evidence=(proof,)),
         },
         actor="reviewer",
         reason="first proposal",
@@ -455,18 +462,7 @@ def test_review_preserves_other_incoming_proposals_on_new_baseline(db_session, p
     pending = db_session.scalars(
         select(FundClassificationReviewCase).where(FundClassificationReviewCase.status == "PENDING")
     ).all()
-    assert len(pending) == 1
-    assert pending[0].revision_id == revised.id
-    assert pending[0].details["valid_from"] == "2026-02-01"
-    service.review(
-        pending[0].id,
-        expected_revision=revised.id,
-        decisions={
-            "asset_class": ReviewDecision(action="OVERRIDE", value="EQUITY", evidence=(proof,))
-        },
-        actor="reviewer",
-        reason="second proposal",
-        can_review=True,
-        reviewed_at=T2,
-    )
-    assert service.latest(product.id).version == 3
+    assert len(pending) == 4
+    assert all(item.revision_id == revised.id for item in pending)
+    assert any(item.details["valid_from"] == "2026-02-01" for item in pending)
+    assert service.latest(product.id).version == 2

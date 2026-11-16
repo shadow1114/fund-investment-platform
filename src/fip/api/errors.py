@@ -4,6 +4,7 @@ from typing import Any
 
 ERROR_CODES: dict[str, tuple[int, bool]] = {
     "VALIDATION_ERROR": (422, False),
+    "BAD_REQUEST": (400, False),
     "UNAUTHENTICATED": (401, False),
     "FORBIDDEN": (403, False),
     "NOT_FOUND": (404, False),
@@ -63,6 +64,13 @@ class AuthenticationError(ApiError):
 class ConflictError(ApiError):
     def __init__(self, message: str, details: Any | None = None) -> None:
         super().__init__(409, "CONFLICT", message, details)
+
+
+class BadRequestError(ApiError):
+    """请求参数组合不合法（如日期区间颠倒），返回 400。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(400, "BAD_REQUEST", message)
 
 
 class InvalidQueryError(ApiError):

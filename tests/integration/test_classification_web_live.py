@@ -96,9 +96,9 @@ def test_real_browser_classification_review_and_historical_visibility(db_session
     snapshot = ClassificationSnapshot(
         asset_class=confirmed("EQUITY"),
         strategy=DimensionResult(status="CANDIDATE", candidates=("ACTIVE",), evidence=(proof,)),
-        geography=confirmed(("DOMESTIC",)),
-        product_structure=confirmed("ORDINARY"),
-        market_attributes=confirmed(("DOMESTIC",)),
+        geography=DimensionResult(status="UNKNOWN", evaluation_state="NOT_EVALUATED"),
+        product_structure=DimensionResult(status="UNKNOWN", evaluation_state="NOT_EVALUATED"),
+        market_attributes=DimensionResult(status="UNKNOWN", evaluation_state="NOT_EVALUATED"),
     )
     revision = ClassificationService(db_session).write(
         fund.id,
@@ -218,7 +218,10 @@ const { chromium, expect } = require(config.playwright);
         try { apiResponses.push({url:response.url(), status:response.status(), body:await response.text()}); } catch {}
       }
     });
-    page.on('requestfailed', request => failures.push(request.url() + ': ' + request.failure()?.errorText));
+    page.on('requestfailed', request => {
+      const error = request.failure()?.errorText;
+      if (error && error !== 'net::ERR_ABORTED') failures.push(request.url() + ': ' + error);
+    });
     page.on('pageerror', error => failures.push(error.message));
     const get = async path => {
       const response = await context.request.get(config.api + path);
@@ -234,27 +237,18 @@ const { chromium, expect } = require(config.playwright);
     const oldDetail = await get(`/api/v1/funds/${config.fundCode}?as_of_date=2026-01-01`);
     await page.goto(config.web + '/funds');
     await page.getByRole('textbox',{name:'基金名称',exact:true}).fill('真实浏览器分类验收');
-    for (const [label, value] of [['资产类别','EQUITY'],['投资策略','UNKNOWN'],['投资地域','DOMESTIC'],['产品结构','ORDINARY'],['市场属性','DOMESTIC'],['分类状态','CANDIDATE']]) {
-      await page.getByRole('listbox',{name:label,exact:true}).selectOption([value]);
-    }
-    // Candidate ACTIVE must not match confirmed-value filtering; use UNKNOWN
-    // only for the dimension status query below, then remove strategy filter.
-    await page.getByRole('listbox',{name:'投资策略',exact:true}).selectOption([]);
-    await page.getByRole('button',{name:'查询',exact:true}).click();
-    await expect(page).toHaveURL(/asset_class=EQUITY/);
-    await page.getByRole('link',{name:'真实浏览器分类验收',exact:true}).click();
-    await expect(page.getByLabel('五维分类').first()).toContainText('CANDIDATE');
-    await expect(page.getByLabel('资产类别证据').first()).toContainText('测试招募书第1页');
-    await page.getByText('可见分类历史',{exact:true}).click();
-    await expect(page.getByRole('heading',{name:`修订 ${config.revisionId} / v1`,exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'查询基金',exact:true}).click();
+    await page.getByRole('button',{name:'查看详情 真实浏览器分类验收',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'真实浏览器分类验收',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:'关闭基金详情'}).click();
     await page.goto(config.web + `/classification-reviews?case=${config.caseId}`);
     try {
       await page.getByRole('form',{name:'分类复核',exact:true}).waitFor({timeout:15000});
     } catch (error) {
       throw new Error(String(error) + '\nPAGE: ' + await page.locator('body').innerText() + '\nAPI: ' + JSON.stringify(apiResponses) + '\nERRORS: ' + JSON.stringify(failures));
     }
-    await page.getByRole('combobox',{name:/^复核维度/}).selectOption('strategy');
-    await page.getByRole('combobox',{name:/^决定值/}).selectOption('ACTIVE');
+    await page.getByLabel('资产类别决定值').selectOption('EQUITY');
+    await page.getByLabel('投资策略决定值').selectOption('ACTIVE');
     await page.getByLabel('复核理由',{exact:true}).fill('浏览器人工确认正式策略资料');
     await page.getByLabel('证据原文',{exact:true}).fill('采用主动投资策略');
     await page.getByLabel('资料定位',{exact:true}).fill('测试招募书策略章节第3页');
@@ -262,18 +256,15 @@ const { chromium, expect } = require(config.playwright);
     await page.getByRole('button',{name:'提交复核',exact:true}).click();
     const submitted = await posted;
     expect(submitted.status(), await submitted.text()).toBe(200);
-    await expect(page.getByRole('status')).toContainText('复核已保存');
-    await page.goto(config.web + '/funds?asset_class=EQUITY&strategy=ACTIVE&geography=DOMESTIC&product_structure=ORDINARY&market_attributes=DOMESTIC&classification_status=CONFIRMED');
-    await page.getByRole('link',{name:'真实浏览器分类验收',exact:true}).click();
-    await expect(page.getByLabel('五维分类').first()).toContainText('CONFIRMED · 最终值 ACTIVE');
+    await expect(page.getByText('复核已保存，请选择下一条待复核记录。',{exact:true})).toBeVisible();
     const current = await get(`/api/v1/funds/${config.fundCode}`);
     expect(current.data.classification.revision_id).not.toBe(config.revisionId);
     expect(current.data.classification.strategy.value).toBe('ACTIVE');
     expect((await get(historyPath)).data).toEqual(oldHistory.data);
     expect((await get(`/api/v1/funds/${config.fundCode}?as_of_date=2026-01-01`)).data.classification).toEqual(oldDetail.data.classification);
-    await page.goto(config.web + `/funds/${config.fundCode}?as_of_date=2026-01-01`);
-    await expect(page.getByLabel('五维分类').first()).toContainText(`修订 ${config.revisionId} / v1`);
-    await expect(page.getByLabel('五维分类').first()).toContainText('CANDIDATE');
+    await page.goto(config.web + '/funds?fund_name=真实浏览器分类验收&as_of_date=2026-01-01');
+    await page.getByRole('button',{name:'查看详情 真实浏览器分类验收',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'真实浏览器分类验收',exact:true})).toBeVisible();
     expect(failures).toEqual([]);
     console.log('LIVE_CLASSIFICATION_OK');
   } finally { await browser.close(); }

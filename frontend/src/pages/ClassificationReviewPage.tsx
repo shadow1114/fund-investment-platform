@@ -130,11 +130,13 @@ export const ClassificationReviewPage = () => {
       locator: locator.trim(),
     };
     const incomingSnapshot = detail.data.incoming;
-    const isCurrentReview = incomingSnapshot?.scheme === "FIP_CLASSIFICATION";
+    const isCurrentReview =
+      incomingSnapshot?.scheme === "FIP_CLASSIFICATION" ||
+      detail.data.baseline?.scheme === "FIP_CLASSIFICATION";
     if (isCurrentReview) {
-      const scope = detail.data.active_scope.filter((name) =>
-        activeDimensions.includes(name as (typeof activeDimensions)[number]),
-      );
+      // The API applies reviews to the complete current active scope, including
+      // a dimension whose value did not change in this incoming proposal.
+      const scope = [...activeDimensions];
       const decisions = Object.fromEntries(
         scope.map((name) => [
           name,
@@ -189,11 +191,11 @@ export const ClassificationReviewPage = () => {
   };
   const incoming = detail.data?.incoming;
   const baseline = detail.data?.baseline;
-  const isCurrentReview = incoming?.scheme === "FIP_CLASSIFICATION";
+  const isCurrentReview =
+    incoming?.scheme === "FIP_CLASSIFICATION" ||
+    baseline?.scheme === "FIP_CLASSIFICATION";
   const reviewScope = isCurrentReview
-    ? (detail.data?.active_scope.filter((name) =>
-        activeDimensions.includes(name as (typeof activeDimensions)[number]),
-      ) ?? [])
+    ? [...activeDimensions]
     : [];
   const requiredTags = isCurrentReview
     ? changedStrategyTags(incoming, baseline)

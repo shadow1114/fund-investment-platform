@@ -4,6 +4,7 @@ import datetime as dt
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -55,6 +56,39 @@ class FundIngestionRunItem(Base):
         ForeignKey("fund.fund_share_class.id"), nullable=True
     )
     symbol: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    result: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BenchmarkIngestionRunItem(Base):
+    """基准行情抓取任务的项级状态；基准不是基金，不能复用 fund_ingestion_run_item。"""
+
+    __tablename__ = "benchmark_ingestion_run_item"
+    __table_args__ = (
+        UniqueConstraint(
+            "operation_id",
+            "benchmark_index_id",
+            name="uq_benchmark_ingestion_run_item_subject",
+        ),
+        Index("ix_benchmark_ingestion_run_item_operation_status", "operation_id", "status", "id"),
+        CheckConstraint(
+            "status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'SKIPPED', 'CANCELLED')",
+            name="ck_benchmark_ingestion_run_item_status",
+        ),
+        {"schema": "governance"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("governance.calculation_job.execution_id", ondelete="CASCADE"), nullable=False
+    )
+    benchmark_index_id: Mapped[int] = mapped_column(
+        ForeignKey("market.benchmark_index.id"), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     result: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)

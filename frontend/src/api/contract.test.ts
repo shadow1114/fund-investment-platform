@@ -48,6 +48,8 @@ const frozenPaths = [
   "/api/v1/fund-ingestion-previews",
   "/api/v1/fund-ingestion-jobs",
   "/api/v1/fund-ingestions",
+  "/api/v1/benchmark-indexes",
+  "/api/v1/benchmark-ingestion-jobs",
   "/api/v1/funds/{fund_id}/classification-history",
   "/api/v1/funds/{fund_id}/basic-info-history",
   "/api/v1/funds/{fund_id}/ingestions",

@@ -114,15 +114,13 @@ test("operation deep links survive refresh without submitting another job", asyn
     if (request.method() === "POST") submissions.push(request.url());
   });
   await page.goto("/data-ingestion?operation_id=OP-RECOVER");
-  await expect(
-    page.getByRole("heading", { name: "任务 OP-RECOVER" }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("基本信息 · 单只基金 · 来源：akshare · 提交人：USR-001"),
-  ).toBeVisible();
+  const log = page.getByRole("dialog", { name: /执行日志 · OP-RECOVER/ });
+  await expect(log).toBeVisible();
+  await expect(log.getByText("基金基本数据 · 单只基金")).toBeVisible();
+  await expect(log.getByText("akshare · USR-001")).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "任务 OP-RECOVER" }),
+    page.getByRole("dialog", { name: /执行日志 · OP-RECOVER/ }),
   ).toBeVisible();
   expect(submissions).toEqual([]);
 });
@@ -147,9 +145,9 @@ test("failed identity lookup hides ingestion controls", async ({ page }) => {
     page.getByRole("alert", { name: /500 INTERNAL_SERVER_ERROR/ }),
   ).toBeVisible({ timeout: 45_000 });
   expect(writes).toEqual([]);
-  await expect(page.getByRole("button", { name: "创建抓取预览" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: "立即执行抓取任务" }),
+  ).toHaveCount(0);
 });
 
 test("data center remains readable at the equivalent of 200 percent zoom", async ({
@@ -160,7 +158,10 @@ test("data center remains readable at the equivalent of 200 percent zoom", async
   await page.setViewportSize({ width: 720, height: 450 });
   await page.goto("/data-ingestion");
   await expect(
-    page.getByRole("heading", { name: "基金数据中心" }),
+    page.getByRole("heading", { level: 1, name: "数据抓取" }),
+  ).toBeAttached();
+  await expect(
+    page.getByRole("button", { name: "立即执行抓取任务" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
   const main = page.locator("main");

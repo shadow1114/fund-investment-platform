@@ -36,6 +36,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { FundDetailPage } from "../../pages/FundDetailPage";
 import { prototypeFactorText } from "./FactorAnalysisPanel";
+import styles from "./FundDetailContent.module.css";
 
 const chartOptions: { series: { data: unknown[] }[] }[] = [];
 
@@ -283,6 +284,200 @@ afterAll(() => {
 });
 
 describe("FundDetailPage", () => {
+  it.each([
+    {
+      latestNav: 1.1,
+      latestIndex: 90,
+      benchmarkText: "-10.00%",
+      benchmarkClass: styles.down,
+      excessText: "20.00%",
+      excessClass: styles.up,
+    },
+    {
+      latestNav: 0.9,
+      latestIndex: 110,
+      benchmarkText: "10.00%",
+      benchmarkClass: styles.up,
+      excessText: "-20.00%",
+      excessClass: styles.down,
+    },
+  ])(
+    "colors benchmark and excess values by their signs",
+    async ({
+      latestNav,
+      latestIndex,
+      benchmarkText,
+      benchmarkClass,
+      excessText,
+      excessClass,
+    }) => {
+      server.use(
+        http.get("/api/v1/funds/000001", () =>
+          HttpResponse.json({
+            data: {
+              ...fundDetailEnvelope.data,
+              fund_id: "000001",
+              benchmark: {
+                benchmark_id: "501",
+                benchmark_name: "指数A",
+                benchmark_type: "INDEX",
+                mapping_version: "v1",
+                components: [
+                  { benchmark_id: "201", benchmark_name: "指数A", weight: 1 },
+                ],
+              },
+            },
+            meta: baseMeta,
+            error: null,
+          }),
+        ),
+        http.get("/api/v1/funds/000001/nav-series", () =>
+          HttpResponse.json({
+            data: {
+              fund_id: "000001",
+              points: [
+                {
+                  date: "2026-09-15",
+                  nav: 1,
+                  nav_status: "VALID",
+                  nav_reason: null,
+                },
+                {
+                  date: "2026-09-16",
+                  nav: latestNav,
+                  nav_status: "VALID",
+                  nav_reason: null,
+                },
+              ],
+              benchmark_series: [
+                {
+                  benchmark_id: "201",
+                  benchmark_name: "指数A",
+                  weight: 1,
+                  points: [
+                    { date: "2026-09-15", value: 100 },
+                    { date: "2026-09-16", value: latestIndex },
+                  ],
+                },
+              ],
+            },
+            meta: baseMeta,
+            error: null,
+          }),
+        ),
+      );
+      renderPage();
+      await screen.findByRole("heading", { name: "Alpha 稳健基金" });
+      expect(
+        await screen.findByText(benchmarkText, { exact: true }),
+      ).toHaveClass(benchmarkClass);
+      expect(await screen.findByText(excessText, { exact: true })).toHaveClass(
+        excessClass,
+      );
+    },
+  );
+
+  it("基准选项来自关联配置，复合和单项切换更新曲线", async () => {
+    server.use(
+      http.get("/api/v1/funds/000001", () =>
+        HttpResponse.json({
+          data: {
+            ...fundDetailEnvelope.data,
+            fund_id: "000001",
+            benchmark: {
+              benchmark_id: "501",
+              benchmark_name: "指数A*70%+指数B*30%",
+              benchmark_type: "COMPOSITE",
+              mapping_version: "v1",
+              components: [
+                { benchmark_id: "201", benchmark_name: "指数A", weight: 0.7 },
+                { benchmark_id: "202", benchmark_name: "指数B", weight: 0.3 },
+              ],
+            },
+          },
+          meta: baseMeta,
+          error: null,
+        }),
+      ),
+      http.get("/api/v1/funds/000001/nav-series", () =>
+        HttpResponse.json({
+          data: {
+            fund_id: "000001",
+            points: [
+              {
+                date: "2026-09-15",
+                nav: 1,
+                nav_status: "VALID",
+                nav_reason: null,
+              },
+              {
+                date: "2026-09-16",
+                nav: 1.2,
+                nav_status: "VALID",
+                nav_reason: null,
+              },
+            ],
+            benchmark_series: [
+              {
+                benchmark_id: "201",
+                benchmark_name: "指数A",
+                weight: 0.7,
+                points: [
+                  { date: "2026-09-15", value: 100 },
+                  { date: "2026-09-16", value: 110 },
+                ],
+              },
+              {
+                benchmark_id: "202",
+                benchmark_name: "指数B",
+                weight: 0.3,
+                points: [
+                  { date: "2026-09-15", value: 1000 },
+                  { date: "2026-09-16", value: 1000 },
+                ],
+              },
+            ],
+          },
+          meta: {
+            ...baseMeta,
+            nav_type: "ADJUSTED",
+            adjustment_convention: "BACKWARD",
+            adjustment_rule_version: "v1",
+            unavailable_count: 0,
+          },
+          error: null,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const select = await screen.findByRole("combobox", { name: "对比基准" });
+    expect(within(select).getAllByRole("option")).toHaveLength(3);
+    expect(within(select).queryByText("中证500")).not.toBeInTheDocument();
+    await waitFor(() => {
+      const last = chartOptions.at(-1)?.series[1].data.at(-1) as [
+        string,
+        number,
+      ];
+      expect(last?.[1]).toBeCloseTo(7);
+    });
+    await user.selectOptions(select, "index:201");
+    await waitFor(() => {
+      const last = chartOptions.at(-1)?.series[1].data.at(-1) as [
+        string,
+        number,
+      ];
+      expect(last?.[1]).toBeCloseTo(10);
+    });
+    await user.selectOptions(select, "index:202");
+    await waitFor(() => {
+      const last = chartOptions.at(-1)?.series[1].data.at(-1) as [
+        string,
+        number,
+      ];
+      expect(last?.[1]).toBe(0);
+    });
+  });
   it("formats prototype loss values without changing the API result", () => {
     const analysis = {
       fund_id: "000001",

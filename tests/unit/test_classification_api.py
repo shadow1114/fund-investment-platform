@@ -179,10 +179,28 @@ def test_list_exposes_tag_filters_and_rejects_catalog_versions(offline):
     funds.rows = [
         {
             "fund_id": "old",
+            "fund_name": "Old Fund",
+            "share_class": "A",
+            "fund_classification": "UNKNOWN",
+            "inception_date": None,
+            "lifecycle_status": "UNKNOWN",
+            "investment_eligibility": "UNKNOWN",
+            "share_class_id": "1",
+            "sub_status": "UNKNOWN",
+            "manager_ids": [],
             "classification": snap(ev("strategy", "QUANTITATIVE"), historical=True).to_dict(),
         },
         {
             "fund_id": "current",
+            "fund_name": "Current Fund",
+            "share_class": "A",
+            "fund_classification": "UNKNOWN",
+            "inception_date": None,
+            "lifecycle_status": "UNKNOWN",
+            "investment_eligibility": "UNKNOWN",
+            "share_class_id": "2",
+            "sub_status": "UNKNOWN",
+            "manager_ids": [],
             "classification": snap(ev("investment_strategy", "本基金采用量化模型。")).to_dict(),
         },
     ]

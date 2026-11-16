@@ -21,7 +21,9 @@ from fip.api.schemas import (
     FundListEnvelopeModel,
     FundManagementCompaniesEnvelopeModel,
     FundReadEnvelopeModel,
+    NavSeriesPayloadModel,
     ReadEnvelopeModel,
+    TypedEnvelope,
 )
 from fip.api.universe_queries import UniverseQueries
 
@@ -278,7 +280,9 @@ def get_fund(
 
 
 @router.get(
-    "/funds/{fund_id}/nav-series", operation_id="getFundNavSeries", response_model=ReadEnvelopeModel
+    "/funds/{fund_id}/nav-series",
+    operation_id="getFundNavSeries",
+    response_model=TypedEnvelope[NavSeriesPayloadModel],
 )
 def get_nav_series(
     fund_id: str,

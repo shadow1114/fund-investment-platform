@@ -27,6 +27,51 @@ def test_fetch_returns_parquet_payload_and_row_count():
     assert list(restored.columns) == ["净值日期", "单位净值", "日增长率"]
 
 
+@pytest.mark.parametrize("symbol", ["HSI", "HSTECH"])
+def test_fetch_hk_index_daily_calls_registered_function_and_preserves_payload(symbol):
+    """港股指数使用指定代码，保留上游字段及真实时间来源。"""
+    frame = pd.DataFrame({
+        "date": ["2026-08-31"],
+        "open": [25000.0],
+        "high": [25100.0],
+        "low": [24900.0],
+        "latest": [25050.0],
+    })
+    calls = []
+
+    def caller(name, **params):
+        calls.append((name, params))
+        return frame
+
+    adapter = AkShareSourceAdapter(clock=lambda: FIXED_NOW, caller=caller)
+    record = adapter.fetch("hk_index_daily", symbol=symbol)
+
+    assert calls == [("stock_hk_index_daily_em", {"symbol": symbol})]
+    assert record.dataset == "hk_index_daily"
+    assert record.request_params == {"symbol": symbol}
+    assert record.row_count == 1
+    assert record.ingested_at == FIXED_NOW
+    assert record.published_at is None
+    assert record.provider_available_at is None
+    pd.testing.assert_frame_equal(pd.read_parquet(io.BytesIO(record.payload)), frame)
+
+
+@pytest.mark.parametrize("column", ["date", "open", "high", "low", "latest"])
+def test_fetch_hk_index_daily_rejects_missing_required_columns(column):
+    """港股指数的任一行情字段缺失均触发契约错误。"""
+    frame = pd.DataFrame({
+        "date": ["2026-08-31"],
+        "open": [25000.0],
+        "high": [25100.0],
+        "low": [24900.0],
+        "latest": [25050.0],
+    }).drop(columns=[column])
+    with pytest.raises(AkShareContractError, match=column) as caught:
+        _adapter(frame).fetch("hk_index_daily", symbol="HSI")
+    assert caught.value.record.dataset == "hk_index_daily"
+    assert caught.value.record.request_params == {"symbol": "HSI"}
+
+
 def test_fetch_leaves_both_time_sources_null():
     """C-12：AKShare 给不出披露时刻，Adapter 必须如实留空。"""
     frame = pd.DataFrame({"净值日期": ["2020-01-02"], "单位净值": ["1.0000"],

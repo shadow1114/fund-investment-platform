@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+
 import type {
   FundIngestionRunItem,
   ListFundIngestionItemsParams,
@@ -22,10 +23,48 @@ import {
   invalidateIngestionFundData,
 } from "../../api/queries";
 import { ErrorState } from "../../components/ErrorState";
-import { IngestionCounts, ingestionStatusLabel } from "./IngestionHistoryTable";
-import { datasetLabels, scopeLabels } from "./IngestionScopeForm";
+import styles from "./DataIngestion.module.css";
+import {
+  IngestionCounts,
+  ingestionStatusLabel,
+  processedCount,
+} from "./IngestionHistoryTable";
+import {
+  datasetLabels,
+  scopeLabels,
+  type IngestionDataset,
+} from "./IngestionScopeForm";
 
 type itemRow = FundIngestionRunItem;
+
+const itemStatusLabels: Record<string, string> = {
+  PENDING: "待处理",
+  RUNNING: "处理中",
+  SUCCESS: "成功",
+  FAILED: "失败",
+  SKIPPED: "跳过",
+  CANCELLED: "取消",
+};
+const itemTone: Record<string, string> = {
+  PENDING: "muted",
+  RUNNING: "running",
+  SUCCESS: "good",
+  FAILED: "critical",
+  SKIPPED: "warning",
+  CANCELLED: "muted",
+};
+
+const resultLabels: Record<string, string> = {
+  source: "数据来源",
+  dataset: "数据集",
+  row_count: "返回行数",
+  inserted_count: "新增版本",
+  unchanged_count: "未变化",
+  first_date: "起始日期",
+  last_date: "截止日期",
+  error_code: "错误代码",
+  retryable: "可重试",
+};
 
 export const IngestionTaskDetail = ({
   operationId,
@@ -55,10 +94,6 @@ export const IngestionTaskDetail = ({
   const retry = useRetryIngestionFailures();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const refreshedTerminal = useRef<string | undefined>(undefined);
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    heading.current?.focus();
-  }, [operationId, query.isSuccess]);
   useEffect(() => {
     if (
       !task ||
@@ -67,8 +102,7 @@ export const IngestionTaskDetail = ({
     )
       return;
     refreshedTerminal.current = operationId;
-    // Prefix invalidation reaches every as-of-date, NAV and basic-info variant.
-    // ALL must not enumerate fund IDs in the browser.
+    // 前缀失效覆盖所有观察日、NAV、基本信息及基准对比变体；全量任务不在浏览器枚举基金。
     void Promise.all([
       invalidateIngestionFundData(client),
       client.invalidateQueries({ queryKey: ingestionKeys.history }),
@@ -76,27 +110,14 @@ export const IngestionTaskDetail = ({
     ]);
   }, [task, operationId, client]);
   const canAct = Boolean(task && (task.scope_type !== "ALL" || canManageAll));
+  const done = task ? processedCount(task) : null;
+
   return (
     <section aria-labelledby="ingestion-task-title">
-      <h2 id="ingestion-task-title" tabIndex={-1} ref={heading}>
+      <h2 id="ingestion-task-title" className={styles.visuallyHidden}>
         任务 {operationId}
       </h2>
-      <Stack>
-        <Group>
-          <Button component={Link} to="/data-ingestion" variant="default">
-            新建抓取任务
-          </Button>
-          <Button
-            variant="default"
-            loading={query.isFetching}
-            onClick={() => {
-              void query.refetch();
-              void items.refetch();
-            }}
-          >
-            刷新任务
-          </Button>
-        </Group>
+      <Stack gap="sm">
         {query.isPending && <Text role="status">正在恢复任务详情…</Text>}
         {query.isError && (
           <ErrorState
@@ -106,42 +127,92 @@ export const IngestionTaskDetail = ({
         )}
         {task && (
           <>
-            <Text fw={600}>{ingestionStatusLabel(task)}</Text>
-            <Text>
-              {datasetLabels[task.dataset]} ·{" "}
-              {task.scope_type ? scopeLabels[task.scope_type] : "历史任务"} ·
-              来源：{task.source} · 提交人：{task.actor}
-            </Text>
-            <Text size="sm">
-              提交：{new Date(task.created_at).toLocaleString("zh-CN")}
-              {task.finished_at
-                ? ` · 结束：${new Date(task.finished_at).toLocaleString("zh-CN")}`
-                : ""}
-            </Text>
-            {task.parent_operation_id && (
-              <Text>
-                失败重试来源：
-                <Link
-                  to={`/data-ingestion?operation_id=${encodeURIComponent(task.parent_operation_id)}`}
-                >
-                  {task.parent_operation_id}
-                </Link>
-              </Text>
-            )}
-            <IngestionCounts task={task} />
+            <dl className={styles.previewList}>
+              <dt>任务状态</dt>
+              <dd>
+                <strong>{ingestionStatusLabel(task)}</strong>
+              </dd>
+              <dt>数据类型</dt>
+              <dd>
+                {datasetLabels[task.dataset as IngestionDataset] ??
+                  task.dataset}
+                {" · "}
+                {task.dataset === "BENCHMARK"
+                  ? "基准指数"
+                  : task.scope_type
+                    ? scopeLabels[task.scope_type]
+                    : "历史任务"}
+              </dd>
+              {task.dataset === "BENCHMARK" && (
+                <>
+                  <dt>时间区间</dt>
+                  <dd>
+                    {task.start_date ?? "全部可得历史"} 至{" "}
+                    {task.end_date ?? "—"}
+                  </dd>
+                </>
+              )}
+              <dt>来源 / 提交人</dt>
+              <dd>
+                {task.source} · {task.actor}
+              </dd>
+              <dt>时间</dt>
+              <dd>
+                提交 {new Date(task.created_at).toLocaleString("zh-CN")}
+                {task.finished_at
+                  ? ` · 结束 ${new Date(task.finished_at).toLocaleString("zh-CN")}`
+                  : ""}
+              </dd>
+              <dt>处理进度</dt>
+              <dd>
+                已处理 {done ?? "暂不可用"} / {task.requested_count} 项 ·{" "}
+                <IngestionCounts task={task} />
+              </dd>
+              {task.parent_operation_id && (
+                <>
+                  <dt>失败重试来源</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      className={styles.linkButton}
+                      onClick={() => onOperation(task.parent_operation_id!)}
+                    >
+                      {task.parent_operation_id}
+                    </button>
+                  </dd>
+                </>
+              )}
+            </dl>
             {task.status === "RUNNING" && (
-              <Text size="sm">
-                后台每批最多处理 50
-                项；已完成计数由服务端返回。取消后保留当前项和已写入的数据。
+              <Text size="xs" c="dimmed">
+                后台分批处理；已完成计数由服务端返回。取消后保留当前项和已写入的数据。
               </Text>
             )}
-            {task.failure && <Text role="alert">{task.failure}</Text>}
-            {!canAct && (
-              <Text role="status">当前身份没有管理全量任务的权限。</Text>
+            {task.failure && (
+              <Text role="alert" size="sm" c="red">
+                {task.failure}
+              </Text>
             )}
-            <Group>
+            {!canAct && (
+              <Text role="status" size="sm">
+                当前身份没有管理全量任务的权限。
+              </Text>
+            )}
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant="default"
+                loading={query.isFetching}
+                onClick={() => {
+                  void query.refetch();
+                  void items.refetch();
+                }}
+              >
+                刷新任务
+              </Button>
               {canAct && task.status === "RUNNING" && (
                 <Button
+                  size="xs"
                   variant="default"
                   disabled={cancel.isPending}
                   onClick={() => setConfirmCancel(true)}
@@ -153,6 +224,7 @@ export const IngestionTaskDetail = ({
                 task.status !== "RUNNING" &&
                 (task.failure_count ?? 0) > 0 && (
                   <Button
+                    size="xs"
                     loading={retry.isPending}
                     onClick={() =>
                       retry.mutate(operationId, {
@@ -166,52 +238,57 @@ export const IngestionTaskDetail = ({
                 )}
             </Group>
             {cancel.isSuccess && (
-              <Text role="status">
+              <Text role="status" size="sm">
                 取消请求已接收，后台完成当前项后停止未处理项。
               </Text>
             )}
             {cancel.isError && <ErrorState error={cancel.error} />}
             {retry.isError && <ErrorState error={retry.error} />}
-            <h3>基金 / 份额类别结果</h3>
-            <NativeSelect
-              label="项级结果状态"
-              value={params.status ?? ""}
-              data={[
-                { value: "", label: "全部结果" },
-                ...[
-                  { value: "PENDING", label: "待处理" },
-                  { value: "RUNNING", label: "处理中" },
-                  { value: "SUCCESS", label: "成功" },
-                  { value: "FAILED", label: "失败" },
-                  { value: "SKIPPED", label: "跳过" },
-                  { value: "CANCELLED", label: "取消" },
-                ],
-              ]}
-              onChange={(event) =>
-                setParams({
-                  ...params,
-                  page: 1,
-                  status: (event.currentTarget.value ||
-                    undefined) as typeof params.status,
-                })
-              }
-            />
-            {items.isFetching && <Text role="status">正在读取项级结果…</Text>}
+            <Group justify="space-between" align="end">
+              <h3 style={{ margin: 0, fontSize: 13 }}>
+                {task.dataset === "BENCHMARK"
+                  ? "基准指数结果"
+                  : "基金 / 份额类别结果"}
+              </h3>
+              <NativeSelect
+                size="xs"
+                label="项级结果状态"
+                value={params.status ?? ""}
+                data={[
+                  { value: "", label: "全部结果" },
+                  ...Object.entries(itemStatusLabels).map(([value, label]) => ({
+                    value,
+                    label,
+                  })),
+                ]}
+                onChange={(event) =>
+                  setParams({
+                    ...params,
+                    page: 1,
+                    status: (event.currentTarget.value ||
+                      undefined) as typeof params.status,
+                  })
+                }
+              />
+            </Group>
+            {items.isFetching && (
+              <Text role="status" size="xs" c="dimmed">
+                正在读取项级结果…
+              </Text>
+            )}
             {items.isError && (
               <ErrorState
                 error={items.error}
                 onRetry={() => void items.refetch()}
               />
             )}
-            {items.data?.items.length === 0 && (
-              <Text>暂无符合条件的项级结果。</Text>
-            )}
             {items.data && (
               <ResearchDataTable
                 caption="抓取项级结果"
-                layoutKey="ingestion-items"
+                layoutKey="ingestion-items-v2"
                 rowData={items.data.items}
-                rowHeight={200}
+                rowHeight={96}
+                emptyMessage="暂无符合条件的项级结果"
                 serverPagination={{
                   page: params.page ?? 1,
                   pageSize: items.data.page_size,
@@ -225,68 +302,90 @@ export const IngestionTaskDetail = ({
                 getRowId={({ data }) => String(data.id)}
                 columnDefs={[
                   {
-                    colId: "column0",
-                    headerName: "基金 / 份额类别",
-                    wrapText: true,
+                    colId: "subject",
+                    headerName:
+                      task.dataset === "BENCHMARK"
+                        ? "基准指数"
+                        : "基金 / 份额类别",
+                    minWidth: 200,
                     cellRenderer: ({ data: item }: { data?: itemRow }) =>
                       item ? (
-                        <div
-                          style={{
-                            maxHeight: 190,
-                            overflow: "auto",
-                            whiteSpace: "normal",
-                          }}
-                        >
-                          <Link
-                            to={`/funds/${encodeURIComponent(item.fund_id)}`}
-                          >
-                            {item.fund_id}
-                          </Link>
-                          <Text size="sm">
-                            份额 {item.share_class_id ?? "不适用"} · 来源代码{" "}
-                            {item.symbol ?? "—"}
-                          </Text>
+                        <div className={styles.cellStack}>
+                          {item.subject_type === "BENCHMARK" ? (
+                            <span>
+                              {item.subject_name ?? item.symbol ?? "—"}
+                            </span>
+                          ) : item.fund_id ? (
+                            <Link
+                              to={`/funds/${encodeURIComponent(item.fund_id)}`}
+                            >
+                              {item.fund_id}
+                            </Link>
+                          ) : (
+                            <span>—</span>
+                          )}
+                          <span className={styles.cellSub}>
+                            {item.subject_type === "BENCHMARK"
+                              ? `代码 ${item.symbol ?? "—"}`
+                              : `份额 ${item.share_class_id ?? "不适用"} · 来源代码 ${item.symbol ?? "—"}`}
+                          </span>
                         </div>
                       ) : null,
                   },
                   {
-                    colId: "column1",
+                    colId: "status",
                     headerName: "状态 / 尝试次数",
-                    wrapText: true,
+                    width: 140,
                     cellRenderer: ({ data: item }: { data?: itemRow }) =>
                       item ? (
-                        <div
-                          style={{
-                            maxHeight: 190,
-                            overflow: "auto",
-                            whiteSpace: "normal",
-                          }}
-                        >
-                          {item.status}
-                          <Text size="sm">尝试 {item.attempts} 次</Text>
+                        <div className={styles.cellStack}>
+                          <span>
+                            <span
+                              className={styles.statusBadge}
+                              data-tone={itemTone[item.status]}
+                            >
+                              {itemStatusLabels[item.status] ?? item.status}
+                            </span>
+                          </span>
+                          <span className={styles.cellSub}>
+                            尝试 {item.attempts} 次
+                          </span>
                         </div>
                       ) : null,
                   },
                   {
-                    colId: "column2",
-                    headerName: "来源结果 / 日期 / 错误",
-                    wrapText: true,
+                    colId: "result",
+                    headerName: "来源结果 / 错误",
+                    minWidth: 260,
+                    flex: 1,
                     cellRenderer: ({ data: item }: { data?: itemRow }) =>
                       item ? (
                         <div
+                          className={styles.cellStack}
                           style={{
-                            maxHeight: 190,
                             overflow: "auto",
-                            whiteSpace: "normal",
+                            justifyContent: "flex-start",
+                            paddingBlock: 6,
                           }}
                         >
-                          {item.error && <Text c="red">{item.error}</Text>}
+                          {item.error && (
+                            <Text size="xs" c="red">
+                              {item.error}
+                            </Text>
+                          )}
                           {item.result && (
-                            <dl>
-                              {Object.entries(item.result).map(
-                                ([key, value]) => (
-                                  <div key={key}>
-                                    <dt>{key}</dt>
+                            <dl
+                              className={styles.previewList}
+                              style={{ fontSize: 11 }}
+                            >
+                              {Object.entries(item.result)
+                                .filter(([key]) => key !== "error")
+                                .map(([key, value]) => (
+                                  <div
+                                    key={key}
+                                    style={{ display: "contents" }}
+                                  >
+                                    <dt>{resultLabels[key] ?? key}</dt>
                                     <dd>
                                       {value == null
                                         ? "—"
@@ -295,11 +394,12 @@ export const IngestionTaskDetail = ({
                                           : String(value)}
                                     </dd>
                                   </div>
-                                ),
-                              )}
+                                ))}
                             </dl>
                           )}
-                          {!item.error && !item.result && "等待结果"}
+                          {!item.error && !item.result && (
+                            <span className={styles.cellSub}>等待结果</span>
+                          )}
                         </div>
                       ) : null,
                   },
@@ -318,7 +418,9 @@ export const IngestionTaskDetail = ({
         centered
       >
         <Stack>
-          <Text>后台完成当前项后，停止剩余未处理项。已完成的数据会保留。</Text>
+          <Text size="sm">
+            后台完成当前项后，停止剩余未处理项。已完成的数据会保留。
+          </Text>
           <Group justify="flex-end">
             <Button
               variant="default"

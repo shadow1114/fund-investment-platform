@@ -25,11 +25,11 @@ import { ErrorState } from "../../components/ErrorState";
 import {
   FactorAnalysisPanel,
   analyticsPeriods,
-  prototypeFactorText,
   prototypeFactorValue,
   type FundAnalyticsPeriod,
 } from "./FactorAnalysisPanel";
 import styles from "./FundDetailContent.module.css";
+import { benchmarkComparison } from "./benchmarkComparison";
 
 const FundNavChart = lazy(() =>
   import("./FundNavChart").then((module) => ({
@@ -77,6 +77,10 @@ export const FundDetailContent = ({
   const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY" | "MONTHLY">(
     "DAILY",
   );
+  const [benchmarkSelection, setBenchmarkSelection] = useState({
+    identifier: "",
+    value: "configured",
+  });
   const identifier = shareClassId || fundId;
   const fund = useQuery({
     queryKey: ["fund-detail", identifier, asOfDate],
@@ -218,6 +222,64 @@ export const FundDetailContent = ({
       ? latestNav.nav / previousNav - 1
       : null;
   const benchmarkName = fundData.benchmark.benchmark_name || "—";
+  const components = fundData.benchmark.components ?? [];
+  const allSeries = nav.data?.data.benchmark_series ?? [];
+  const options = [
+    ...(components.length > 1
+      ? [{ value: "configured", label: `复合基准：${benchmarkName}` }]
+      : []),
+    ...components.map((item) => ({
+      value: `index:${item.benchmark_id}`,
+      label: `${item.benchmark_name ?? allSeries.find((s) => s.benchmark_id === item.benchmark_id)?.benchmark_name ?? item.benchmark_id} (${(item.weight * 100).toFixed(2)}%)`,
+    })),
+  ];
+  const requested =
+    benchmarkSelection.identifier === identifier
+      ? benchmarkSelection.value
+      : "configured";
+  const selected = options.some((item) => item.value === requested)
+    ? requested
+    : (options[0]?.value ?? "");
+  const selectedComponent = components.find(
+    (item) => `index:${item.benchmark_id}` === selected,
+  );
+  const selectedName = selectedComponent
+    ? (selectedComponent.benchmark_name ??
+      allSeries.find(
+        (item) => item.benchmark_id === selectedComponent.benchmark_id,
+      )?.benchmark_name ??
+      selectedComponent.benchmark_id)
+    : benchmarkName;
+  const selectedSeries =
+    selected === "configured"
+      ? components.map((item) => ({
+          benchmark_id: item.benchmark_id,
+          benchmark_name: item.benchmark_name ?? item.benchmark_id,
+          weight: item.weight,
+          points:
+            allSeries.find(
+              (series) => series.benchmark_id === item.benchmark_id,
+            )?.points ?? [],
+        }))
+      : selectedComponent
+        ? [
+            {
+              benchmark_id: selectedComponent.benchmark_id,
+              benchmark_name: selectedName,
+              weight: 1,
+              points:
+                allSeries.find(
+                  (item) =>
+                    item.benchmark_id === selectedComponent.benchmark_id,
+                )?.points ?? [],
+            },
+          ]
+        : [];
+  const latestComparison = benchmarkComparison(periodPoints, selectedSeries).at(
+    -1,
+  );
+  const comparisonText = (value: number | null | undefined, suffix = "%") =>
+    value == null ? "—" : `${value.toFixed(2)}${suffix}`;
   const changeText =
     change === null
       ? "—"
@@ -236,6 +298,8 @@ export const FundDetailContent = ({
         ? styles.up
         : styles.down;
   };
+  const comparisonClass = (value: number | null | undefined) =>
+    value == null || value === 0 ? "" : value > 0 ? styles.up : styles.down;
   const code =
     fundCode ?? (/^\d{6}$/.test(fundData.fund_id) ? fundData.fund_id : "—");
 
@@ -323,11 +387,20 @@ export const FundDetailContent = ({
         <div className={styles.secondaryControls}>
           <label>
             对比基准:
-            <select aria-label="对比基准" defaultValue="current">
-              <option value="current">{benchmarkName} (基准)</option>
-              <option disabled>中证500</option>
-              <option disabled>中证1000</option>
-              <option disabled>指数增强同类平均</option>
+            <select
+              aria-label="对比基准"
+              value={selected}
+              disabled={!options.length}
+              onChange={(event) =>
+                setBenchmarkSelection({ identifier, value: event.target.value })
+              }
+            >
+              {!options.length && <option value="">暂无配置基准</option>}
+              {options.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -364,16 +437,21 @@ export const FundDetailContent = ({
               <span>
                 本基金:{" "}
                 <strong className={returnClass("F-RET-003")}>
-                  {prototypeFactorText(analysis, "F-RET-003")}
+                  {comparisonText(latestComparison?.fund)}
                 </strong>
               </span>
               <span>
-                {benchmarkName}: <strong>—</strong>
+                {selectedName}:{" "}
+                <strong
+                  className={comparisonClass(latestComparison?.benchmark)}
+                >
+                  {comparisonText(latestComparison?.benchmark)}
+                </strong>
               </span>
               <span>
                 超额收益:{" "}
-                <strong className={returnClass("F-REL-001")}>
-                  {prototypeFactorText(analysis, "F-REL-001")}
+                <strong className={comparisonClass(latestComparison?.excess)}>
+                  {comparisonText(latestComparison?.excess, "%")}
                 </strong>
               </span>
             </div>
@@ -392,7 +470,8 @@ export const FundDetailContent = ({
                   mode={value as FundDetailTab}
                   analysis={analysis}
                   frequency={frequency}
-                  benchmarkName={benchmarkName}
+                  benchmarkName={selectedName}
+                  benchmarkSeries={selectedSeries}
                   colorMode={colorMode}
                 />
               </Suspense>

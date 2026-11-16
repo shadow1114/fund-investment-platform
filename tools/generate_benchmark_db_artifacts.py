@@ -11,6 +11,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _CSV_PATH = _ROOT / "docs/benchmark.csv"
 _MIGRATION_PATH = _ROOT / "db/migrations/versions/0044_benchmark_source_request_metadata.py"
 _MAPPING_PATH = _ROOT / "config/benchmark/component_provider_codes.yaml"
+_SUPPLEMENT_PATH = _ROOT / "config/benchmark/supplemental_indexes.json"
 _CSV_FIELDS = ["component_name", "lookup_name", "code", "Source", "api", "query_param"]
 
 
@@ -52,6 +53,14 @@ def _read_benchmarks() -> tuple[list[dict[str, Any]], dict[str, str]]:
         if previous_code != provider_code:
             raise ValueError(
                 f"component_name {component_name!r} maps to conflicting provider codes"
+            )
+
+    supplements = json.loads(_SUPPLEMENT_PATH.read_text(encoding="utf-8"))
+    for record in supplements:
+        existing = by_name.setdefault(record["display_name"], record)
+        if existing != record:
+            raise ValueError(
+                f"Supplemental display name {record['display_name']!r} conflicts with CSV"
             )
 
     seed_codes = {record["provider_code"] for record in by_name.values()}
@@ -163,15 +172,52 @@ def downgrade() -> None:
 
 
 def _build_mapping_yaml(component_map: dict[str, str]) -> str:
-    entries = "\n".join(
-        f"  {json.dumps(component_name, ensure_ascii=False)}: "
-        f"{json.dumps(provider_code, ensure_ascii=False)}"
-        for component_name, provider_code in component_map.items()
-    )
+    import yaml
+
+    records, _ = _read_benchmarks()
+    provider_codes = {row["provider_code"] for row in records}
+    display_to_code = {row["display_name"]: row["provider_code"] for row in records}
+    component_to_code = dict(component_map)
+    component_to_name: dict[str, str] = {}
+    with _CSV_PATH.open(newline="", encoding="utf-8") as csv_file:
+        for row in csv.DictReader(csv_file):
+            component_to_name[row["component_name"].strip()] = row["lookup_name"].strip()
+    if _MAPPING_PATH.exists():
+        existing = yaml.safe_load(_MAPPING_PATH.read_text(encoding="utf-8")) or {}
+        component_to_name.update(existing.get("component_to_lookup_name", {}))
+        if "component_to_provider_code" in existing:
+            manual = existing["component_to_provider_code"]
+        else:
+            manual = {
+                component: display_to_code.get(value, value)
+                for component, value in existing.get("component_to_lookup_name", {}).items()
+            }
+        for component, code in manual.items():
+            if code not in provider_codes:
+                raise ValueError(
+                    f"Manual component mapping {component!r} references unknown provider code "
+                    f"or display name {code!r}"
+                )
+        component_to_code.update(manual)
+    code_to_displays: dict[str, list[str]] = {}
+    for record in records:
+        code_to_displays.setdefault(record["provider_code"], []).append(record["display_name"])
+    for component, code in component_to_code.items():
+        if component not in component_to_name and len(set(code_to_displays.get(code, []))) == 1:
+            component_to_name[component] = code_to_displays[code][0]
+
+    def entries(values: dict[str, str]) -> str:
+        return "\n".join(
+            f"  {json.dumps(name, ensure_ascii=False)}: {json.dumps(value, ensure_ascii=False)}"
+            for name, value in values.items()
+        )
+
     return (
         "# Generated from docs/benchmark.csv; keys are source component descriptions.\n"
+        "component_to_lookup_name:\n"
+        f"{entries(component_to_name)}\n"
         "component_to_provider_code:\n"
-        f"{entries}\n"
+        f"{entries(component_to_code)}\n"
     )
 
 

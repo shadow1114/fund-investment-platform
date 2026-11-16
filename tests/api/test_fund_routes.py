@@ -129,7 +129,18 @@ class _SeededFundRepository(FundRepository):
             "as_of_date": "2025-01-31",
         }
         return {
-            "data": {"fund_id": identifier, "points": [{"date": "2025-01-01", "nav": 1.2}]},
+            "data": {
+                "fund_id": identifier,
+                "points": [
+                    {
+                        "date": "2025-01-01",
+                        "nav": 1.2,
+                        "nav_status": "VALID",
+                        "nav_reason": None,
+                        "reason_code": None,
+                    }
+                ],
+            },
             "meta": {"adjustment_rule_version": "adjustment-v2", "unavailable_count": 0},
         }
 
@@ -379,7 +390,15 @@ def test_fund_detail_and_related_reads_delegate_to_seeded_repository() -> None:
 
     assert detail.json()["data"]["fund_id"] == "fund-1"
     assert detail.json()["meta"]["is_point_in_time"] is True
-    assert nav.json()["data"]["points"] == [{"date": "2025-01-01", "nav": 1.2}]
+    assert nav.json()["data"]["points"] == [
+        {
+            "date": "2025-01-01",
+            "nav": 1.2,
+            "nav_status": "VALID",
+            "nav_reason": None,
+            "reason_code": None,
+        }
+    ]
     assert nav.json()["meta"] == {
         **nav.json()["meta"],
         "as_of_date": "2025-01-31",

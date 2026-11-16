@@ -3,6 +3,7 @@ import { useRef } from "react";
 
 import {
   submitScopedFundIngestion,
+  submitBenchmarkIngestion,
   cancelFundIngestion,
   retryFundIngestionFailures,
   createBacktest,
@@ -15,6 +16,7 @@ import {
 } from "./generated/m17";
 import type {
   BacktestCreateRequest,
+  BenchmarkIngestionRequest,
   DecisionReviewRequest,
   FundIngestionRequest,
   FundIngestionBatchRequest,
@@ -209,6 +211,28 @@ export function useSubmitScopedIngestion() {
           { preview_id: previewId },
           withIdempotencyKey(key),
         ),
+      );
+    },
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: ingestionKeys.history }),
+  });
+}
+
+// 同一组基准与区间复用同一个幂等键，响应丢失后重试不会重复建任务。
+export function useSubmitBenchmarkIngestion() {
+  const client = useQueryClient();
+  const keys = useRef(new Map<string, string>());
+  return useMutation({
+    mutationFn: async (request: BenchmarkIngestionRequest) => {
+      const signature = JSON.stringify([
+        [...request.benchmark_index_ids].sort(),
+        request.start_date ?? null,
+        request.end_date ?? null,
+      ]);
+      const key = keys.current.get(signature) ?? globalThis.crypto.randomUUID();
+      keys.current.set(signature, key);
+      return unwrapResponse(
+        await submitBenchmarkIngestion(request, withIdempotencyKey(key)),
       );
     },
     onSuccess: () =>

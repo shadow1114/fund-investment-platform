@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as _dt
 from datetime import datetime
 from typing import Annotated, Any, Generic, Literal, TypeVar
 
@@ -167,9 +168,17 @@ class FundIngestionJobRequest(StrictModel):
     preview_id: str
 
 
+# 任务表的数据集枚举：BENCHMARK 为基准行情抓取任务，预览接口仍只支持基金数据集。
+FundIngestionDataset = Literal["BASIC_INFO", "NAV", "BENCHMARK"]
+
+
 class FundIngestionItemModel(StrictModel):
     id: int
-    fund_id: str
+    # 基准项没有基金，fund_id 为空；subject_type 区分项的主体类型。
+    fund_id: str | None = None
+    subject_type: Literal["FUND", "BENCHMARK"] = "FUND"
+    subject_name: str | None = None
+    benchmark_index_id: str | None = None
     share_class_id: int | None
     symbol: str | None
     status: Literal["PENDING", "RUNNING", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"]
@@ -198,7 +207,7 @@ class FundIngestionSubmissionModel(StrictModel):
     operation_id: str
     fund_id: str
     fund_ids: list[str]
-    dataset: Literal["BASIC_INFO", "NAV"]
+    dataset: FundIngestionDataset
     status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
 
 
@@ -206,7 +215,7 @@ class FundIngestionTaskModel(StrictModel):
     operation_id: str
     fund_id: str
     fund_ids: list[str]
-    dataset: Literal["BASIC_INFO", "NAV"]
+    dataset: FundIngestionDataset
     source: str
     actor: str
     status: Literal["RUNNING", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"]
@@ -218,11 +227,52 @@ class FundIngestionTaskModel(StrictModel):
     cancelled_count: int | None = None
     scope_type: Literal["SINGLE", "SELECTED", "ALL"] | None = None
     parent_operation_id: str | None = None
+    # 抓取区间（基准任务使用；基金任务为空）。
+    start_date: _dt.date | None = None
+    end_date: _dt.date | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
     items: list[dict[str, Any]]
     failure: str | None = None
+
+
+class BenchmarkIndexModel(StrictModel):
+    benchmark_index_id: str
+    display_name: str
+    provider_code: str
+    source: str | None = None
+    # 当前可见（available_at <= 现在）的最新行情日期；从未抓取时为空。
+    latest_value_date: _dt.date | None = None
+
+
+class BenchmarkSourceCountsModel(StrictModel):
+    csindex: int
+    chinabond: int
+    akshare: int
+
+
+class BenchmarkIndexPage(StrictModel):
+    items: list[BenchmarkIndexModel]
+    page: int
+    page_size: int
+    total: int
+    # 按 q 过滤后、不按 source 过滤的各数据源计数。
+    source_counts: BenchmarkSourceCountsModel
+
+
+class BenchmarkIngestionRequest(StrictModel):
+    benchmark_index_ids: list[Annotated[str, Field(pattern=r"^[0-9]{1,18}$")]] = Field(
+        min_length=1, max_length=200
+    )
+    start_date: _dt.date | None = None
+    end_date: _dt.date | None = None
+
+    @field_validator("benchmark_index_ids")
+    @classmethod
+    def deduplicate_ids(cls, value: list[str]) -> list[str]:
+        # 保序去重；格式已由 pattern 校验，这里不抛错。
+        return list(dict.fromkeys(value))
 
 
 class FundBasicInfoHistoryModel(StrictModel):
@@ -421,6 +471,7 @@ class FundSummaryModel(StrictModel):
 class BenchmarkComponentModel(StrictModel):
     benchmark_id: str
     weight: float
+    benchmark_name: str | None = None
 
 
 class BenchmarkModel(StrictModel):
@@ -454,9 +505,22 @@ class NavPointModel(StrictModel):
     reason_code: str | None = None
 
 
+class BenchmarkSeriesPointModel(StrictModel):
+    date: str
+    value: float | None
+
+
+class BenchmarkSeriesModel(StrictModel):
+    benchmark_id: str
+    benchmark_name: str
+    weight: float
+    points: list[BenchmarkSeriesPointModel]
+
+
 class NavSeriesModel(StrictModel):
     fund_id: str
     points: list[NavPointModel]
+    benchmark_series: list[BenchmarkSeriesModel] = Field(default_factory=list)
 
 
 class FactorResultModel(StrictModel):
